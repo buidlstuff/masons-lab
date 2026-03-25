@@ -95,7 +95,11 @@ export function BuildPage() {
           timeline: { paused: false, timeScale: 1, allowPause: true, allowStep: false, allowReset: true },
           randomSeed: 42,
         },
-      } as ExperimentManifest),
+        primitives: [],
+        behaviors: [],
+        controls: [],
+        metadata: { recipeId: undefined },
+      } as unknown as ExperimentManifest),
     controlValues,
   );
 

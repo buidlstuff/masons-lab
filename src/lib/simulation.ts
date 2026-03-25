@@ -123,9 +123,10 @@ export function useMachineSimulation(
 // ─── Scripted simulation (recipe machines — unchanged) ───────────────────────
 
 function createInitialSnapshot(manifest: ExperimentManifest): RuntimeSnapshot {
-  const hook = manifest.primitives.find((primitive) => primitive.kind === 'hook');
+  const primitives = manifest?.primitives ?? [];
+  const hook = primitives.find((primitive) => primitive.kind === 'hook');
   const hookY = hook && 'y' in hook.config ? (hook.config.y as number) : 0;
-  const loco = manifest.primitives.find((primitive) => primitive.kind === 'locomotive');
+  const loco = primitives.find((primitive) => primitive.kind === 'locomotive');
   const trainProgress = loco && 'progress' in loco.config ? (loco.config.progress as number) : 0;
 
   return {
@@ -142,7 +143,7 @@ function createInitialSnapshot(manifest: ExperimentManifest): RuntimeSnapshot {
 }
 
 function getInitialHopperFill(manifest: ExperimentManifest) {
-  const hopper = manifest.primitives.find((primitive) => primitive.kind === 'hopper');
+  const hopper = (manifest?.primitives ?? []).find((primitive) => primitive.kind === 'hopper');
   return hopper && 'fill' in hopper.config ? (hopper.config.fill as number) : 0;
 }
 
