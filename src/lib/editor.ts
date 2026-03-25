@@ -136,6 +136,16 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
       };
     case 'hopper':
       return { id: `hopper-${nanoid(6)}`, kind, label: 'Hopper', config: { x, y, capacity: 10, releaseRate: 1.5, fill: 0 } };
+    case 'cargo-block':
+      return { id: `cargo-${nanoid(6)}`, kind, label: 'Cargo Block', config: { x, y, weight: 5 } };
+    case 'material-pile':
+      return { id: `pile-${nanoid(6)}`, kind, label: 'Material Pile', config: { x, y, quantity: 20 } };
+    case 'rail-switch':
+      return { id: `switch-${nanoid(6)}`, kind, label: 'Rail Switch', config: { x, y, branch: 'right' } };
+    case 'locomotive':
+      return { id: `loco-${nanoid(6)}`, kind, label: 'Locomotive', config: { trackId: 'track-main', progress: 0, speed: 0.18 } };
+    case 'wagon':
+      return { id: `wagon-${nanoid(6)}`, kind, label: 'Wagon', config: { trackId: 'track-main', offset: -0.12, capacity: 6 } };
     default:
       return { id: `node-${nanoid(6)}`, kind: 'node', label: 'Node', config: { x, y } };
   }

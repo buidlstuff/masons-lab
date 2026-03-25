@@ -12,13 +12,22 @@ import type {
 
 const FEATURED = getFeaturedMachines();
 
+type ToolUseBlock<T = Record<string, unknown>> = { type: 'tool_use'; input: T };
+
+function buildExperimentSchema() {
+  const raw = zodToJsonSchema(experimentManifestSchema as never) as { $schema?: string; [key: string]: unknown };
+  const { $schema: _unused, ...experimentSchema } = raw;
+  return experimentSchema;
+}
+
 export async function generateExperimentWithAi(prompt: string): Promise<GenerateExperimentResult> {
   const fallback = generateFallback(prompt);
   if (!process.env.ANTHROPIC_API_KEY) {
     return fallback;
   }
 
-  const schema = zodToJsonSchema(experimentManifestSchema as never, 'ExperimentManifest');
+  const experimentSchema = buildExperimentSchema();
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -27,22 +36,28 @@ export async function generateExperimentWithAi(prompt: string): Promise<Generate
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
       max_tokens: 4096,
       system:
-        'You are Mason’s Lab Assistant. Only produce stage-1 construction yard machines. Stay inside the four allowed recipes: gear-train-lab, conveyor-loader, winch-crane, rail-cart-loop. Return only valid JSON.',
+        "You are Mason's Lab Assistant. Only produce stage-1 construction yard machines. Stay inside the four allowed recipes: gear-train-lab, conveyor-loader, winch-crane, rail-cart-loop.",
       messages: [
         {
           role: 'user',
-          content: `Create one machine for this request: ${prompt}. Use the ExperimentManifest schema.`,
+          content: `Create one machine for this request: ${prompt}`,
         },
       ],
-      output_config: {
-        format: {
-          type: 'json_schema',
-          schema,
+      tools: [
+        {
+          name: 'create_experiment',
+          description: "Create one ExperimentManifest for Mason's Lab construction yard.",
+          input_schema: {
+            type: 'object',
+            properties: { experiment: experimentSchema },
+            required: ['experiment'],
+          },
         },
-      },
+      ],
+      tool_choice: { type: 'tool', name: 'create_experiment' },
     }),
   });
 
@@ -50,18 +65,21 @@ export async function generateExperimentWithAi(prompt: string): Promise<Generate
     return fallback;
   }
 
-  const payload = (await response.json()) as { content?: Array<{ text?: string }> };
-  const text = payload.content?.[0]?.text;
-  if (!text) {
+  const payload = (await response.json()) as { content?: Array<{ type: string; input?: unknown }> };
+  const toolBlock = (payload.content ?? []).find(
+    (c): c is ToolUseBlock<{ experiment?: unknown }> => c.type === 'tool_use',
+  );
+  const parsed = toolBlock?.input?.experiment as ExperimentManifest | undefined;
+
+  if (!parsed) {
     return fallback;
   }
 
   try {
-    const parsed = JSON.parse(text) as ExperimentManifest;
     parsed.metadata.createdBy = {
       source: 'ai',
       modelFamily: 'anthropic',
-      modelId: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+      modelId: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
       promptHash: hashPrompt(prompt),
       generatedAt: new Date().toISOString(),
     };
@@ -89,6 +107,8 @@ export async function editExperimentWithAi(prompt: string, experiment: Experimen
     return fallback;
   }
 
+  const experimentSchema = buildExperimentSchema();
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -97,16 +117,28 @@ export async function editExperimentWithAi(prompt: string, experiment: Experimen
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
       max_tokens: 4096,
       system:
-        'You are editing a stage-1 construction machine. Preserve stable ids for unchanged parts. Only make bounded edits within the existing recipe family. Return only valid JSON.',
+        'You are editing a stage-1 construction machine. Preserve stable ids for unchanged parts. Only make bounded edits within the existing recipe family.',
       messages: [
         {
           role: 'user',
           content: `Prompt: ${prompt}\n\nCurrent machine JSON:\n${JSON.stringify(experiment)}`,
         },
       ],
+      tools: [
+        {
+          name: 'edit_experiment',
+          description: 'Return the edited ExperimentManifest.',
+          input_schema: {
+            type: 'object',
+            properties: { experiment: experimentSchema },
+            required: ['experiment'],
+          },
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'edit_experiment' },
     }),
   });
 
@@ -115,13 +147,16 @@ export async function editExperimentWithAi(prompt: string, experiment: Experimen
   }
 
   try {
-    const payload = (await response.json()) as { content?: Array<{ text?: string }> };
-    const text = payload.content?.[0]?.text ?? '';
-    const firstBrace = text.indexOf('{');
-    if (firstBrace < 0) {
+    const payload = (await response.json()) as { content?: Array<{ type: string; input?: unknown }> };
+    const toolBlock = (payload.content ?? []).find(
+      (c): c is ToolUseBlock<{ experiment?: unknown }> => c.type === 'tool_use',
+    );
+    const edited = toolBlock?.input?.experiment as ExperimentManifest | undefined;
+
+    if (!edited) {
       return fallback;
     }
-    const edited = JSON.parse(text.slice(firstBrace)) as ExperimentManifest;
+
     const validation = validateExperimentManifest(edited);
     if (!validation.ok) {
       return repairFallback(validation.errors, fallback);
@@ -152,15 +187,46 @@ export async function explainExperimentWithAi(prompt: string, experiment: Experi
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
       max_tokens: 512,
-      system: 'Explain construction machines to a child in plain, honest language. Return JSON with whatIsHappening, whatToTryNext, and vocabulary.',
+      system: 'Explain construction machines to a child in plain, honest language.',
       messages: [
         {
           role: 'user',
           content: `${prompt}\n\nMachine JSON:\n${JSON.stringify(experiment)}`,
         },
       ],
+      tools: [
+        {
+          name: 'explain_machine',
+          description: 'Return a kid-friendly explanation of the machine.',
+          input_schema: {
+            type: 'object',
+            properties: {
+              whatIsHappening: { type: 'string', description: 'Plain-language description of what the machine does.' },
+              whatToTryNext: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Suggestions for Mason to experiment with.',
+              },
+              vocabulary: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    term: { type: 'string' },
+                    kidFriendlyMeaning: { type: 'string' },
+                  },
+                  required: ['term', 'kidFriendlyMeaning'],
+                },
+                description: 'Key terms explained for a child.',
+              },
+            },
+            required: ['whatIsHappening', 'whatToTryNext', 'vocabulary'],
+          },
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'explain_machine' },
     }),
   });
 
@@ -169,14 +235,23 @@ export async function explainExperimentWithAi(prompt: string, experiment: Experi
   }
 
   try {
-    const payload = (await response.json()) as { content?: Array<{ text?: string }> };
-    const text = payload.content?.[0]?.text ?? '';
-    const firstBrace = text.indexOf('{');
-    if (firstBrace < 0) {
+    type ExplainInput = { whatIsHappening?: string; whatToTryNext?: string[]; vocabulary?: Array<{ term: string; kidFriendlyMeaning: string }> };
+    const payload = (await response.json()) as { content?: Array<{ type: string; input?: unknown }> };
+    const toolBlock = (payload.content ?? []).find(
+      (c): c is ToolUseBlock<ExplainInput> => c.type === 'tool_use',
+    );
+
+    if (!toolBlock?.input?.whatIsHappening) {
       return { explanation: experiment.explanation };
     }
-    const explanation = JSON.parse(text.slice(firstBrace)) as ExplainExperimentResult['explanation'];
-    return { explanation };
+
+    return {
+      explanation: {
+        whatIsHappening: toolBlock.input.whatIsHappening,
+        whatToTryNext: toolBlock.input.whatToTryNext ?? [],
+        vocabulary: toolBlock.input.vocabulary ?? [],
+      },
+    };
   } catch {
     return { explanation: experiment.explanation };
   }

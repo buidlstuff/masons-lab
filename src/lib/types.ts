@@ -466,16 +466,30 @@ export interface BuildTelemetry {
 }
 
 export const SLICE_PARTS: PrimitiveKind[] = [
+  // Structure
   'node',
-  'beam',
   'wheel',
   'axle',
+  // Power & Motion
   'motor',
   'gear',
   'winch',
-  'rope',
   'hook',
+  // Rail
   'rail-segment',
+  'rail-switch',
+  'locomotive',
+  'wagon',
+  // Processing
   'conveyor',
   'hopper',
+  'cargo-block',
+  'material-pile',
+];
+
+export const PART_CATEGORIES: Array<{ label: string; kinds: PrimitiveKind[] }> = [
+  { label: 'Structure', kinds: ['node', 'wheel', 'axle'] },
+  { label: 'Power', kinds: ['motor', 'gear', 'winch', 'hook'] },
+  { label: 'Rail', kinds: ['rail-segment', 'rail-switch', 'locomotive', 'wagon'] },
+  { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile'] },
 ];

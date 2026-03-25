@@ -1,4 +1,4 @@
-import { SLICE_PARTS, type PrimitiveKind } from '../lib/types';
+import { PART_CATEGORIES, type PrimitiveKind } from '../lib/types';
 
 interface PartPaletteProps {
   selectedKind?: PrimitiveKind | null;
@@ -11,32 +11,69 @@ export function PartPalette({ selectedKind, onSelectKind }: PartPaletteProps) {
       <div className="panel-header compact">
         <div>
           <p className="eyebrow">Part Drawer</p>
-          <h3>12-part slice</h3>
+          <h3>Pick a part to place</h3>
         </div>
-        <button type="button" className="ghost-button" onClick={() => onSelectKind(null)}>
-          Clear Tool
-        </button>
-      </div>
-      <div className="palette-grid">
-        {SLICE_PARTS.map((kind) => (
-          <button
-            key={kind}
-            type="button"
-            className={`palette-item ${selectedKind === kind ? 'active' : ''}`}
-            onClick={() => onSelectKind(selectedKind === kind ? null : kind)}
-          >
-            <span>{labelForPart(kind)}</span>
+        {selectedKind && (
+          <button type="button" className="ghost-button" onClick={() => onSelectKind(null)}>
+            Clear
           </button>
+        )}
+      </div>
+      <div className="palette-categories">
+        {PART_CATEGORIES.map((category) => (
+          <div key={category.label} className="palette-category">
+            <p className="palette-category-label">{category.label}</p>
+            <div className="palette-grid">
+              {category.kinds.map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={`palette-item ${selectedKind === kind ? 'active' : ''}`}
+                  title={labelForPart(kind)}
+                  onClick={() => onSelectKind(selectedKind === kind ? null : kind)}
+                >
+                  <span className="palette-icon">{iconForPart(kind)}</span>
+                  <span className="palette-label">{labelForPart(kind)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
+      {selectedKind && (
+        <p className="palette-hint muted">Click on the canvas to place a {labelForPart(selectedKind)}.</p>
+      )}
     </section>
   );
 }
 
-function labelForPart(kind: PrimitiveKind) {
+function iconForPart(kind: PrimitiveKind): string {
   switch (kind) {
-    case 'rail-segment':
-      return 'Rail';
+    case 'node': return '●';
+    case 'wheel': return '○';
+    case 'axle': return '─';
+    case 'motor': return '⚡';
+    case 'gear': return '⚙';
+    case 'winch': return '🔧';
+    case 'hook': return '🪝';
+    case 'rail-segment': return '═';
+    case 'rail-switch': return '⇌';
+    case 'locomotive': return '🚂';
+    case 'wagon': return '🚃';
+    case 'conveyor': return '▶';
+    case 'hopper': return '▽';
+    case 'cargo-block': return '■';
+    case 'material-pile': return '▲';
+    default: return '◆';
+  }
+}
+
+function labelForPart(kind: PrimitiveKind): string {
+  switch (kind) {
+    case 'rail-segment': return 'Rail';
+    case 'rail-switch': return 'Switch';
+    case 'cargo-block': return 'Cargo';
+    case 'material-pile': return 'Pile';
     default:
       return kind
         .split('-')

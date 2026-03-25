@@ -284,6 +284,23 @@ export function BuildPage() {
         </section>
       ) : null}
 
+      {jobComplete && job ? (
+        <section className="job-complete-card">
+          <div className="job-complete-star">★</div>
+          <div className="job-complete-content">
+            <h2>Job Done, Mason!</h2>
+            <p>You completed <strong>{job.title}</strong>.</p>
+            <p className="muted">{job.hints[0] ?? 'Great work — try pushing the controls to see what else it can do!'}</p>
+          </div>
+          <div className="job-complete-actions">
+            <button type="button" className="primary-link" onClick={handleSaveMachine}>
+              Save Machine
+            </button>
+            <Link to="/">Back to Yard</Link>
+          </div>
+        </section>
+      ) : null}
+
       <div className="build-layout">
         <div className="left-rail">
           <AssistantPanel
