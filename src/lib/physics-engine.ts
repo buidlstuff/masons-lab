@@ -35,6 +35,10 @@ export interface PhysicsFrame {
   hookY: number | null;
   hopperFill: number | null;
   bodyPositions: Record<string, { x: number; y: number; angle: number }>;
+  /** id → list of gear ids it is currently driving (for canvas overlay) */
+  motorDrives: Record<string, string[]>;
+  /** gear id → list of meshed gear ids (for canvas overlay) */
+  gearMeshes: Record<string, string[]>;
 }
 
 export interface PhysicsWorld {
@@ -149,6 +153,27 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
     }
   }
 
+  // ── Pin gears to their spawn point ────────────────────────────────────────
+  // Gears should spin in place, not fall under gravity.
+  // A zero-length stiffness-1 constraint from world point → body center achieves this.
+  for (const prim of manifest.primitives) {
+    if (prim.kind !== 'gear') continue;
+    const body = bodyMap.get(prim.id);
+    if (!body) continue;
+    Matter.World.add(
+      engine.world,
+      Matter.Constraint.create({
+        pointA: { x: body.position.x, y: body.position.y },
+        bodyB: body,
+        pointB: { x: 0, y: 0 },
+        length: 0,
+        stiffness: 1,
+        damping: 0,
+        label: `pin-${prim.id}`,
+      }),
+    );
+  }
+
   // ── Motor → gear proximity map ────────────────────────────────────────────
   // A motor drives any gear within 220px — close enough for the default layouts.
   const motorGearMap = new Map<string, string[]>();
@@ -162,6 +187,32 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       })
       .map((p) => p.id);
     motorGearMap.set(motor.id, gearIds);
+  }
+
+  // ── Gear-to-gear mesh map ─────────────────────────────────────────────────
+  // When two gears' radii nearly touch, the second should counter-rotate.
+  // We record pairs as (driverGearId → [meshedGearId, teethRatio][]).
+  const gearMeshMap = new Map<string, Array<{ id: string; ratio: number }>>();
+  const gearPrims = manifest.primitives.filter((p) => p.kind === 'gear');
+  for (let i = 0; i < gearPrims.length; i += 1) {
+    for (let j = i + 1; j < gearPrims.length; j += 1) {
+      const a = gearPrims[i];
+      const b = gearPrims[j];
+      const aCfg = a.config as { x: number; y: number; teeth: number };
+      const bCfg = b.config as { x: number; y: number; teeth: number };
+      const rA = teethToRadius(aCfg.teeth);
+      const rB = teethToRadius(bCfg.teeth);
+      const dist = Math.hypot(aCfg.x - bCfg.x, aCfg.y - bCfg.y);
+      // Mesh if centers are within combined radii + 16px tolerance
+      if (dist <= rA + rB + 16) {
+        const ratioAtoB = aCfg.teeth / bCfg.teeth;
+        const ratioBtoA = bCfg.teeth / aCfg.teeth;
+        if (!gearMeshMap.has(a.id)) gearMeshMap.set(a.id, []);
+        if (!gearMeshMap.has(b.id)) gearMeshMap.set(b.id, []);
+        gearMeshMap.get(a.id)!.push({ id: b.id, ratio: ratioAtoB });
+        gearMeshMap.get(b.id)!.push({ id: a.id, ratio: ratioBtoA });
+      }
+    }
   }
 
   // Mutable control state (updated by applyControls without restarting engine)
@@ -194,7 +245,11 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
   // ── driveMotors ───────────────────────────────────────────────────────────
   // Called every tick to spin gears via setAngularVelocity (no torque API in
   // Matter.js 0.20 — this is the canonical approach for driven shafts).
+  // Also propagates velocity through gear meshes (with direction reversal).
   function driveMotors() {
+    // Track which gears have been driven this tick to avoid double-setting
+    const driven = new Map<string, number>(); // gearId → angularVelocity
+
     for (const motor of manifest.primitives.filter((p) => p.kind === 'motor')) {
       const cfg = motor.config as { rpm: number; powerState: boolean };
       if (!cfg.powerState) continue;
@@ -203,10 +258,31 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       );
       const rpm = rpmControl ? Number(currentControls[rpmControl.id] ?? cfg.rpm) : cfg.rpm;
       const angVel = (rpm * Math.PI) / 30; // RPM → rad/s
+
       for (const gearId of motorGearMap.get(motor.id) ?? []) {
-        const gearBody = bodyMap.get(gearId);
-        if (gearBody) Matter.Body.setAngularVelocity(gearBody, angVel);
+        driven.set(gearId, angVel);
       }
+    }
+
+    // Propagate through gear meshes (BFS, max 8 hops to prevent infinite loops)
+    const queue = [...driven.entries()];
+    let hop = 0;
+    while (queue.length > 0 && hop < 8) {
+      const [driverId, driverVel] = queue.shift()!;
+      for (const { id: meshId, ratio } of gearMeshMap.get(driverId) ?? []) {
+        if (!driven.has(meshId)) {
+          const meshVel = -driverVel / ratio; // reverse direction, adjust for tooth ratio
+          driven.set(meshId, meshVel);
+          queue.push([meshId, meshVel]);
+        }
+      }
+      hop += 1;
+    }
+
+    // Apply velocities
+    for (const [gearId, angVel] of driven) {
+      const gearBody = bodyMap.get(gearId);
+      if (gearBody) Matter.Body.setAngularVelocity(gearBody, angVel);
     }
   }
 
@@ -259,7 +335,17 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       hopperFill = count;
     }
 
-    return { rotations, hookY, hopperFill, bodyPositions };
+    // Build overlay maps for the canvas
+    const motorDrives: Record<string, string[]> = {};
+    for (const [motorId, gearIds] of motorGearMap) {
+      motorDrives[motorId] = gearIds;
+    }
+    const gearMeshes: Record<string, string[]> = {};
+    for (const [gearId, meshes] of gearMeshMap) {
+      gearMeshes[gearId] = meshes.map((m) => m.id);
+    }
+
+    return { rotations, hookY, hopperFill, bodyPositions, motorDrives, gearMeshes };
   }
 
   // ── cleanup ───────────────────────────────────────────────────────────────

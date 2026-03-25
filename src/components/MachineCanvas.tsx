@@ -106,11 +106,25 @@ export function MachineCanvas({
     return manifest.metadata.recipeId ? `Recipe: ${manifest.metadata.recipeId}` : 'Free Build — Physics Active';
   }, [manifest.metadata.recipeId]);
 
+  const hint = useMemo(() => {
+    if (placingKind) return `Click canvas to place ${placingKind}`;
+    const sel = manifest.primitives.find((p) => p.id === selectedPrimitiveId);
+    if (!sel) return 'Click a part to select · Drag to reposition';
+    switch (sel.kind) {
+      case 'motor': return 'Motor selected — place a Gear inside its range ring to drive it';
+      case 'gear': return 'Gear selected — place another Gear touching this one to mesh them';
+      case 'winch': return 'Winch selected — place a Hook below it, then use Quick Connect → Winch to Hook';
+      case 'node': return 'Node selected — place another Node and use Quick Connect → Connect Nodes with Beam';
+      case 'hook': return 'Hook selected — use Quick Connect to attach it to a Winch';
+      default: return `${sel.label ?? sel.kind} selected — drag to move · Inspector to adjust`;
+    }
+  }, [manifest.primitives, placingKind, selectedPrimitiveId]);
+
   return (
     <div className="machine-canvas-shell">
       <div className="machine-canvas-toolbar">
         <span>{status}</span>
-        <span>{placingKind ? `Placing ${placingKind} — click canvas` : 'Click to select · Drag to move'}</span>
+        <span className="canvas-hint">{hint}</span>
       </div>
       <div className="machine-canvas" ref={hostRef} />
     </div>
@@ -122,12 +136,105 @@ function drawScene(instance: p5, manifest: ExperimentManifest, runtime: RuntimeS
   drawGrid(instance);
   drawRecipeDecor(instance, manifest.metadata.recipeId ?? '');
 
+  // Connection overlay: motor ranges, driven-gear lines, gear meshes
+  if (!manifest.metadata.recipeId) {
+    drawConnectionOverlay(instance, manifest, runtime, selectedPrimitiveId);
+  }
+
   for (const primitive of manifest.primitives) {
     const selected = primitive.id === selectedPrimitiveId;
     drawPrimitive(instance, primitive, runtime, selected, manifest.primitives);
   }
 
   drawGoalZones(instance, manifest.metadata.recipeId ?? '', runtime);
+}
+
+function drawConnectionOverlay(
+  instance: p5,
+  manifest: ExperimentManifest,
+  runtime: RuntimeSnapshot,
+  selectedPrimitiveId?: string,
+) {
+  instance.push();
+
+  for (const prim of manifest.primitives) {
+    if (prim.kind === 'motor') {
+      const { x, y } = prim.config as { x: number; y: number };
+      const isSelected = prim.id === selectedPrimitiveId;
+      const drivenGears = runtime.motorDrives?.[prim.id] ?? [];
+
+      // Draw motor drive-range ring (faint, always visible)
+      instance.noFill();
+      instance.stroke(71, 197, 165, isSelected ? 60 : 28);
+      instance.strokeWeight(1);
+      instance.circle(x, y, 440); // 220px radius shown as diameter
+
+      // Draw lines from motor to each gear it drives
+      for (const gearId of drivenGears) {
+        const gear = manifest.primitives.find((p) => p.id === gearId);
+        if (!gear) continue;
+        const gPos = getLivePos(gear, runtime);
+        instance.stroke(71, 197, 165, 80);
+        instance.strokeWeight(1);
+        (instance.drawingContext as CanvasRenderingContext2D).setLineDash([4, 6]);
+        instance.line(x, y, gPos.x, gPos.y);
+        (instance.drawingContext as CanvasRenderingContext2D).setLineDash([]);
+        // Arrow tip at the gear
+        instance.fill(71, 197, 165, 80);
+        instance.noStroke();
+        instance.circle(gPos.x, gPos.y, 8);
+      }
+
+      // Label: show if no gears are connected yet
+      if (drivenGears.length === 0 && isSelected) {
+        instance.noStroke();
+        instance.fill(71, 197, 165, 140);
+        instance.textSize(11);
+        instance.textAlign(instance.CENTER, instance.TOP);
+        instance.text('Place a gear inside this ring', x, y + 26);
+      }
+    }
+
+    if (prim.kind === 'winch') {
+      const { x, y } = prim.config as { x: number; y: number };
+      const isSelected = prim.id === selectedPrimitiveId;
+      const hasRope = manifest.primitives.some(
+        (p) => p.kind === 'rope' && (p.config as { fromId: string }).fromId === prim.id,
+      );
+
+      if (!hasRope && isSelected) {
+        // Draw a suggested rope drop-line
+        instance.stroke(245, 158, 11, 60);
+        instance.strokeWeight(1);
+        (instance.drawingContext as CanvasRenderingContext2D).setLineDash([4, 6]);
+        instance.line(x, y, x, y + 220);
+        (instance.drawingContext as CanvasRenderingContext2D).setLineDash([]);
+        instance.noStroke();
+        instance.fill(245, 158, 11, 120);
+        instance.textSize(11);
+        instance.textAlign(instance.CENTER, instance.TOP);
+        instance.text('Place a Hook here, then Quick Connect', x, y + 230);
+      }
+    }
+
+    // Gear mesh connections
+    if (prim.kind === 'gear') {
+      const pos = getLivePos(prim, runtime);
+      for (const meshId of runtime.gearMeshes?.[prim.id] ?? []) {
+        const meshGear = manifest.primitives.find((p) => p.id === meshId);
+        if (!meshGear) continue;
+        const mPos = getLivePos(meshGear, runtime);
+        // Only draw each pair once (lower id draws)
+        if (prim.id < meshId) {
+          instance.stroke(94, 234, 212, 50);
+          instance.strokeWeight(1);
+          instance.line(pos.x, pos.y, mPos.x, mPos.y);
+        }
+      }
+    }
+  }
+
+  instance.pop();
 }
 
 function drawGrid(instance: p5) {

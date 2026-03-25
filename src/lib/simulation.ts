@@ -16,6 +16,10 @@ export interface RuntimeSnapshot {
   /** Populated in free-build (physics) mode. MachineCanvas uses these for
    *  live body positions instead of the static manifest config values. */
   bodyPositions?: Record<string, { x: number; y: number; angle: number }>;
+  /** motor id → gear ids it is driving (for canvas connection overlay) */
+  motorDrives?: Record<string, string[]>;
+  /** gear id → meshed gear ids (for canvas connection overlay) */
+  gearMeshes?: Record<string, string[]>;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -94,6 +98,8 @@ export function useMachineSimulation(
           hookY: frame.hookY !== null ? frame.hookY : prev.hookY,
           hopperFill: frame.hopperFill !== null ? frame.hopperFill : prev.hopperFill,
           bodyPositions: frame.bodyPositions,
+          motorDrives: frame.motorDrives,
+          gearMeshes: frame.gearMeshes,
           telemetry: {
             ...prev.telemetry,
             hookHeight: frame.hookY !== null ? Math.round(frame.hookY) : prev.telemetry.hookHeight,
