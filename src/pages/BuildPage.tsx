@@ -52,6 +52,7 @@ export function BuildPage() {
 
   useEffect(() => {
     async function bootstrapDraft() {
+      // Draft already loaded from DB — apply it.
       if (draft) {
         setManifest(draft.manifest);
         setControlValues(
@@ -62,25 +63,40 @@ export function BuildPage() {
         return;
       }
 
-      if (!draftId && machineFromQuery) {
+      // draftId in URL but draft not yet in DB (stale/invalid URL) — fall through to create.
+      // draftId in URL and draft still loading — wait (useLiveQuery will re-fire this effect).
+      if (draftId) {
+        return;
+      }
+
+      // No draftId yet — create one from machine, blueprint, or empty.
+      function applyDraft(nextDraft: ReturnType<typeof createEmptyDraft>) {
+        setManifest(nextDraft.manifest);
+        setControlValues(
+          Object.fromEntries(
+            nextDraft.manifest.controls.map((control) => [control.id, control.defaultValue ?? false]),
+          ),
+        );
+        navigate(`/build/${nextDraft.draftId}${jobId ? `?job=${jobId}` : ''}`, { replace: true });
+      }
+
+      if (machineFromQuery) {
         const nextDraft = createDraftFromMachine(machineFromQuery);
         await db.drafts.put(nextDraft);
-        navigate(`/build/${nextDraft.draftId}${jobId ? `?job=${jobId}` : ''}`, { replace: true });
+        applyDraft(nextDraft);
         return;
       }
 
-      if (!draftId && blueprintFromQuery) {
+      if (blueprintFromQuery) {
         const nextDraft = createDraftFromBlueprint(blueprintFromQuery);
         await db.drafts.put(nextDraft);
-        navigate(`/build/${nextDraft.draftId}${jobId ? `?job=${jobId}` : ''}`, { replace: true });
+        applyDraft(nextDraft);
         return;
       }
 
-      if (!draftId) {
-        const nextDraft = createEmptyDraft();
-        await db.drafts.put(nextDraft);
-        navigate(`/build/${nextDraft.draftId}${jobId ? `?job=${jobId}` : ''}`, { replace: true });
-      }
+      const nextDraft = createEmptyDraft();
+      await db.drafts.put(nextDraft);
+      applyDraft(nextDraft);
     }
 
     void bootstrapDraft();
