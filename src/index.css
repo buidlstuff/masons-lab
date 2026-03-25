@@ -298,6 +298,286 @@ button:disabled {
   color: var(--text);
 }
 
+.machine-card-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
+.machine-card-eyebrow .eyebrow {
+  margin: 0;
+}
+
+.difficulty-pill {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid;
+}
+
+.job-card-eyebrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+.tier-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(71, 197, 165, 0.1);
+  border: 1px solid rgba(71, 197, 165, 0.25);
+  color: #47c5a5;
+}
+
+.tier-badge.tier-2 { background: rgba(254,200,75,0.1); border-color: rgba(254,200,75,0.25); color: #fec84b; }
+.tier-badge.tier-3 { background: rgba(239,123,69,0.1); border-color: rgba(239,123,69,0.25); color: #ef7b45; }
+.tier-badge.tier-4 { background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.25); color: #f87171; }
+
+.done-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(74,222,128,0.12);
+  border: 1px solid rgba(74,222,128,0.3);
+  color: #4ade80;
+}
+
+.preview-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(96,165,250,0.1);
+  border: 1px solid rgba(96,165,250,0.25);
+  color: #60a5fa;
+}
+
+/* Save modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 10, 15, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  animation: fade-in 0.15s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.modal-card {
+  background: rgba(11, 22, 31, 0.98);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 2rem 2.2rem;
+  width: min(480px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  animation: slide-up 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.modal-card h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.modal-card textarea {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.85rem;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 0.4rem;
+}
+
+.fav-btn {
+  background: none;
+  border: none;
+  padding: 0 0.2rem;
+  font-size: 1.1rem;
+  cursor: pointer;
+  color: #fec84b;
+  line-height: 1;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+
+.fav-btn:hover { opacity: 1; }
+
+/* ── Assistant Panel tabs & compose ───────────────────────── */
+.assistant-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  margin-bottom: 4px;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 6px 0;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.tab-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  background: rgba(71,197,165,0.15);
+  color: #47c5a5;
+  border-color: rgba(71,197,165,0.3);
+}
+
+.compose-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.compose-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.compose-empty {
+  font-size: 0.82rem;
+  text-align: center;
+  margin-top: 12px;
+}
+
+.compose-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.compose-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.compose-row:hover { background: rgba(255,255,255,0.07); }
+
+.compose-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.compose-row-info strong {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compose-category {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #47c5a5;
+}
+
+.compose-row-info .muted {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.compose-mount-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  font-size: 0.78rem;
+  border-radius: 6px;
+  background: rgba(71,197,165,0.15);
+  color: #47c5a5;
+  border: 1px solid rgba(71,197,165,0.3);
+  cursor: pointer;
+  transition: background 0.15s;
+  align-self: center;
+}
+
+.compose-mount-btn:hover:not(:disabled) {
+  background: rgba(71,197,165,0.28);
+}
+
+.compose-mount-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.starter-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(71,197,165,0.1);
+  border: 1px solid rgba(71,197,165,0.25);
+  color: #47c5a5;
+}
+
 .job-card.complete,
 .job-banner.complete {
   border-color: rgba(74, 222, 128, 0.38);
@@ -568,6 +848,70 @@ button:disabled {
 .small-panel {
   min-height: 0;
 }
+
+/* Blueprint detail page */
+.page-blueprint-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.blueprint-detail-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2rem;
+  align-items: start;
+  padding: 2rem 2.4rem;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(71,197,165,0.06), rgba(11,22,31,0.9));
+}
+
+.blueprint-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.port-list,
+.parts-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.port-row,
+.part-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.02);
+  font-size: 0.85rem;
+}
+
+.port-kind,
+.part-kind {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  background: rgba(71,197,165,0.12);
+  color: #47c5a5;
+  white-space: nowrap;
+}
+
+.port-kind-power-in  { background: rgba(239,123,69,0.15); color: #ef7b45; }
+.port-kind-power-out { background: rgba(239,123,69,0.15); color: #ef7b45; }
+.port-kind-material-in  { background: rgba(96,165,250,0.15); color: #60a5fa; }
+.port-kind-material-out { background: rgba(96,165,250,0.15); color: #60a5fa; }
 
 .blueprint-row {
   display: flex;

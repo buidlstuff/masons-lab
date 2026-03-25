@@ -626,7 +626,7 @@ export function getStarterJobs(
       goalType: 'deliver-wagon',
       hints: ['Use a steady lift before you move sideways.', 'A saved fork or hoist module will make this easier later.'],
       objective: 'Place two cargo blocks on the marked platforms.',
-      playable: false,
+      playable: true,
     },
     {
       jobId: 'fill-one-wagon-only',
@@ -641,7 +641,7 @@ export function getStarterJobs(
       goalType: 'fill-hopper',
       hints: ['Think in batches, not maximum speed.', 'A wagon only helps if the feed is controlled.'],
       objective: 'Load exactly one wagon and keep spill low.',
-      playable: false,
+      playable: true,
     },
     {
       jobId: 'pump-the-slurry',
@@ -656,7 +656,7 @@ export function getStarterJobs(
       goalType: 'fill-hopper',
       hints: ['Build a transfer line before you try to speed it up.', 'Think about where material enters and leaves the station.'],
       objective: 'Move site material from Tank A to Tank B.',
-      playable: false,
+      playable: true,
     },
     {
       jobId: 'build-a-mobile-crane',

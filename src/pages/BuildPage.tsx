@@ -49,6 +49,7 @@ export function BuildPage() {
   const [telemetry, setTelemetry] = useState<BuildTelemetry>({});
   const [busy, setBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>();
+  const [saveModal, setSaveModal] = useState<{ title: string; learned: string } | null>(null);
 
   useEffect(() => {
     async function bootstrapDraft() {
@@ -156,10 +157,18 @@ export function BuildPage() {
     [draft?.sourceBlueprintId, draft?.sourceMachineId, draftId],
   );
 
-  async function handleSaveMachine() {
-    if (!manifest) {
-      return;
-    }
+  function handleSaveMachine() {
+    if (!manifest) return;
+    // Open the lab notes modal — actual save happens on confirm
+    setSaveModal({
+      title: manifest.metadata.title,
+      learned: '',
+    });
+  }
+
+  async function confirmSaveMachine(title: string, learned: string) {
+    if (!manifest) return;
+    setSaveModal(null);
     const recordId = crypto.randomUUID();
     await db.machines.put({
       recordId,
@@ -167,12 +176,13 @@ export function BuildPage() {
         ...manifest,
         experimentId: crypto.randomUUID(),
         status: 'saved',
+        metadata: { ...manifest.metadata, title: title || manifest.metadata.title },
       },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       labEntry: {
-        whatBuilt: manifest.metadata.shortDescription,
-        whatLearned: manifest.metadata.teachingGoal,
+        whatBuilt: title || manifest.metadata.shortDescription,
+        whatLearned: learned || manifest.metadata.teachingGoal,
         difficulty: manifest.metadata.difficulty,
       },
       featured: false,
@@ -306,6 +316,11 @@ export function BuildPage() {
           <AssistantPanel
             manifest={manifest}
             busy={busy}
+            blueprints={blueprints ?? []}
+            onMount={(blueprintRecord) => {
+              void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint));
+              setStatusMessage(`Mounted ${blueprintRecord.blueprint.title}.`);
+            }}
             onGenerate={async (prompt) => {
               setBusy(true);
               try {
@@ -453,6 +468,41 @@ export function BuildPage() {
           </section>
         </div>
       </div>
+
+      {saveModal !== null && (
+        <div className="modal-backdrop" onClick={() => setSaveModal(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <p className="eyebrow">Lab Notebook</p>
+            <h2>Save this machine</h2>
+            <label className="field">
+              <span>Machine name</span>
+              <input
+                type="text"
+                value={saveModal.title}
+                onChange={(e) => setSaveModal({ ...saveModal, title: e.target.value })}
+                placeholder={manifest?.metadata.title}
+              />
+            </label>
+            <label className="field">
+              <span>What did you learn? <span className="muted">(optional)</span></span>
+              <textarea
+                rows={3}
+                value={saveModal.learned}
+                onChange={(e) => setSaveModal({ ...saveModal, learned: e.target.value })}
+                placeholder="e.g. Bigger gears slow things down but add more force."
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="primary-link" onClick={() => void confirmSaveMachine(saveModal.title, saveModal.learned)}>
+                Save Machine
+              </button>
+              <button type="button" onClick={() => setSaveModal(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { db } from './db';
 import { getFeaturedMachines, getStarterBlueprints, getStarterJobs } from './seed-data';
 
 export async function ensureSeedData() {
-  const seedVersion = 'stage-2';
+  const seedVersion = 'stage-2b';
   const seeded = await db.settings.get('seed-version');
   if (seeded?.value === seedVersion) {
     return;

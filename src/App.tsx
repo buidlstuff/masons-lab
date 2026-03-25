@@ -1,4 +1,5 @@
 import { createBrowserRouter, Link, Outlet, RouterProvider } from 'react-router-dom';
+import { BlueprintPage } from './pages/BlueprintPage';
 import { BuildPage } from './pages/BuildPage';
 import { HomePage } from './pages/HomePage';
 import { JobPage } from './pages/JobPage';
@@ -37,6 +38,7 @@ const router = createBrowserRouter([
       { path: 'build/:draftId', element: <BuildPage /> },
       { path: 'machines/:machineId', element: <MachinePage /> },
       { path: 'jobs/:jobId', element: <JobPage /> },
+      { path: 'blueprints/:blueprintId', element: <BlueprintPage /> },
     ],
   },
 ]);
