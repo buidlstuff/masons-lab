@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gear Train Simulator</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; font-family: 'Courier New', monospace; color: #c9d1d9; overflow: hidden; }
+  canvas { display: block; }
+  #panel {
+    position: fixed; top: 10px; left: 10px; background: rgba(13,17,23,0.95);
+    padding: 16px; border-radius: 10px; border: 1px solid #30363d; z-index: 10; width: 260px;
+  }
+  #panel h2 { color: #47c5a5; font-size: 16px; margin-bottom: 10px; }
+  .gear-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .gear-row label { color: #8b949e; font-size: 12px; width: 60px; }
+  .gear-row input { width: 90px; accent-color: #22a47f; }
+  .gear-row .val { color: #fec84b; font-size: 13px; width: 40px; text-align: right; }
+  #output {
+    position: fixed; top: 10px; right: 10px; background: rgba(13,17,23,0.95);
+    padding: 16px; border-radius: 10px; border: 1px solid #30363d; z-index: 10; min-width: 200px;
+  }
+  #output h3 { color: #47c5a5; font-size: 14px; margin-bottom: 8px; }
+  .stat { margin: 4px 0; color: #8b949e; font-size: 12px; }
+  .stat .num { color: #fec84b; font-size: 16px; font-weight: bold; }
+  .stat .label { color: #47c5a5; }
+  button {
+    padding: 6px 12px; background: #22a47f; color: #0a0a0a; border: none;
+    border-radius: 5px; cursor: pointer; font-family: inherit; font-weight: bold; margin: 3px;
+  }
+  button:hover { background: #47c5a5; }
+  #formula {
+    position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(13,17,23,0.95); padding: 12px 20px; border-radius: 10px;
+    border: 1px solid #30363d; z-index: 10; text-align: center; font-size: 13px;
+  }
+  #formula .eq { color: #47c5a5; font-size: 15px; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h2>Gear Train Builder</h2>
+  <div>
+    <div class="gear-row">
+      <label>Input RPM:</label>
+      <input type="range" id="inputRPM" min="10" max="300" value="60">
+      <span class="val" id="rpmVal">60</span>
+    </div>
+    <div id="gearControls"></div>
+  </div>
+  <div style="margin-top:10px">
+    <button onclick="addGear()">+ Add Gear</button>
+    <button onclick="removeGear()">- Remove</button>
+  </div>
+</div>
+<div id="output">
+  <h3>Output</h3>
+  <div class="stat"><span class="label">Output Speed:</span><br><span class="num" id="outRPM">60</span> RPM</div>
+  <div class="stat"><span class="label">Gear Ratio:</span><br><span class="num" id="ratio">1.00</span>:1</div>
+  <div class="stat"><span class="label">Torque Multiplier:</span><br><span class="num" id="torque">1.00</span>x</div>
+  <div class="stat"><span class="label">Direction:</span><br><span class="num" id="direction">→ CW</span></div>
+</div>
+<div id="formula">
+  <div class="eq" id="formulaText">Ratio = Driven / Driver</div>
+  <div style="color:#8b949e;font-size:11px;margin-top:4px">More teeth = slower but stronger. Fewer teeth = faster but weaker.</div>
+</div>
+<canvas id="canvas"></canvas>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+
+let gears = [
+  { teeth: 20 },
+  { teeth: 40 },
+];
+let inputRPM = 60;
+let time = 0;
+
+function buildControls() {
+  const div = document.getElementById('gearControls');
+  div.innerHTML = '';
+  gears.forEach((g, i) => {
+    const row = document.createElement('div');
+    row.className = 'gear-row';
+    row.innerHTML = `
+      <label>Gear ${i+1}:</label>
+      <input type="range" min="10" max="80" value="${g.teeth}" data-idx="${i}">
+      <span class="val">${g.teeth}T</span>
+    `;
+    row.querySelector('input').oninput = e => {
+      gears[parseInt(e.target.dataset.idx)].teeth = parseInt(e.target.value);
+      e.target.nextElementSibling.textContent = e.target.value + 'T';
+      updateOutput();
+    };
+    div.appendChild(row);
+  });
+}
+
+function addGear() {
+  if (gears.length < 6) { gears.push({ teeth: 30 }); buildControls(); updateOutput(); }
+}
+
+function removeGear() {
+  if (gears.length > 2) { gears.pop(); buildControls(); updateOutput(); }
+}
+
+document.getElementById('inputRPM').oninput = e => {
+  inputRPM = parseInt(e.target.value);
+  document.getElementById('rpmVal').textContent = inputRPM;
+  updateOutput();
+};
+
+function updateOutput() {
+  let ratio = 1;
+  for (let i = 1; i < gears.length; i++) {
+    ratio *= gears[i].teeth / gears[i-1].teeth;
+  }
+  const outRPM = inputRPM / ratio;
+  const direction = gears.length % 2 === 1 ? '← CCW' : '→ CW';
+
+  document.getElementById('outRPM').textContent = outRPM.toFixed(1);
+  document.getElementById('ratio').textContent = ratio.toFixed(2);
+  document.getElementById('torque').textContent = ratio.toFixed(2);
+  document.getElementById('direction').textContent = direction;
+
+  // Build formula
+  let formula = 'Ratio = ';
+  const parts = [];
+  for (let i = 1; i < gears.length; i++) {
+    parts.push(`${gears[i].teeth}/${gears[i-1].teeth}`);
+  }
+  formula += parts.join(' x ') + ` = ${ratio.toFixed(2)}`;
+  document.getElementById('formulaText').textContent = formula;
+}
+
+function drawGear(x, y, radius, teeth, angle, color, label, rpm) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+
+  const toothHeight = 8;
+  const toothWidth = (2 * Math.PI * radius) / (teeth * 2);
+
+  // Gear body
+  ctx.beginPath();
+  for (let i = 0; i < teeth; i++) {
+    const a1 = (i / teeth) * Math.PI * 2;
+    const a2 = ((i + 0.5) / teeth) * Math.PI * 2;
+    const a3 = ((i + 0.5) / teeth) * Math.PI * 2;
+    const a4 = ((i + 1) / teeth) * Math.PI * 2;
+
+    const outerR = radius + toothHeight;
+    const innerR = radius;
+
+    if (i === 0) ctx.moveTo(Math.cos(a1) * outerR, Math.sin(a1) * outerR);
+    ctx.lineTo(Math.cos(a2) * outerR, Math.sin(a2) * outerR);
+    ctx.lineTo(Math.cos(a2) * innerR, Math.sin(a2) * innerR);
+    ctx.lineTo(Math.cos(a4) * innerR, Math.sin(a4) * innerR);
+    ctx.lineTo(Math.cos(a4) * outerR, Math.sin(a4) * outerR);
+  }
+  ctx.closePath();
+  ctx.fillStyle = color + '40';
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Center hub
+  ctx.beginPath();
+  ctx.arc(0, 0, 8, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  // Inner circle
+  ctx.beginPath();
+  ctx.arc(0, 0, radius * 0.5, 0, Math.PI * 2);
+  ctx.strokeStyle = color + '60';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Spokes
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * 10, Math.sin(a) * 10);
+    ctx.lineTo(Math.cos(a) * radius * 0.45, Math.sin(a) * radius * 0.45);
+    ctx.strokeStyle = color + '60';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  // Label (not rotated)
+  ctx.fillStyle = '#c9d1d9';
+  ctx.font = 'bold 12px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText(label, x, y + radius + 28);
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '10px Courier New';
+  ctx.fillText(`${teeth}T | ${Math.abs(rpm).toFixed(0)} RPM`, x, y + radius + 42);
+}
+
+function draw(timestamp) {
+  const dt = 1/60;
+  time += dt;
+
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw grid dots
+  ctx.fillStyle = 'rgba(48,54,61,0.3)';
+  for (let x = 0; x < canvas.width; x += 40) {
+    for (let y = 0; y < canvas.height; y += 40) {
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+
+  const colors = ['#47c5a5','#fec84b','#9c7dff','#ef4444','#3b82f6','#22c55e'];
+  const centerY = canvas.height / 2 - 20;
+  const startX = canvas.width / 2 - ((gears.length - 1) * 90) / 2;
+
+  // Calculate positions, speeds, angles
+  let positions = [];
+  let rpms = [inputRPM];
+  let angles = [];
+  let x = startX;
+
+  for (let i = 0; i < gears.length; i++) {
+    const radius = gears[i].teeth * 1.8;
+    if (i > 0) {
+      const prevRadius = gears[i-1].teeth * 1.8;
+      x += prevRadius + radius + 16; // mesh gap
+      const gearRatio = gears[i].teeth / gears[i-1].teeth;
+      rpms[i] = rpms[i-1] / gearRatio * -1; // reversed direction
+    }
+    positions.push({ x, y: centerY, radius });
+    const angularSpeed = (rpms[i] / 60) * Math.PI * 2;
+    // Sync tooth mesh
+    const meshOffset = i > 0 ? (Math.PI / gears[i].teeth) : 0;
+    angles.push(angularSpeed * time + meshOffset);
+  }
+
+  // Draw mesh indicators
+  for (let i = 0; i < positions.length - 1; i++) {
+    const p1 = positions[i], p2 = positions[i+1];
+    ctx.strokeStyle = 'rgba(71,197,165,0.2)';
+    ctx.setLineDash([4,4]);
+    ctx.beginPath();
+    ctx.moveTo(p1.x + p1.radius + 4, p1.y);
+    ctx.lineTo(p2.x - p2.radius - 4, p2.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Draw gears
+  gears.forEach((g, i) => {
+    drawGear(positions[i].x, positions[i].y, positions[i].radius, g.teeth,
+      angles[i], colors[i % colors.length], `Gear ${i+1}`, rpms[i]);
+  });
+
+  // Draw speed arrow on first and last
+  if (positions.length > 0) {
+    const first = positions[0];
+    ctx.fillStyle = '#22c55e';
+    ctx.font = 'bold 13px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('INPUT →', first.x, first.y - first.radius - 20);
+
+    const last = positions[positions.length-1];
+    ctx.fillStyle = '#fec84b';
+    ctx.fillText('→ OUTPUT', last.x, last.y - last.radius - 20);
+  }
+
+  requestAnimationFrame(draw);
+}
+
+buildControls();
+updateOutput();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

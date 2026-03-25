@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Circuit Playground</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; font-family: 'Courier New', monospace; color: #c9d1d9; }
+  #app { display: flex; height: 100vh; }
+  #sidebar {
+    width: 220px; background: #161b22; padding: 16px; border-right: 1px solid #30363d;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #sidebar h2 { color: #47c5a5; font-size: 16px; margin-bottom: 8px; }
+  .component-btn {
+    padding: 10px; background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+    color: #c9d1d9; cursor: pointer; font-family: inherit; font-size: 13px; text-align: left;
+    transition: all 0.15s;
+  }
+  .component-btn:hover { background: #30363d; border-color: #47c5a5; }
+  .component-btn.active { border-color: #22a47f; background: #0d2d22; }
+  .component-btn .icon { font-size: 18px; margin-right: 6px; }
+  #canvas-area { flex: 1; position: relative; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #info {
+    position: fixed; bottom: 10px; left: 240px; background: rgba(22,27,34,0.95);
+    padding: 12px 16px; border-radius: 8px; border: 1px solid #30363d;
+    font-size: 12px; color: #8b949e;
+  }
+  #info .highlight { color: #47c5a5; font-weight: bold; }
+  #readout {
+    position: fixed; top: 10px; right: 10px; background: rgba(22,27,34,0.95);
+    padding: 16px; border-radius: 8px; border: 1px solid #30363d; min-width: 180px;
+  }
+  #readout h3 { color: #47c5a5; font-size: 14px; margin-bottom: 8px; }
+  #readout .val { color: #fec84b; font-size: 18px; font-weight: bold; }
+  #readout .unit { color: #8b949e; font-size: 12px; }
+  .section-label { color: #8b949e; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <h2>Components</h2>
+    <div class="section-label">Sources</div>
+    <button class="component-btn active" data-type="battery" onclick="selectComponent('battery')">
+      <span class="icon">🔋</span> Battery (9V)
+    </button>
+    <div class="section-label">Passives</div>
+    <button class="component-btn" data-type="resistor" onclick="selectComponent('resistor')">
+      <span class="icon">⚡</span> Resistor (100-10k)
+    </button>
+    <button class="component-btn" data-type="led" onclick="selectComponent('led')">
+      <span class="icon">💡</span> LED
+    </button>
+    <div class="section-label">Controls</div>
+    <button class="component-btn" data-type="switch" onclick="selectComponent('switch')">
+      <span class="icon">🔘</span> Switch
+    </button>
+    <div class="section-label">Tools</div>
+    <button class="component-btn" data-type="wire" onclick="selectComponent('wire')">
+      <span class="icon">〰️</span> Wire (drag)
+    </button>
+    <button class="component-btn" data-type="delete" onclick="selectComponent('delete')">
+      <span class="icon">🗑️</span> Delete (click)
+    </button>
+    <button class="component-btn" onclick="clearAll()" style="margin-top:auto;background:#3d1f1f;border-color:#ef4444;">
+      <span class="icon">💥</span> Clear Circuit
+    </button>
+  </div>
+  <div id="canvas-area">
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+<div id="info">
+  <span class="highlight">Click</span> to place components &bull;
+  <span class="highlight">Drag</span> between components to wire them &bull;
+  <span class="highlight">Click switches</span> to toggle &bull;
+  <span class="highlight">Scroll</span> on resistors to change value
+</div>
+<div id="readout">
+  <h3>Circuit Readout</h3>
+  <div>Total Voltage: <span class="val" id="rVoltage">0</span> <span class="unit">V</span></div>
+  <div>Total Current: <span class="val" id="rCurrent">0</span> <span class="unit">mA</span></div>
+  <div>Total Resistance: <span class="val" id="rResistance">0</span> <span class="unit">ohms</span></div>
+  <div>LEDs On: <span class="val" id="rLeds">0</span></div>
+</div>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = canvas.parentElement.clientWidth;
+  canvas.height = canvas.parentElement.clientHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+let selectedType = 'battery';
+let components = [];
+let wires = [];
+let dragging = null;
+let wireStart = null;
+let nextId = 1;
+
+const GRID = 40;
+function snap(v) { return Math.round(v / GRID) * GRID; }
+
+function selectComponent(type) {
+  selectedType = type;
+  document.querySelectorAll('.component-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`[data-type="${type}"]`)?.classList.add('active');
+}
+
+function findComponent(x, y, radius=30) {
+  return components.find(c => Math.hypot(c.x-x, c.y-y) < radius);
+}
+
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = snap(e.clientX - rect.left);
+  const y = snap(e.clientY - rect.top);
+
+  if (selectedType === 'delete') {
+    const c = findComponent(x, y);
+    if (c) {
+      components = components.filter(cc => cc !== c);
+      wires = wires.filter(w => w.from !== c.id && w.to !== c.id);
+    }
+    return;
+  }
+
+  if (selectedType === 'wire') return;
+
+  if (selectedType === 'switch') {
+    const existing = findComponent(x, y);
+    if (existing && existing.type === 'switch') {
+      existing.on = !existing.on;
+      simulate();
+      return;
+    }
+  }
+
+  if (!findComponent(x, y)) {
+    const comp = {
+      id: nextId++, type: selectedType, x, y,
+      value: selectedType === 'resistor' ? 1000 : selectedType === 'battery' ? 9 : 0,
+      on: selectedType === 'switch' ? false : true,
+      lit: false
+    };
+    components.push(comp);
+    simulate();
+  }
+});
+
+canvas.addEventListener('mousedown', e => {
+  if (selectedType !== 'wire') return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const c = findComponent(x, y);
+  if (c) wireStart = c;
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (!wireStart) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const c = findComponent(x, y);
+  if (c && c !== wireStart) {
+    if (!wires.find(w => (w.from===wireStart.id && w.to===c.id) || (w.from===c.id && w.to===wireStart.id))) {
+      wires.push({ from: wireStart.id, to: c.id });
+      simulate();
+    }
+  }
+  wireStart = null;
+});
+
+canvas.addEventListener('wheel', e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const c = findComponent(x, y);
+  if (c && c.type === 'resistor') {
+    e.preventDefault();
+    c.value = Math.max(100, Math.min(10000, c.value + (e.deltaY > 0 ? -100 : 100)));
+    simulate();
+  }
+}, { passive: false });
+
+function simulate() {
+  // Simple series circuit simulation
+  let totalVoltage = 0;
+  let totalResistance = 0;
+  let switchOpen = false;
+  let ledCount = 0;
+
+  // Find connected components (simplified - treats everything as series)
+  const connected = new Set();
+  function walk(id) {
+    if (connected.has(id)) return;
+    connected.add(id);
+    wires.filter(w => w.from === id || w.to === id).forEach(w => {
+      walk(w.from === id ? w.to : w.from);
+    });
+  }
+  // Start from first battery
+  const bat = components.find(c => c.type === 'battery');
+  if (bat) walk(bat.id);
+
+  components.forEach(c => {
+    if (!connected.has(c.id)) { c.lit = false; return; }
+    if (c.type === 'battery') totalVoltage += c.value;
+    if (c.type === 'resistor') totalResistance += c.value;
+    if (c.type === 'led') { totalResistance += 20; ledCount++; }
+    if (c.type === 'switch' && !c.on) switchOpen = true;
+  });
+
+  const current = (switchOpen || totalResistance === 0) ? 0 : (totalVoltage / totalResistance) * 1000;
+
+  components.forEach(c => {
+    if (c.type === 'led') c.lit = current > 0.5 && connected.has(c.id);
+  });
+
+  document.getElementById('rVoltage').textContent = totalVoltage.toFixed(1);
+  document.getElementById('rCurrent').textContent = current.toFixed(1);
+  document.getElementById('rResistance').textContent = totalResistance;
+  document.getElementById('rLeds').textContent = components.filter(c => c.lit).length;
+}
+
+function drawComponent(c) {
+  ctx.save();
+  ctx.translate(c.x, c.y);
+
+  if (c.type === 'battery') {
+    ctx.strokeStyle = '#47c5a5'; ctx.lineWidth = 2;
+    ctx.strokeRect(-20, -12, 40, 24);
+    ctx.fillStyle = '#22a47f'; ctx.fillRect(-18, -10, 36, 20);
+    ctx.fillStyle = '#0a0a0a'; ctx.font = 'bold 11px Courier New'; ctx.textAlign = 'center';
+    ctx.fillText(c.value + 'V', 0, 4);
+    // Terminals
+    ctx.fillStyle = '#ef4444'; ctx.fillRect(18, -4, 6, 8);
+    ctx.fillStyle = '#3b82f6'; ctx.fillRect(-24, -4, 6, 8);
+  }
+
+  if (c.type === 'resistor') {
+    ctx.strokeStyle = '#fec84b'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-25, 0);
+    for (let i = 0; i < 6; i++) {
+      ctx.lineTo(-20 + i*8, (i%2===0 ? -8 : 8));
+    }
+    ctx.lineTo(25, 0);
+    ctx.stroke();
+    ctx.fillStyle = '#fec84b'; ctx.font = '10px Courier New'; ctx.textAlign = 'center';
+    const label = c.value >= 1000 ? (c.value/1000) + 'k' : c.value;
+    ctx.fillText(label + 'Ω', 0, -14);
+  }
+
+  if (c.type === 'led') {
+    ctx.beginPath();
+    ctx.moveTo(-12, -12); ctx.lineTo(-12, 12); ctx.lineTo(14, 0); ctx.closePath();
+    if (c.lit) {
+      ctx.fillStyle = '#22c55e'; ctx.shadowColor = '#22c55e'; ctx.shadowBlur = 20;
+    } else {
+      ctx.fillStyle = '#21262d'; ctx.shadowBlur = 0;
+    }
+    ctx.fill();
+    ctx.strokeStyle = '#47c5a5'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Light rays when lit
+    if (c.lit) {
+      ctx.strokeStyle = 'rgba(34,197,94,0.4)'; ctx.lineWidth = 1;
+      for (let a = -0.5; a <= 0.5; a += 0.25) {
+        ctx.beginPath(); ctx.moveTo(16, a*10);
+        ctx.lineTo(26, a*16); ctx.stroke();
+      }
+    }
+  }
+
+  if (c.type === 'switch') {
+    ctx.strokeStyle = c.on ? '#22c55e' : '#ef4444'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(-15, 0, 4, 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(15, 0, 4, 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-11, 0);
+    if (c.on) {
+      ctx.lineTo(11, 0);
+    } else {
+      ctx.lineTo(5, -14);
+    }
+    ctx.stroke();
+    ctx.fillStyle = '#8b949e'; ctx.font = '9px Courier New'; ctx.textAlign = 'center';
+    ctx.fillText(c.on ? 'ON' : 'OFF', 0, 18);
+  }
+
+  ctx.restore();
+}
+
+function draw() {
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw grid
+  ctx.strokeStyle = 'rgba(48,54,61,0.5)'; ctx.lineWidth = 0.5;
+  for (let x = 0; x < canvas.width; x += GRID) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y < canvas.height; y += GRID) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+
+  // Draw wires
+  wires.forEach(w => {
+    const a = components.find(c => c.id === w.from);
+    const b = components.find(c => c.id === w.to);
+    if (!a || !b) return;
+    const hasCurrentFlow = components.some(c => c.lit);
+    ctx.strokeStyle = hasCurrentFlow ? '#22c55e' : '#30363d';
+    ctx.lineWidth = hasCurrentFlow ? 2.5 : 1.5;
+    ctx.shadowColor = hasCurrentFlow ? '#22c55e' : 'transparent';
+    ctx.shadowBlur = hasCurrentFlow ? 6 : 0;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.shadowBlur = 0;
+  });
+
+  // Draw components
+  components.forEach(drawComponent);
+
+  requestAnimationFrame(draw);
+}
+
+function clearAll() { components = []; wires = []; nextId = 1; simulate(); }
+
+simulate();
+draw();
+</script>
+</body>
+</html>

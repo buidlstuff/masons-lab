@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Physics Sandbox - Bouncing Balls</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; font-family: 'Courier New', monospace; overflow: hidden; }
+  canvas { display: block; }
+  #controls {
+    position: fixed; top: 10px; left: 10px; background: rgba(20,70,60,0.9);
+    padding: 15px; border-radius: 10px; color: #47c5a5; z-index: 10;
+    border: 1px solid #22a47f; font-size: 13px;
+  }
+  #controls h3 { margin-bottom: 8px; color: #79dbc1; font-size: 15px; }
+  #controls label { display: block; margin: 5px 0 2px; }
+  #controls input[type="range"] { width: 150px; accent-color: #22a47f; }
+  #controls button {
+    margin-top: 8px; padding: 6px 14px; background: #22a47f; color: #0a0a0a;
+    border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-family: inherit;
+  }
+  #controls button:hover { background: #47c5a5; }
+  #stats {
+    position: fixed; top: 10px; right: 10px; background: rgba(20,70,60,0.9);
+    padding: 12px; border-radius: 10px; color: #79dbc1; z-index: 10;
+    border: 1px solid #22a47f; font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div id="controls">
+  <h3>Physics Controls</h3>
+  <label>Gravity: <span id="gVal">9.8</span></label>
+  <input type="range" id="gravity" min="0" max="30" step="0.5" value="9.8">
+  <label>Bounciness: <span id="bVal">0.7</span></label>
+  <input type="range" id="bounce" min="0" max="1" step="0.05" value="0.7">
+  <label>Ball Size: <span id="sVal">15</span></label>
+  <input type="range" id="size" min="5" max="50" step="1" value="15">
+  <br>
+  <button onclick="balls=[]">Clear All</button>
+  <p style="margin-top:8px;font-size:11px;color:#aaa">Click anywhere to drop a ball!</p>
+</div>
+<div id="stats">
+  <div>Balls: <span id="count">0</span></div>
+  <div>FPS: <span id="fps">0</span></div>
+</div>
+<canvas id="canvas"></canvas>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let balls = [];
+let gravity = 9.8;
+let bounciness = 0.7;
+let ballSize = 15;
+let lastTime = performance.now();
+let frameCount = 0;
+let fpsDisplay = 0;
+
+const colors = ['#22a47f','#47c5a5','#79dbc1','#f79009','#ef4444','#9c7dff','#fec84b','#22c55e'];
+
+document.getElementById('gravity').oninput = e => {
+  gravity = parseFloat(e.target.value);
+  document.getElementById('gVal').textContent = gravity;
+};
+document.getElementById('bounce').oninput = e => {
+  bounciness = parseFloat(e.target.value);
+  document.getElementById('bVal').textContent = bounciness;
+};
+document.getElementById('size').oninput = e => {
+  ballSize = parseInt(e.target.value);
+  document.getElementById('sVal').textContent = ballSize;
+};
+
+canvas.addEventListener('click', e => {
+  for (let i = 0; i < 3; i++) {
+    balls.push({
+      x: e.clientX + (Math.random()-0.5)*20,
+      y: e.clientY + (Math.random()-0.5)*20,
+      vx: (Math.random()-0.5)*200,
+      vy: (Math.random()-0.5)*100,
+      r: ballSize + (Math.random()-0.5)*10,
+      color: colors[Math.floor(Math.random()*colors.length)],
+      trail: []
+    });
+  }
+});
+
+function update(dt) {
+  for (let ball of balls) {
+    // Store trail
+    ball.trail.push({x: ball.x, y: ball.y});
+    if (ball.trail.length > 8) ball.trail.shift();
+
+    // Apply gravity
+    ball.vy += gravity * 50 * dt;
+
+    // Update position
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+
+    // Floor bounce
+    if (ball.y + ball.r > canvas.height) {
+      ball.y = canvas.height - ball.r;
+      ball.vy *= -bounciness;
+      ball.vx *= 0.98; // friction
+    }
+    // Ceiling bounce
+    if (ball.y - ball.r < 0) {
+      ball.y = ball.r;
+      ball.vy *= -bounciness;
+    }
+    // Wall bounce
+    if (ball.x + ball.r > canvas.width) {
+      ball.x = canvas.width - ball.r;
+      ball.vx *= -bounciness;
+    }
+    if (ball.x - ball.r < 0) {
+      ball.x = ball.r;
+      ball.vx *= -bounciness;
+    }
+  }
+
+  // Simple ball-to-ball collision
+  for (let i = 0; i < balls.length; i++) {
+    for (let j = i+1; j < balls.length; j++) {
+      const a = balls[i], b = balls[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      const minDist = a.r + b.r;
+      if (dist < minDist && dist > 0) {
+        const nx = dx/dist, ny = dy/dist;
+        const overlap = minDist - dist;
+        a.x -= nx*overlap*0.5; a.y -= ny*overlap*0.5;
+        b.x += nx*overlap*0.5; b.y += ny*overlap*0.5;
+        const dvx = a.vx - b.vx, dvy = a.vy - b.vy;
+        const dvn = dvx*nx + dvy*ny;
+        if (dvn > 0) {
+          a.vx -= dvn*nx*bounciness; a.vy -= dvn*ny*bounciness;
+          b.vx += dvn*nx*bounciness; b.vy += dvn*ny*bounciness;
+        }
+      }
+    }
+  }
+
+  // Cap at 200 balls for performance
+  if (balls.length > 200) balls.splice(0, balls.length - 200);
+}
+
+function draw() {
+  ctx.fillStyle = 'rgba(10,10,10,0.3)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let ball of balls) {
+    // Draw trail
+    for (let i = 0; i < ball.trail.length; i++) {
+      const alpha = (i / ball.trail.length) * 0.3;
+      ctx.beginPath();
+      ctx.arc(ball.trail[i].x, ball.trail[i].y, ball.r * 0.6, 0, Math.PI * 2);
+      ctx.fillStyle = ball.color + Math.floor(alpha*255).toString(16).padStart(2,'0');
+      ctx.fill();
+    }
+    // Draw ball
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(ball.x - ball.r*0.3, ball.y - ball.r*0.3, ball.r*0.1, ball.x, ball.y, ball.r);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.3, ball.color);
+    grad.addColorStop(1, '#000000');
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  document.getElementById('count').textContent = balls.length;
+}
+
+function loop(time) {
+  const dt = Math.min((time - lastTime) / 1000, 0.05);
+  lastTime = time;
+  frameCount++;
+  if (frameCount % 30 === 0) {
+    fpsDisplay = Math.round(1/dt);
+    document.getElementById('fps').textContent = fpsDisplay;
+  }
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize', () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+});
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
