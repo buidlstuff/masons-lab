@@ -214,8 +214,8 @@ function drawConnectionOverlay(
   runtime: RuntimeSnapshot,
   selectedPrimitiveId: string | undefined,
   placingKind: PrimitiveKind | null | undefined,
-  mouseX: number,
-  mouseY: number,
+  _mouseX: number,
+  _mouseY: number,
 ) {
   instance.push();
   const ctx = instance.drawingContext as CanvasRenderingContext2D;
