@@ -247,9 +247,7 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
     const mCfg = motor.config as { x: number; y: number; rpm: number };
     for (const conv of manifest.primitives.filter((p) => p.kind === 'conveyor')) {
       const cCfg = conv.config as { path: Array<{ x: number; y: number }> };
-      const near = cCfg.path.some(
-        (pt) => Math.hypot(pt.x - mCfg.x, pt.y - mCfg.y) < 300,
-      );
+      const near = distToPolyline(cCfg.path, mCfg.x, mCfg.y) < 300;
       if (near) {
         const prev = conveyorMotorRpm.get(conv.id) ?? 0;
         conveyorMotorRpm.set(conv.id, Math.max(prev, mCfg.rpm));
@@ -595,6 +593,21 @@ function distToSegment(
   if (lenSq === 0) return Math.hypot(px - ax, py - ay);
   const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function distToPolyline(points: Array<{ x: number; y: number }>, px: number, py: number): number {
+  if (points.length < 2) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  let closest = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    closest = Math.min(
+      closest,
+      distToSegment(px, py, points[index].x, points[index].y, points[index + 1].x, points[index + 1].y),
+    );
+  }
+  return closest;
 }
 
 /**

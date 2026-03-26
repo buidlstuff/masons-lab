@@ -2,7 +2,7 @@ import type { ExperimentManifest, PrimitiveInstance, PrimitiveKind, ProjectSucce
 import type { RuntimeSnapshot } from './simulation';
 
 const MOTOR_RANGE = 220;
-const CONVEYOR_RANGE = 22;
+const CONVEYOR_RANGE = 28;
 const CONVEYOR_MOTOR_RANGE = 300;
 
 export interface GoalProgress {
@@ -291,9 +291,11 @@ function countMotorsNearConveyors(manifest: ExperimentManifest) {
   return motors.filter((motor) => {
     const config = motor.config as { x: number; y: number };
     return conveyors.some((conveyor) =>
-      (conveyor.config as { path: Array<{ x: number; y: number }> }).path.some((point) =>
-        Math.hypot(point.x - config.x, point.y - config.y) <= CONVEYOR_MOTOR_RANGE,
-      ),
+      distanceToPolyline(
+        (conveyor.config as { path: Array<{ x: number; y: number }> }).path,
+        config.x,
+        config.y,
+      ) <= CONVEYOR_MOTOR_RANGE,
     );
   }).length;
 }

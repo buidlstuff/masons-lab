@@ -15,6 +15,14 @@ interface MachineCanvasProps {
   selectedPrimitiveId?: string;
   placingKind?: PrimitiveKind | null;
   activeJobHint?: string;
+  projectGuide?: {
+    title: string;
+    detail: string;
+    line?: Array<{ x: number; y: number }>;
+    circle?: { x: number; y: number; r: number };
+    rect?: { x: number; y: number; w: number; h: number };
+    marker?: { x: number; y: number; label: string };
+  } | null;
   onPlacePrimitive: (x: number, y: number) => void;
   onSelectPrimitive: (primitiveId?: string) => void;
   onMovePrimitive: (primitiveId: string, x: number, y: number) => void;
@@ -28,6 +36,7 @@ export function MachineCanvas({
   selectedPrimitiveId,
   placingKind,
   activeJobHint,
+  projectGuide,
   onPlacePrimitive,
   onSelectPrimitive,
   onMovePrimitive,
@@ -41,6 +50,7 @@ export function MachineCanvas({
   const runtimeRef = useRef(runtime);
   const selectedRef = useRef(selectedPrimitiveId);
   const placingRef = useRef(placingKind);
+  const projectGuideRef = useRef(projectGuide);
   const onPlaceRef = useRef(onPlacePrimitive);
   const onSelectRef = useRef(onSelectPrimitive);
   const onMoveRef = useRef(onMovePrimitive);
@@ -60,6 +70,7 @@ export function MachineCanvas({
     runtimeRef.current = runtime;
     selectedRef.current = selectedPrimitiveId;
     placingRef.current = placingKind;
+    projectGuideRef.current = projectGuide;
     onPlaceRef.current = onPlacePrimitive;
     onSelectRef.current = onSelectPrimitive;
     onMoveRef.current = onMovePrimitive;
@@ -73,6 +84,7 @@ export function MachineCanvas({
     onSelectPrimitive,
     onTelemetry,
     placingKind,
+    projectGuide,
     runtime,
     selectedPrimitiveId,
   ]);
@@ -111,6 +123,7 @@ export function MachineCanvas({
           hoveredIdRef.current,
           draggingIdRef.current,
           placingRef.current,
+          projectGuideRef.current,
           flashTimesRef.current,
         );
         onTelemetryRef.current(runtimeRef.current.telemetry);
@@ -233,10 +246,12 @@ function drawScene(
   hoveredPrimitiveId: string | undefined,
   draggingPrimitiveId: string | undefined,
   placingKind: PrimitiveKind | null | undefined,
+  projectGuide: MachineCanvasProps['projectGuide'],
   flashTimes: Record<string, number>,
 ) {
   instance.background(7, 14, 22);
   drawGrid(instance);
+  drawProjectGuide(instance, projectGuide);
   drawConnectionOverlay(instance, manifest, runtime, selectedPrimitiveId, placingKind);
 
   for (const primitive of manifest.primitives) {
@@ -330,7 +345,7 @@ function drawConnectionOverlay(
       const nearConveyor = manifest.primitives.some((p) => {
         if (p.kind !== 'conveyor') return false;
         const cCfg = p.config as { path: Array<{ x: number; y: number }> };
-        return cCfg.path.some((pt) => Math.hypot(pt.x - x, pt.y - y) < CONVEYOR_MOTOR_RANGE);
+        return distanceToPolyline(cCfg.path, x, y) < CONVEYOR_MOTOR_RANGE;
       });
       if (nearConveyor || isSelected) {
         instance.noFill();
@@ -374,13 +389,13 @@ function drawConnectionOverlay(
     // ── Conveyor endpoint zones ─────────────────────────────────────────────
     if (prim.kind === 'conveyor' && prim.id === selectedPrimitiveId) {
       const cCfg = prim.config as { path: Array<{ x: number; y: number }> };
-      for (const pt of [cCfg.path[0], cCfg.path[cCfg.path.length - 1]]) {
+      if (cCfg.path.length >= 2) {
         instance.noFill();
-        instance.stroke(245, 158, 11, 30);
-        instance.strokeWeight(1);
-        ctx.setLineDash([3, 8]);
-        instance.circle(pt.x, pt.y, CONVEYOR_MOTOR_RANGE * 2);
-        ctx.setLineDash([]);
+        instance.stroke(245, 158, 11, 35);
+        instance.strokeWeight(CONVEYOR_MOTOR_RANGE / 20);
+        for (let index = 0; index < cCfg.path.length - 1; index += 1) {
+          instance.line(cCfg.path[index].x, cCfg.path[index].y, cCfg.path[index + 1].x, cCfg.path[index + 1].y);
+        }
       }
     }
 
@@ -507,6 +522,51 @@ function drawPlacingPreview(
 
   instance.pop();
   drawPreviewCard(instance, mx, my, assessment.title, assessment.detail, assessment.tone);
+}
+
+function drawProjectGuide(
+  instance: p5,
+  guide: MachineCanvasProps['projectGuide'],
+) {
+  if (!guide) {
+    return;
+  }
+
+  const pulse = 0.7 + Math.sin(Date.now() / 180) * 0.18;
+
+  instance.push();
+  instance.noFill();
+  instance.stroke(94, 234, 212, 90 + pulse * 60);
+  instance.strokeWeight(guide.line ? 12 : 3);
+
+  if (guide.line && guide.line.length >= 2) {
+    for (let index = 0; index < guide.line.length - 1; index += 1) {
+      instance.line(guide.line[index].x, guide.line[index].y, guide.line[index + 1].x, guide.line[index + 1].y);
+    }
+  }
+
+  if (guide.circle) {
+    instance.strokeWeight(2);
+    instance.circle(guide.circle.x, guide.circle.y, guide.circle.r * 2);
+  }
+
+  if (guide.rect) {
+    instance.strokeWeight(2);
+    instance.rect(guide.rect.x, guide.rect.y, guide.rect.w, guide.rect.h, 18);
+  }
+
+  if (guide.marker) {
+    instance.noStroke();
+    instance.fill(94, 234, 212, 220);
+    instance.circle(guide.marker.x, guide.marker.y, 12);
+    instance.fill(241, 245, 249, 240);
+    instance.textSize(11);
+    instance.textAlign(instance.CENTER, instance.BOTTOM);
+    instance.text(guide.marker.label, guide.marker.x, guide.marker.y - 10);
+  }
+  instance.pop();
+
+  drawPreviewCard(instance, 24, 88, guide.title, guide.detail, 'good');
 }
 
 function drawInteractionOverlay(

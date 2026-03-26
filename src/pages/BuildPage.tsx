@@ -28,6 +28,7 @@ import type {
   EditExperimentResult,
   ExperimentManifest,
   GenerateExperimentResult,
+  PrimitiveConfig,
   PrimitiveKind,
   PrimitiveInstance,
 } from '../lib/types';
@@ -209,8 +210,19 @@ export function BuildPage() {
     const newlyCompleted = completedSteps.filter((step) => !previousIds.includes(step.stepId));
     const latestStep = newlyCompleted[newlyCompleted.length - 1];
 
-    if (latestStep && !projectState.complete) {
-      showStatus(latestStep.successCopy, 'success');
+    if (latestStep) {
+      if (projectState.complete) {
+        setPlacingKind(null);
+        showStatus(latestStep.successCopy, 'success');
+      } else {
+        const nextKind = projectState.currentStep?.allowedPartKinds[0] ?? null;
+        setSelectedPrimitiveId(undefined);
+        setPlacingKind(nextKind);
+        showStatus(
+          `${latestStep.successCopy}${projectState.currentStep ? ` Next: ${projectState.currentStep.instruction}` : ''}`,
+          'success',
+        );
+      }
     }
 
     completedStepIdsRef.current = completedSteps.map((step) => step.stepId);
@@ -360,7 +372,15 @@ export function BuildPage() {
     }
   }
 
-  const activeJobHint = activeProjectStep?.instruction ?? (jobComplete ? job?.hints[0] : undefined);
+  const projectGuide = useMemo(
+    () => (
+      manifest && activeProjectStep
+        ? deriveProjectGuide(manifest, activeProjectStep, placingKind ?? activeProjectStep.allowedPartKinds[0] ?? null)
+        : null
+    ),
+    [activeProjectStep, manifest, placingKind],
+  );
+  const activeJobHint = projectGuide?.detail ?? activeProjectStep?.instruction ?? (jobComplete ? job?.hints[0] : undefined);
   const machineActivity = manifest
     ? deriveMachineActivity(manifest, runtime)
     : { active: false, label: 'Preparing the canvas', tone: 'info' as NoticeTone };
@@ -395,16 +415,24 @@ export function BuildPage() {
         return;
       }
 
-      const nextManifest = addPrimitive(manifest, placingKind, x, y);
-      const placedPrimitive = nextManifest.primitives[nextManifest.primitives.length - 1];
+      const guidedPlacement = activeProjectStep
+        ? deriveGuidedPlacement(manifest, activeProjectStep, placingKind, x, y)
+        : null;
+      const nextPosition = guidedPlacement ?? { x, y };
+      let nextManifest = addPrimitive(manifest, placingKind, nextPosition.x, nextPosition.y);
+      let placedPrimitive = nextManifest.primitives[nextManifest.primitives.length - 1];
+      if (guidedPlacement?.configOverride && placedPrimitive) {
+        nextManifest = updatePrimitive(nextManifest, placedPrimitive.id, guidedPlacement.configOverride);
+        placedPrimitive = nextManifest.primitives[nextManifest.primitives.length - 1];
+      }
       void persistDraft(nextManifest);
       setSelectedPrimitiveId(placedPrimitive?.id);
       setPlacingKind(null);
 
-      const placementFeedback = describePlacedPrimitive(manifest, placingKind, x, y);
+      const placementFeedback = guidedPlacement?.feedback ?? describePlacedPrimitive(manifest, placingKind, nextPosition.x, nextPosition.y);
       showStatus(placementFeedback.message, placementFeedback.tone);
     },
-    [manifest, persistDraft, placingKind, showStatus],
+    [activeProjectStep, manifest, persistDraft, placingKind, showStatus],
   );
 
   const handleSelectPrimitive = useCallback(
@@ -583,13 +611,22 @@ export function BuildPage() {
         </div>
 
         <div className="builder-compass-actions">
-          {manifest.primitives.length === 0 && !placingKind ? (
+          {activeProjectStep && !placingKind ? (
             <button
               type="button"
               className="primary-link"
-              onClick={() => handleSelectKind(activeProjectStep?.allowedPartKinds[0] ?? 'motor')}
+              onClick={() => handleSelectKind(activeProjectStep.allowedPartKinds[0] ?? 'motor')}
             >
-              Start with {labelForPrimitive(activeProjectStep?.allowedPartKinds[0] ?? 'motor')}
+              Place {labelForPrimitive(activeProjectStep.allowedPartKinds[0] ?? 'motor')}
+            </button>
+          ) : null}
+          {!activeProjectStep && manifest.primitives.length === 0 && !placingKind ? (
+            <button
+              type="button"
+              className="primary-link"
+              onClick={() => handleSelectKind('motor')}
+            >
+              Start with Motor
             </button>
           ) : null}
           {placingKind ? (
@@ -736,6 +773,7 @@ export function BuildPage() {
             selectedPrimitiveId={selectedPrimitiveId}
             placingKind={placingKind}
             activeJobHint={activeJobHint}
+            projectGuide={projectGuide}
             onPlacePrimitive={handlePlacePrimitive}
             onSelectPrimitive={handleSelectPrimitive}
             onMovePrimitive={(primitiveId, x, y) => {
@@ -922,6 +960,23 @@ interface BuilderStep {
   state: 'active' | 'done' | 'upcoming';
 }
 
+interface ProjectCanvasGuide {
+  title: string;
+  detail: string;
+  line?: Array<{ x: number; y: number }>;
+  circle?: { x: number; y: number; r: number };
+  rect?: { x: number; y: number; w: number; h: number };
+  marker?: { x: number; y: number; label: string };
+}
+
+interface GuidedPlacement {
+  x: number;
+  y: number;
+  configOverride?: PrimitiveConfig;
+  feedback?: { message: string; tone: NoticeTone };
+  guide?: ProjectCanvasGuide;
+}
+
 function deriveMachineActivity(
   manifest: ExperimentManifest,
   runtime: RuntimeSnapshot,
@@ -1071,6 +1126,238 @@ function deriveProjectSteps(projectState: NonNullable<ReturnType<typeof evaluate
         ? 'active'
         : 'upcoming',
   }));
+}
+
+function deriveProjectGuide(
+  manifest: ExperimentManifest,
+  step: { successCheck: string; title: string; instruction: string },
+  preferredKind: PrimitiveKind | null,
+): ProjectCanvasGuide | null {
+  if (!preferredKind) {
+    return null;
+  }
+
+  const placement = deriveGuidedPlacement(manifest, step, preferredKind, 0, 0);
+  return placement?.guide ?? null;
+}
+
+function deriveGuidedPlacement(
+  manifest: ExperimentManifest,
+  step: { successCheck: string; title: string; instruction: string },
+  kind: PrimitiveKind,
+  x: number,
+  y: number,
+): GuidedPlacement | null {
+  const primaryMotor = manifest.primitives.find((primitive) => primitive.kind === 'motor');
+  const gears = manifest.primitives.filter((primitive) => primitive.kind === 'gear');
+  const conveyor = manifest.primitives.find((primitive) => primitive.kind === 'conveyor');
+  const gearCount = gears.length;
+
+  switch (step.successCheck) {
+    case 'has-motor':
+      if (kind !== 'motor') return null;
+      return {
+        x: clamp(x || 260, 180, 760),
+        y: 360,
+        guide: {
+          title: 'Place the motor',
+          detail: 'Click anywhere. The motor will snap onto the work line so the next gear placement makes sense.',
+          circle: { x: clamp(x || 260, 180, 760), y: 360, r: 34 },
+          marker: { x: clamp(x || 260, 180, 760), y: 360, label: 'Motor spot' },
+        },
+        feedback: {
+          message: 'Motor placed on the work line. Next, drop a gear into the green motor ring.',
+          tone: 'success',
+        },
+      };
+    case 'first-gear-live':
+      if (kind !== 'gear' || !primaryMotor) return null;
+      return placeFirstGuidedGear(primaryMotor);
+    case 'gear-train-live':
+      if (kind !== 'gear') return null;
+      if (gearCount === 0 && primaryMotor) {
+        return placeFirstGuidedGear(primaryMotor);
+      }
+      if (gears[0]) {
+        const guide = placeMeshedGear(gears[0]);
+        if (guide) return guide;
+      }
+      return null;
+    case 'has-conveyor':
+      if (kind !== 'conveyor') return null;
+      return placeStarterConveyor(x, y, step.title);
+    case 'cargo-on-conveyor':
+      if (kind !== 'cargo-block' || !conveyor) return null;
+      return placeCargoOnStarterConveyor(conveyor, manifest.primitives.filter((primitive) => primitive.kind === 'cargo-block').length);
+    case 'has-hopper':
+    case 'hopper-catching-cargo':
+      if (kind === 'hopper' && conveyor) {
+        return placeHopperAtConveyorOutput(conveyor);
+      }
+      if (kind === 'cargo-block' && conveyor) {
+        return placeCargoOnStarterConveyor(conveyor, manifest.primitives.filter((primitive) => primitive.kind === 'cargo-block').length);
+      }
+      return null;
+    case 'motor-near-conveyor':
+      if (kind !== 'motor' || !conveyor) return null;
+      return placeMotorNearConveyor(conveyor);
+    case 'powered-loader-target':
+      if (kind === 'cargo-block' && conveyor) {
+        return placeCargoOnStarterConveyor(conveyor, manifest.primitives.filter((primitive) => primitive.kind === 'cargo-block').length);
+      }
+      if (kind === 'motor' && conveyor) {
+        return placeMotorNearConveyor(conveyor);
+      }
+      if (kind === 'hopper' && conveyor) {
+        return placeHopperAtConveyorOutput(conveyor);
+      }
+      return null;
+    default:
+      return null;
+  }
+}
+
+function placeFirstGuidedGear(motor: PrimitiveInstance): GuidedPlacement {
+  const motorConfig = motor.config as { x: number; y: number };
+  const x = motorConfig.x + 150;
+  const y = motorConfig.y;
+
+  return {
+    x,
+    y,
+    guide: {
+      title: 'Drop the first gear into the motor ring',
+      detail: 'Click anywhere. The first gear will snap into the motor reach ring so it spins immediately.',
+      circle: { x, y, r: 34 },
+      marker: { x, y, label: 'First live gear' },
+    },
+    feedback: {
+      message: 'Gear snapped into the motor ring. You should see it spin right away.',
+      tone: 'success',
+    },
+  };
+}
+
+function placeMeshedGear(gear: PrimitiveInstance): GuidedPlacement | null {
+  const gearConfig = gear.config as { x: number; y: number; teeth?: number };
+  const baseRadius = Math.max(24, Number(gearConfig.teeth ?? 24) * 1.4);
+  const nextRadius = Math.max(24, 24 * 1.4);
+  const x = gearConfig.x + baseRadius + nextRadius + 8;
+  const y = gearConfig.y;
+
+  return {
+    x,
+    y,
+    guide: {
+      title: 'Mesh the next gear',
+      detail: 'Click anywhere. The new gear will snap beside the live gear so the teeth mesh cleanly.',
+      circle: { x, y, r: 34 },
+      marker: { x, y, label: 'Mesh here' },
+    },
+    feedback: {
+      message: 'Second gear snapped into the mesh zone. The gear train should now read clearly.',
+      tone: 'success',
+    },
+  };
+}
+
+function placeStarterConveyor(x: number, _y: number, title: string): GuidedPlacement {
+  const centerX = clamp(x || 450, 260, 700);
+  const centerY = 420;
+  const path = [
+    { x: centerX - 180, y: centerY },
+    { x: centerX + 180, y: centerY },
+  ];
+
+  return {
+    x: centerX,
+    y: centerY,
+    configOverride: {
+      path,
+      speed: 45,
+      direction: 'forward',
+    },
+    guide: {
+      title,
+      detail: 'Click anywhere. The conveyor will snap into a clear horizontal lane so the rest of the project lines up.',
+      line: path,
+      marker: { x: centerX, y: centerY - 26, label: 'Belt lane' },
+    },
+    feedback: {
+      message: 'Conveyor placed in the starter lane. Now add cargo so you can read the motion.',
+      tone: 'success',
+    },
+  };
+}
+
+function placeCargoOnStarterConveyor(conveyor: PrimitiveInstance, existingCargoCount: number): GuidedPlacement {
+  const path = (conveyor.config as { path: Array<{ x: number; y: number }> }).path;
+  const start = path[0];
+  const end = path[path.length - 1];
+  const t = Math.min(0.48, 0.18 + existingCargoCount * 0.1);
+  const beltX = start.x + (end.x - start.x) * t;
+  const beltY = start.y + (end.y - start.y) * t - 14;
+
+  return {
+    x: beltX,
+    y: beltY,
+    guide: {
+      title: 'Put cargo on the belt',
+      detail: 'Click anywhere. The cargo will snap onto the conveyor so the step cannot fail from a tiny miss.',
+      line: path,
+      marker: { x: beltX, y: beltY - 12, label: 'Cargo snap point' },
+    },
+    feedback: {
+      message: 'Cargo snapped onto the belt. Watch it ride the conveyor, then place the hopper at the output.',
+      tone: 'success',
+    },
+  };
+}
+
+function placeHopperAtConveyorOutput(conveyor: PrimitiveInstance): GuidedPlacement {
+  const path = (conveyor.config as { path: Array<{ x: number; y: number }> }).path;
+  const output = path[path.length - 1];
+  const x = output.x + 82;
+  const y = output.y - 58;
+
+  return {
+    x,
+    y,
+    guide: {
+      title: 'Place the hopper at the output',
+      detail: 'Click anywhere. The hopper will snap beside the conveyor exit so the cargo has a real target.',
+      line: path,
+      rect: { x: output.x + 18, y: output.y - 56, w: 122, h: 120 },
+      marker: { x, y: y - 18, label: 'Hopper target' },
+    },
+    feedback: {
+      message: 'Hopper snapped onto the conveyor output. The next cargo that arrives should count for real.',
+      tone: 'success',
+    },
+  };
+}
+
+function placeMotorNearConveyor(conveyor: PrimitiveInstance): GuidedPlacement {
+  const path = (conveyor.config as { path: Array<{ x: number; y: number }> }).path;
+  const start = path[0];
+  const x = start.x - 82;
+  const y = start.y - 8;
+
+  return {
+    x,
+    y,
+    guide: {
+      title: 'Power the conveyor',
+      detail: 'Click anywhere. The motor will snap near the conveyor so the power boost is obvious and reliable.',
+      line: path,
+      circle: { x, y, r: 34 },
+      marker: { x, y: y - 34, label: 'Motor boost spot' },
+    },
+    feedback: {
+      message: 'Motor snapped into power range. The conveyor should now feel stronger.',
+      tone: 'success',
+    },
+  };
 }
 
 function describePlacedPrimitive(
@@ -1239,6 +1526,10 @@ function hasNearbyMotor(manifest: ExperimentManifest, x: number, y: number) {
     const config = primitive.config as { x: number; y: number };
     return Math.hypot(config.x - x, config.y - y) < 300;
   });
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function isDrivenPlacement(
