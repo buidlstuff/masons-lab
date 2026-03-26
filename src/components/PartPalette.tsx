@@ -1,30 +1,57 @@
-import { useState } from 'react';
-import { PART_CATEGORIES, type PrimitiveKind } from '../lib/types';
+import { useMemo, useState } from 'react';
+import { PART_CATEGORIES, type ExperimentManifest, type PrimitiveInstance, type PrimitiveKind } from '../lib/types';
 
-// The 5 parts with the strongest, most immediate physics feedback in free-build mode.
-const BEGINNER_PARTS: Array<{ kind: PrimitiveKind; icon: string; label: string; tagline: string }> = [
-  { kind: 'motor',    icon: '⚡', label: 'Motor',    tagline: 'Makes things spin' },
-  { kind: 'gear',     icon: '⚙', label: 'Gear',     tagline: 'Changes speed' },
-  { kind: 'wheel',    icon: '○', label: 'Wheel',    tagline: 'Rolls on surfaces' },
-  { kind: 'conveyor', icon: '▶', label: 'Conveyor', tagline: 'Moves cargo along' },
-  { kind: 'hopper',   icon: '▽', label: 'Hopper',   tagline: 'Collects and fills' },
-];
+const BEGINNER_PARTS: PrimitiveKind[] = ['motor', 'gear', 'wheel', 'conveyor', 'hopper'];
 
 interface PartPaletteProps {
+  manifest: ExperimentManifest;
+  selectedPrimitive?: PrimitiveInstance;
   selectedKind?: PrimitiveKind | null;
+  activeJobHint?: string;
   onSelectKind: (kind: PrimitiveKind | null) => void;
 }
 
-export function PartPalette({ selectedKind, onSelectKind }: PartPaletteProps) {
+interface PaletteSuggestion {
+  kind: PrimitiveKind;
+  reason: string;
+}
+
+export function PartPalette({
+  manifest,
+  selectedPrimitive,
+  selectedKind,
+  activeJobHint,
+  onSelectKind,
+}: PartPaletteProps) {
   const [beginner, setBeginner] = useState(() => {
-    try { return localStorage.getItem('mason-beginner-mode') !== 'false'; }
-    catch { return true; }
+    try {
+      return localStorage.getItem('mason-beginner-mode') !== 'false';
+    } catch {
+      return true;
+    }
   });
+
+  const counts = useMemo(() => countKinds(manifest), [manifest]);
+  const suggestions = useMemo(
+    () => deriveSuggestions(manifest, selectedPrimitive),
+    [manifest, selectedPrimitive],
+  );
+  const canvasKinds = useMemo(
+    () => Object.entries(counts)
+      .filter(([, count]) => count > 0)
+      .sort((left, right) => right[1] - left[1])
+      .map(([kind]) => kind as PrimitiveKind),
+    [counts],
+  );
 
   function toggleBeginner() {
     const next = !beginner;
     setBeginner(next);
-    try { localStorage.setItem('mason-beginner-mode', String(next)); } catch { /* ignore */ }
+    try {
+      localStorage.setItem('mason-beginner-mode', String(next));
+    } catch {
+      // Ignore storage failures.
+    }
   }
 
   return (
@@ -32,64 +59,119 @@ export function PartPalette({ selectedKind, onSelectKind }: PartPaletteProps) {
       <div className="panel-header compact">
         <div>
           <p className="eyebrow">Part Drawer</p>
-          <h3>Pick a part to place</h3>
+          <h3>{selectedPrimitive ? `Works with ${labelForPart(selectedPrimitive.kind)}` : 'Pick the next part'}</h3>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {selectedKind && (
-            <button type="button" className="ghost-button" onClick={() => onSelectKind(null)}>
-              Clear
-            </button>
-          )}
-        </div>
+        {selectedKind ? (
+          <button type="button" className="ghost-button" onClick={() => onSelectKind(null)}>
+            Clear
+          </button>
+        ) : null}
       </div>
 
-      {/* Mode toggle */}
+      <div className="palette-context-card">
+        <p className="palette-context-label">Right now</p>
+        <strong>
+          {selectedPrimitive
+            ? `${labelForPart(selectedPrimitive.kind)} selected`
+            : manifest.primitives.length === 0
+              ? 'Start with a part that reacts fast'
+              : 'Recommended parts match the current canvas'}
+        </strong>
+        <p className="muted">
+          {selectedPrimitive
+            ? connectionHintForKind(selectedPrimitive.kind)
+            : activeJobHint ?? 'Motors, gears, conveyors, and rails give the fastest visible feedback.'}
+        </p>
+      </div>
+
+      {suggestions.length > 0 ? (
+        <div className="palette-suggestion-list">
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.kind}
+              type="button"
+              className={`palette-suggestion-card ${selectedKind === suggestion.kind ? 'active' : ''}`}
+              onClick={() => onSelectKind(selectedKind === suggestion.kind ? null : suggestion.kind)}
+            >
+              <span className="palette-suggestion-icon">{iconForPart(suggestion.kind)}</span>
+              <div className="palette-suggestion-copy">
+                <span className="palette-suggestion-label">{labelForPart(suggestion.kind)}</span>
+                <span className="palette-suggestion-reason">{suggestion.reason}</span>
+              </div>
+              {counts[suggestion.kind] ? (
+                <span className="palette-suggestion-count">x{counts[suggestion.kind]}</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {canvasKinds.length > 0 ? (
+        <div className="palette-presence">
+          {canvasKinds.slice(0, 7).map((kind) => (
+            <span key={kind} className="palette-presence-chip">
+              {labelForPart(kind)} x{counts[kind]}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
       <div className="palette-mode-toggle">
         <button
           type="button"
           className={`palette-mode-btn ${beginner ? 'active' : ''}`}
-          onClick={() => { if (!beginner) toggleBeginner(); }}
+          onClick={() => {
+            if (!beginner) {
+              toggleBeginner();
+            }
+          }}
         >
           Starter
         </button>
         <button
           type="button"
           className={`palette-mode-btn ${!beginner ? 'active' : ''}`}
-          onClick={() => { if (beginner) toggleBeginner(); }}
+          onClick={() => {
+            if (beginner) {
+              toggleBeginner();
+            }
+          }}
         >
           All Parts
         </button>
       </div>
 
       {beginner ? (
-        /* ── Beginner mode: 5 core parts with taglines ── */
         <div className="palette-beginner-list">
-          {BEGINNER_PARTS.map(({ kind, icon, label, tagline }) => (
+          {BEGINNER_PARTS.map((kind) => (
             <button
               key={kind}
               type="button"
               className={`palette-beginner-item ${selectedKind === kind ? 'active' : ''}`}
               onClick={() => onSelectKind(selectedKind === kind ? null : kind)}
             >
-              <span className="palette-beginner-icon">{icon}</span>
+              <span className="palette-beginner-icon">{iconForPart(kind)}</span>
               <div className="palette-beginner-info">
-                <span className="palette-beginner-label">{label}</span>
-                <span className="palette-beginner-tagline">{tagline}</span>
+                <span className="palette-beginner-label">{labelForPart(kind)}</span>
+                <span className="palette-beginner-tagline">{taglineForPart(kind)}</span>
               </div>
-              {selectedKind === kind && <span className="palette-beginner-check">▶</span>}
+              {counts[kind] ? <span className="palette-beginner-check">x{counts[kind]}</span> : null}
             </button>
           ))}
 
           <details className="palette-more-details">
-            <summary className="palette-more-summary">More parts…</summary>
+            <summary className="palette-more-summary">More parts for structures, rail, and lifting</summary>
             <div className="palette-categories">
-              {PART_CATEGORIES.map((category) => (
-                <div key={category.label} className="palette-category">
-                  <p className="palette-category-label">{category.label}</p>
-                  <div className="palette-grid">
-                    {category.kinds
-                      .filter((k) => !BEGINNER_PARTS.some((b) => b.kind === k))
-                      .map((kind) => (
+              {PART_CATEGORIES.map((category) => {
+                const hiddenKinds = category.kinds.filter((kind) => !BEGINNER_PARTS.includes(kind));
+                if (hiddenKinds.length === 0) {
+                  return null;
+                }
+                return (
+                  <div key={category.label} className="palette-category">
+                    <p className="palette-category-label">{category.label}</p>
+                    <div className="palette-grid">
+                      {hiddenKinds.map((kind) => (
                         <button
                           key={kind}
                           type="button"
@@ -99,16 +181,17 @@ export function PartPalette({ selectedKind, onSelectKind }: PartPaletteProps) {
                         >
                           <span className="palette-icon">{iconForPart(kind)}</span>
                           <span className="palette-label">{labelForPart(kind)}</span>
+                          {counts[kind] ? <span className="palette-item-count">x{counts[kind]}</span> : null}
                         </button>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </details>
         </div>
       ) : (
-        /* ── All-parts mode: category grid ── */
         <div className="palette-categories">
           {PART_CATEGORIES.map((category) => (
             <div key={category.label} className="palette-category">
@@ -124,6 +207,7 @@ export function PartPalette({ selectedKind, onSelectKind }: PartPaletteProps) {
                   >
                     <span className="palette-icon">{iconForPart(kind)}</span>
                     <span className="palette-label">{labelForPart(kind)}</span>
+                    {counts[kind] ? <span className="palette-item-count">x{counts[kind]}</span> : null}
                   </button>
                 ))}
               </div>
@@ -132,46 +216,222 @@ export function PartPalette({ selectedKind, onSelectKind }: PartPaletteProps) {
         </div>
       )}
 
-      {selectedKind && (
+      {selectedKind ? (
         <p className="palette-hint muted">
-          Click on the canvas to place {labelForPart(selectedKind)}.
+          Place {labelForPart(selectedKind)} on the canvas, then press Escape if you want to cancel.
         </p>
-      )}
+      ) : null}
     </section>
   );
 }
 
+function deriveSuggestions(
+  manifest: ExperimentManifest,
+  selectedPrimitive?: PrimitiveInstance,
+): PaletteSuggestion[] {
+  const suggestions = new Map<PrimitiveKind, string>();
+  const counts = countKinds(manifest);
+  const push = (kind: PrimitiveKind, reason: string) => {
+    if (!suggestions.has(kind)) {
+      suggestions.set(kind, reason);
+    }
+  };
+
+  if (selectedPrimitive) {
+    switch (selectedPrimitive.kind) {
+      case 'motor':
+        push('gear', 'Drop it inside the motor ring for instant rotation.');
+        push('wheel', 'A wheel inside the ring gives quick visible motion.');
+        break;
+      case 'gear':
+      case 'wheel':
+        push('gear', 'Touching gears mesh and make the motion legible.');
+        push('motor', 'Add or move a motor nearby if this part is still idle.');
+        break;
+      case 'conveyor':
+        push('hopper', 'Hoppers give conveyors a clear target.');
+        push('cargo-block', 'Cargo is the fastest way to test conveyor movement.');
+        push('motor', 'A nearby motor boosts conveyor speed.');
+        break;
+      case 'hopper':
+        push('conveyor', 'Conveyors feed material into the hopper.');
+        push('cargo-block', 'Cargo shows whether the hopper is actually receiving anything.');
+        break;
+      case 'winch':
+      case 'hook':
+        push('hook', 'A hook is the missing half of the hoist.');
+        push('winch', 'A winch and hook only become useful together.');
+        break;
+      case 'node':
+        push('node', 'A second node lets Quick Connect create a beam.');
+        break;
+      case 'rail-segment':
+        push('locomotive', 'Locomotives make the track meaningful.');
+        push('wagon', 'Wagons show delivery progress once the train is moving.');
+        break;
+      case 'locomotive':
+      case 'wagon':
+        push('rail-segment', 'Train parts still need a real rail segment underneath them.');
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (manifest.primitives.length === 0) {
+    push('motor', 'Best first move for immediate motion.');
+    push('conveyor', 'Great if you want cargo feedback quickly.');
+    push('rail-segment', 'Start here if you want a train instead of gears.');
+  } else {
+    if (counts.motor > 0 && counts.gear === 0) {
+      push('gear', 'You already have power on the canvas. Give the motor something to drive.');
+    }
+    if (counts.conveyor > 0 && counts.hopper === 0) {
+      push('hopper', 'A hopper gives your conveyor an obvious destination.');
+    }
+    if ((counts.conveyor > 0 || counts.hopper > 0) && counts['cargo-block'] === 0) {
+      push('cargo-block', 'Cargo makes processing setups readable right away.');
+    }
+    if (counts.winch > 0 && counts.hook === 0) {
+      push('hook', 'Without a hook, the winch never gets to lift anything.');
+    }
+    if (counts['rail-segment'] > 0 && counts.locomotive === 0) {
+      push('locomotive', 'Add a locomotive once the track exists.');
+    }
+    if (counts.node === 1) {
+      push('node', 'One more node is enough to create a beam.');
+    }
+  }
+
+  return [...suggestions.entries()]
+    .map(([kind, reason]) => ({ kind, reason }))
+    .slice(0, 5);
+}
+
+function countKinds(manifest: ExperimentManifest) {
+  const counts: Record<PrimitiveKind, number> = {
+    node: 0,
+    beam: 0,
+    wheel: 0,
+    axle: 0,
+    motor: 0,
+    gear: 0,
+    winch: 0,
+    rope: 0,
+    hook: 0,
+    'rail-segment': 0,
+    'rail-switch': 0,
+    locomotive: 0,
+    wagon: 0,
+    conveyor: 0,
+    hopper: 0,
+    'cargo-block': 0,
+    'material-pile': 0,
+  };
+
+  manifest.primitives.forEach((primitive) => {
+    counts[primitive.kind] += 1;
+  });
+
+  return counts;
+}
+
+function connectionHintForKind(kind: PrimitiveKind) {
+  switch (kind) {
+    case 'motor':
+      return 'Motors only feel useful when a gear, wheel, or conveyor can pick up the power.';
+    case 'gear':
+      return 'Gears want either motor reach or contact with another gear.';
+    case 'conveyor':
+      return 'Conveyors are easiest to read when cargo moves into a hopper.';
+    case 'winch':
+    case 'hook':
+      return 'Hoists only make sense once both the winch and hook are on the canvas.';
+    case 'rail-segment':
+      return 'Rails define the path, but trains still need their trackId set in the Inspector.';
+    default:
+      return 'Pick a matching part below if you want a clearer reaction from the canvas.';
+  }
+}
+
+function taglineForPart(kind: PrimitiveKind) {
+  switch (kind) {
+    case 'motor':
+      return 'Starts the motion';
+    case 'gear':
+      return 'Transfers and changes speed';
+    case 'wheel':
+      return 'Shows spinning clearly';
+    case 'conveyor':
+      return 'Moves cargo across the floor';
+    case 'hopper':
+      return 'Collects what the conveyor feeds';
+    case 'node':
+      return 'Anchor point for beams';
+    case 'winch':
+      return 'Raises and lowers a hook';
+    case 'hook':
+      return 'The lifting end of a hoist';
+    case 'rail-segment':
+      return 'Track for locomotives and wagons';
+    case 'locomotive':
+      return 'Pulls the rail setup forward';
+    default:
+      return 'Adds another building behavior';
+  }
+}
+
 function iconForPart(kind: PrimitiveKind): string {
   switch (kind) {
-    case 'node': return '●';
-    case 'wheel': return '○';
-    case 'axle': return '─';
-    case 'motor': return '⚡';
-    case 'gear': return '⚙';
-    case 'winch': return '🔧';
-    case 'hook': return '🪝';
-    case 'rail-segment': return '═';
-    case 'rail-switch': return '⇌';
-    case 'locomotive': return '🚂';
-    case 'wagon': return '🚃';
-    case 'conveyor': return '▶';
-    case 'hopper': return '▽';
-    case 'cargo-block': return '■';
-    case 'material-pile': return '▲';
-    default: return '◆';
+    case 'node':
+      return 'O';
+    case 'wheel':
+      return 'o';
+    case 'axle':
+      return '=';
+    case 'motor':
+      return 'M';
+    case 'gear':
+      return '*';
+    case 'winch':
+      return 'W';
+    case 'hook':
+      return 'J';
+    case 'rail-segment':
+      return '=';
+    case 'rail-switch':
+      return 'Y';
+    case 'locomotive':
+      return 'L';
+    case 'wagon':
+      return 'U';
+    case 'conveyor':
+      return '>';
+    case 'hopper':
+      return 'V';
+    case 'cargo-block':
+      return '#';
+    case 'material-pile':
+      return '^';
+    default:
+      return '+';
   }
 }
 
 function labelForPart(kind: PrimitiveKind): string {
   switch (kind) {
-    case 'rail-segment': return 'Rail';
-    case 'rail-switch': return 'Switch';
-    case 'cargo-block': return 'Cargo';
-    case 'material-pile': return 'Pile';
+    case 'rail-segment':
+      return 'Rail';
+    case 'rail-switch':
+      return 'Switch';
+    case 'cargo-block':
+      return 'Cargo';
+    case 'material-pile':
+      return 'Pile';
     default:
       return kind
         .split('-')
-        .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+        .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
         .join(' ');
   }
 }

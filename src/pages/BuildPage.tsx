@@ -14,7 +14,7 @@ import { db } from '../lib/db';
 import { addPrimitive, connectPrimitives, deletePrimitive, movePrimitive, updatePrimitive } from '../lib/editor';
 import { getGoalProgress, isJobComplete } from '../lib/jobs';
 import { createDraftFromBlueprint, createDraftFromMachine, createEmptyDraft } from '../lib/seed-data';
-import { useMachineSimulation } from '../lib/simulation';
+import { useMachineSimulation, type RuntimeSnapshot } from '../lib/simulation';
 import { awardJobXp, TIER_NAMES } from '../lib/xp';
 import type {
   BuildTelemetry,
@@ -52,12 +52,28 @@ export function BuildPage() {
   const [controlValues, setControlValues] = useState<Record<string, string | number | boolean>>({});
   const [telemetry, setTelemetry] = useState<BuildTelemetry>({});
   const [busy, setBusy] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string>();
+  const [statusNotice, setStatusNotice] = useState<{ tone: NoticeTone; message: string } | null>(null);
   const [saveModal, setSaveModal] = useState<{ title: string; learned: string } | null>(null);
   const [xpToast, setXpToast] = useState<{ gained: number; newXp: number; tierName?: string } | null>(null);
   const [flashToast, setFlashToast] = useState(false);
+  const [assistantPromptSeed, setAssistantPromptSeed] = useState<string | null>(null);
   const flashCountRef = useRef(0);
   const jobCompletedRef = useRef(false);
+  const statusTimeoutRef = useRef<number | undefined>(undefined);
+  const assistantRef = useRef<HTMLDivElement | null>(null);
+
+  const showStatus = useCallback((message: string, tone: NoticeTone = 'info') => {
+    window.clearTimeout(statusTimeoutRef.current);
+    setStatusNotice({ message, tone });
+    statusTimeoutRef.current = window.setTimeout(() => setStatusNotice(null), 4200);
+  }, []);
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(statusTimeoutRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     async function bootstrapDraft() {
@@ -225,7 +241,7 @@ export function BuildPage() {
       },
       featured: false,
     });
-    setStatusMessage('Saved machine to the yard.');
+    showStatus('Saved machine to the yard.', 'success');
     navigate(`/machines/${recordId}`);
   }
 
@@ -242,7 +258,7 @@ export function BuildPage() {
       createdAt: now,
       updatedAt: now,
     });
-    setStatusMessage(`Saved blueprint "${blueprint.title}".`);
+    showStatus(`Saved blueprint "${blueprint.title}".`, 'success');
   }
 
   async function handleSaveBoth() {
@@ -320,12 +336,145 @@ export function BuildPage() {
       const encoded = btoa(encodeURIComponent(JSON.stringify(manifest)));
       const url = `${window.location.origin}/build?share=${encoded}`;
       void navigator.clipboard.writeText(url).then(() => {
-        setStatusMessage('Share link copied to clipboard!');
+        showStatus('Share link copied to clipboard!', 'success');
       });
     } catch {
-      setStatusMessage('Could not copy link.');
+      showStatus('Could not copy link.', 'warning');
     }
   }
+
+  const activeJobHint = manifest ? deriveJobHint() : undefined;
+  const machineActivity = manifest
+    ? deriveMachineActivity(manifest, runtime, telemetry)
+    : { active: false, label: 'Preparing the canvas', tone: 'info' as NoticeTone };
+  const builderFocus = manifest
+    ? deriveBuilderFocus(manifest, placingKind, selectedPrimitive, activeJobHint, machineActivity)
+    : {
+        title: 'Preparing the yard',
+        description: 'Loading the current draft.',
+        assistantPrompt: 'Explain how to get started in Mason\'s Lab.',
+      };
+  const buildSteps = manifest
+    ? deriveBuildSteps(manifest, placingKind, machineActivity.active)
+    : [];
+  const contextualConnectPrompt = selectedPrimitive
+    ? `Stuck on ${labelForPrimitive(selectedPrimitive.kind)}? Ask the assistant what it should connect to next.`
+    : 'Need a hand? Load a prompt into the assistant from here instead of hunting for the right tab.';
+
+  const openAssistantWithPrompt = useCallback(
+    (prompt: string) => {
+      setAssistantPromptSeed(prompt);
+      assistantRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      showStatus('Loaded a prompt into the assistant.', 'info');
+    },
+    [showStatus],
+  );
+
+  const handlePlacePrimitive = useCallback(
+    (x: number, y: number) => {
+      if (!manifest || !placingKind) {
+        return;
+      }
+
+      const nextManifest = addPrimitive(manifest, placingKind, x, y);
+      const placedPrimitive = nextManifest.primitives[nextManifest.primitives.length - 1];
+      void persistDraft(nextManifest);
+      setSelectedPrimitiveId(placedPrimitive?.id);
+      setPlacingKind(null);
+
+      const placementFeedback = describePlacedPrimitive(manifest, placingKind, x, y);
+      showStatus(placementFeedback.message, placementFeedback.tone);
+    },
+    [manifest, persistDraft, placingKind, showStatus],
+  );
+
+  const handleSelectPrimitive = useCallback(
+    (primitiveId?: string) => {
+      setSelectedPrimitiveId(primitiveId);
+    },
+    [],
+  );
+
+  const handleSelectKind = useCallback(
+    (kind: PrimitiveKind | null) => {
+      setPlacingKind(kind);
+      if (kind) {
+        setSelectedPrimitiveId(undefined);
+        showStatus(`Place ${labelForPrimitive(kind)} on the canvas. Press Escape to cancel.`, 'info');
+      }
+    },
+    [showStatus],
+  );
+
+  const handleConnectWinch = useCallback(() => {
+    if (!manifest) {
+      return;
+    }
+    if (!selectedPrimitiveId) {
+      showStatus('Select the winch or hook you want to connect first.', 'warning');
+      return;
+    }
+
+    const selectedPrimitiveRecord = manifest.primitives.find((primitive) => primitive.id === selectedPrimitiveId);
+    const source = selectedPrimitiveRecord?.kind === 'winch'
+      ? selectedPrimitiveRecord
+      : manifest.primitives.find((primitive) => primitive.kind === 'winch');
+    const target = selectedPrimitiveRecord?.kind === 'hook'
+      ? selectedPrimitiveRecord
+      : manifest.primitives.find((primitive) => primitive.kind === 'hook');
+
+    if (!source || !target) {
+      showStatus('Add a hook first, then use Quick Connect to hang the rope.', 'warning');
+      return;
+    }
+
+    void persistDraft(connectPrimitives(manifest, source.id, target.id));
+    showStatus('Connected the winch to the hook.', 'success');
+  }, [manifest, persistDraft, selectedPrimitiveId, showStatus]);
+
+  const handleConnectNodes = useCallback(() => {
+    if (!manifest) {
+      return;
+    }
+    if (!selectedPrimitiveId) {
+      showStatus('Select the first node, then use Quick Connect to add a beam.', 'warning');
+      return;
+    }
+
+    const target = manifest.primitives.find(
+      (primitive) => primitive.id !== selectedPrimitiveId && primitive.kind === 'node',
+    );
+
+    if (!target) {
+      showStatus('Place a second node first so the beam has somewhere to land.', 'warning');
+      return;
+    }
+
+    void persistDraft(connectPrimitives(manifest, selectedPrimitiveId, target.id));
+    showStatus('Connected the two nodes with a beam.', 'success');
+  }, [manifest, persistDraft, selectedPrimitiveId, showStatus]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      if (placingKind) {
+        setPlacingKind(null);
+        showStatus('Placement cancelled. You are back in select mode.', 'info');
+        return;
+      }
+
+      if (selectedPrimitiveId) {
+        setSelectedPrimitiveId(undefined);
+        showStatus('Selection cleared.', 'info');
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [placingKind, selectedPrimitiveId, showStatus]);
 
   if (!manifest) {
     return (
@@ -336,6 +485,14 @@ export function BuildPage() {
     );
   }
 
+  const builderModeLabel = placingKind
+    ? `Placing ${labelForPrimitive(placingKind)}`
+    : selectedPrimitive
+      ? `Inspecting ${selectedPrimitive.label ?? labelForPrimitive(selectedPrimitive.kind)}`
+      : manifest.primitives.length === 0
+        ? 'Start mode'
+        : 'Select mode';
+
   return (
     <div className="page page-build">
       <div className="build-header">
@@ -343,7 +500,9 @@ export function BuildPage() {
           <p className="eyebrow">Builder</p>
           <h1>{manifest.metadata.title}</h1>
           <p>{manifest.metadata.shortDescription}</p>
-          {statusMessage ? <p className="muted">{statusMessage}</p> : null}
+          {statusNotice ? (
+            <p className={`builder-status builder-status-${statusNotice.tone}`}>{statusNotice.message}</p>
+          ) : null}
         </div>
         <div className="hero-actions">
           <button type="button" className="primary-link" onClick={handleSaveMachine}>
@@ -364,6 +523,58 @@ export function BuildPage() {
           <Link to="/">Back to Yard</Link>
         </div>
       </div>
+
+      <section className="panel builder-compass">
+        <div className="builder-compass-copy">
+          <div>
+            <p className="eyebrow">Build Loop</p>
+            <h2>{builderFocus.title}</h2>
+          </div>
+          <p>{builderFocus.description}</p>
+        </div>
+
+        <div className="builder-chip-row">
+          <span className={`builder-chip ${placingKind ? 'is-active' : ''}`}>Mode: {builderModeLabel}</span>
+          <span className={`builder-chip is-${machineActivity.tone}`}>{machineActivity.label}</span>
+          <span className="builder-chip">Canvas: {manifest.primitives.length} part{manifest.primitives.length === 1 ? '' : 's'}</span>
+          {job ? <span className="builder-chip">Job: {job.title}</span> : null}
+        </div>
+
+        <div className="builder-step-strip">
+          {buildSteps.map((step) => (
+            <div key={step.label} className={`builder-step builder-step-${step.state}`}>
+              <span className="builder-step-dot" />
+              <span>{step.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="builder-compass-actions">
+          {manifest.primitives.length === 0 && !placingKind ? (
+            <button type="button" className="primary-link" onClick={() => handleSelectKind('motor')}>
+              Start with a Motor
+            </button>
+          ) : null}
+          {placingKind ? (
+            <button type="button" className="primary-link" onClick={() => setPlacingKind(null)}>
+              Cancel Placement
+            </button>
+          ) : null}
+          {selectedPrimitive ? (
+            <button type="button" onClick={() => setSelectedPrimitiveId(undefined)}>
+              Clear Selection
+            </button>
+          ) : null}
+          <button type="button" onClick={() => openAssistantWithPrompt(builderFocus.assistantPrompt)}>
+            Ask Assistant
+          </button>
+        </div>
+
+        <div className="builder-assistant-prompt">
+          <strong>Fast help:</strong>
+          <span>{contextualConnectPrompt}</span>
+        </div>
+      </section>
 
       {job ? (() => {
         const gp = getGoalProgress(job, telemetry);
@@ -411,14 +622,16 @@ export function BuildPage() {
       ) : null}
 
       <div className="build-layout">
-        <div className="left-rail">
+        <div className="left-rail" ref={assistantRef}>
           <AssistantPanel
             manifest={manifest}
             busy={busy}
+            promptSeed={assistantPromptSeed}
+            onPromptSeedConsumed={() => setAssistantPromptSeed(null)}
             blueprints={blueprints ?? []}
             onMount={(blueprintRecord) => {
               void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint));
-              setStatusMessage(`Mounted ${blueprintRecord.blueprint.title}.`);
+              showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
             }}
             onGenerate={async (prompt) => {
               setBusy(true);
@@ -455,23 +668,20 @@ export function BuildPage() {
         <div className="canvas-column" style={{ position: 'relative' }}>
           <HudOverlay hud={manifest.hud} telemetry={telemetry} />
           <StarterOverlay
-            visible={manifest.primitives.length === 0}
-            onSelectKind={setPlacingKind}
+            visible={manifest.primitives.length === 0 && !placingKind}
+            onSelectKind={handleSelectKind}
           />
           {flashToast && (
-            <div className="connection-toast">⚙ It&apos;s working!</div>
+            <div className="connection-toast">The machine is responding.</div>
           )}
           <MachineCanvas
             manifest={manifest}
             runtime={runtime}
             selectedPrimitiveId={selectedPrimitiveId}
             placingKind={placingKind}
-            activeJobHint={deriveJobHint()}
-            onPlacePrimitive={(x, y) => {
-              void persistDraft(addPrimitive(manifest, placingKind ?? 'node', x, y));
-              setPlacingKind(null);
-            }}
-            onSelectPrimitive={(primitiveId) => setSelectedPrimitiveId(primitiveId)}
+            activeJobHint={activeJobHint}
+            onPlacePrimitive={handlePlacePrimitive}
+            onSelectPrimitive={handleSelectPrimitive}
             onMovePrimitive={(primitiveId, x, y) => {
               void persistDraft(movePrimitive(manifest, primitiveId, x, y));
             }}
@@ -486,14 +696,22 @@ export function BuildPage() {
         </div>
 
         <div className="right-rail">
-          <PartPalette selectedKind={placingKind} onSelectKind={setPlacingKind} />
-          <ControlPanel
-            controls={manifest.controls}
-            values={controlValues}
-            onChange={(controlId, value) => {
-              setControlValues((current) => ({ ...current, [controlId]: value }));
-            }}
+          <PartPalette
+            manifest={manifest}
+            selectedPrimitive={selectedPrimitive}
+            selectedKind={placingKind}
+            activeJobHint={activeJobHint}
+            onSelectKind={handleSelectKind}
           />
+          {manifest.controls.length > 0 ? (
+            <ControlPanel
+              controls={manifest.controls}
+              values={controlValues}
+              onChange={(controlId, value) => {
+                setControlValues((current) => ({ ...current, [controlId]: value }));
+              }}
+            />
+          ) : null}
           <InspectorPanel
             primitive={selectedPrimitive}
             manifest={manifest}
@@ -502,8 +720,9 @@ export function BuildPage() {
               if (selectedPrimitiveId === primitiveId) {
                 setSelectedPrimitiveId(undefined);
               }
+              showStatus('Part removed from the canvas.', 'info');
             }}
-            onUpdateNumber={(primitiveId, key, value) => {
+            onUpdateValue={(primitiveId, key, value) => {
               const primitive = manifest.primitives.find((item) => item.id === primitiveId);
               if (!primitive) {
                 return;
@@ -512,14 +731,15 @@ export function BuildPage() {
             }}
           />
 
-          <section className="panel small-panel">
-            <div className="panel-header compact">
+          <details className="panel small-panel disclosure-panel">
+            <summary className="disclosure-summary">
               <div>
-                <p className="eyebrow">Blueprint Library</p>
-                <h3>Mount reusable modules</h3>
+                <p className="eyebrow">Workshop Shelf</p>
+                <h3>Mount a saved blueprint</h3>
               </div>
-            </div>
-            <div className="blueprint-list">
+              <span className="muted">{(blueprints ?? []).length} saved</span>
+            </summary>
+            <div className="blueprint-list disclosure-content">
               {(blueprints ?? []).slice(0, 8).map((blueprintRecord) => (
                 <article key={blueprintRecord.recordId} className="blueprint-row">
                   <div>
@@ -530,7 +750,7 @@ export function BuildPage() {
                     type="button"
                     onClick={() => {
                       void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint));
-                      setStatusMessage(`Mounted ${blueprintRecord.blueprint.title}.`);
+                      showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
                     }}
                   >
                     Mount
@@ -538,48 +758,39 @@ export function BuildPage() {
                 </article>
               ))}
             </div>
-          </section>
+          </details>
 
-          <section className="panel small-panel">
+          {(selectedPrimitive?.kind === 'winch' || selectedPrimitive?.kind === 'hook' || selectedPrimitive?.kind === 'node') ? (
+            <section className="panel small-panel">
             <div className="panel-header compact">
               <div>
                 <p className="eyebrow">Quick Connect</p>
                 <h3>Approved pairings</h3>
               </div>
             </div>
-            <p className="muted">Select a source part, then use the quick connectors below.</p>
+            <p className="muted">
+              {selectedPrimitive.kind === 'node'
+                ? 'Use this when two nodes should become a beam.'
+                : 'Use this when a winch and hook are already on the canvas.'}
+            </p>
             <div className="button-row vertical">
               <button
                 type="button"
-                disabled={!selectedPrimitiveId}
-                onClick={() => {
-                  const target = manifest.primitives.find(
-                    (primitive) => primitive.id !== selectedPrimitiveId && primitive.kind === 'hook',
-                  );
-                  if (selectedPrimitiveId && target) {
-                    void persistDraft(connectPrimitives(manifest, selectedPrimitiveId, target.id));
-                  }
-                }}
+                disabled={!selectedPrimitiveId || (selectedPrimitive.kind !== 'winch' && selectedPrimitive.kind !== 'hook')}
+                onClick={handleConnectWinch}
               >
                 Connect Winch to Hook
               </button>
               <button
                 type="button"
-                disabled={!selectedPrimitiveId}
-                onClick={() => {
-                  const source = selectedPrimitiveId;
-                  const target = manifest.primitives.find(
-                    (primitive) => primitive.id !== source && primitive.kind === 'node',
-                  );
-                  if (source && target) {
-                    void persistDraft(connectPrimitives(manifest, source, target.id));
-                  }
-                }}
+                disabled={!selectedPrimitiveId || selectedPrimitive.kind !== 'node'}
+                onClick={handleConnectNodes}
               >
                 Connect Nodes with Beam
               </button>
             </div>
           </section>
+          ) : null}
         </div>
       </div>
 
@@ -629,4 +840,374 @@ export function BuildPage() {
       )}
     </div>
   );
+}
+
+type NoticeTone = 'info' | 'success' | 'warning';
+
+interface MachineActivity {
+  active: boolean;
+  label: string;
+  tone: NoticeTone;
+}
+
+interface BuilderFocus {
+  title: string;
+  description: string;
+  assistantPrompt: string;
+}
+
+interface BuilderStep {
+  label: string;
+  state: 'active' | 'done' | 'upcoming';
+}
+
+function deriveMachineActivity(
+  manifest: ExperimentManifest,
+  runtime: RuntimeSnapshot,
+  telemetry: BuildTelemetry,
+): MachineActivity {
+  const movingParts = Object.values(runtime.rotations).filter((rotation) => Math.abs(rotation) > 0.05).length;
+  if (movingParts > 0) {
+    return {
+      active: true,
+      label: `${movingParts} part${movingParts === 1 ? '' : 's'} moving`,
+      tone: 'success',
+    };
+  }
+
+  const drivenParts = Object.values(runtime.motorDrives ?? {}).reduce((count, ids) => count + ids.length, 0);
+  if (drivenParts > 0) {
+    return {
+      active: true,
+      label: `${drivenParts} driven connection${drivenParts === 1 ? '' : 's'} live`,
+      tone: 'success',
+    };
+  }
+
+  const hopperFill = telemetry.hopperFill ?? runtime.hopperFill ?? 0;
+  if (hopperFill > 0) {
+    return {
+      active: true,
+      label: `Hopper fill at ${Math.round(hopperFill)}`,
+      tone: 'success',
+    };
+  }
+
+  if ((telemetry.trainSpeed ?? 0) > 0) {
+    return {
+      active: true,
+      label: `Train moving at ${telemetry.trainSpeed}`,
+      tone: 'success',
+    };
+  }
+
+  if (manifest.primitives.length === 0) {
+    return {
+      active: false,
+      label: 'Empty canvas',
+      tone: 'info',
+    };
+  }
+
+  return {
+    active: false,
+    label: 'Nothing moving yet',
+    tone: 'warning',
+  };
+}
+
+function deriveBuilderFocus(
+  manifest: ExperimentManifest,
+  placingKind: PrimitiveKind | null,
+  selectedPrimitive: PrimitiveInstance | undefined,
+  activeJobHint: string | undefined,
+  machineActivity: MachineActivity,
+): BuilderFocus {
+  if (placingKind) {
+    return {
+      title: `Place ${labelForPrimitive(placingKind)}`,
+      description: placementInstructionForKind(placingKind),
+      assistantPrompt: `I am placing a ${labelForPrimitive(placingKind)}. Tell me where it should go and what I should add next.`,
+    };
+  }
+
+  if (manifest.primitives.length === 0) {
+    return {
+      title: 'Build one thing that moves in under 30 seconds',
+      description: 'Start with a motor, then drop a gear or wheel inside its green ring so the canvas gives you immediate feedback.',
+      assistantPrompt: 'Build a simple motor and gear demo I can remix by hand.',
+    };
+  }
+
+  if (activeJobHint) {
+    return {
+      title: 'Follow the active job',
+      description: activeJobHint,
+      assistantPrompt: 'Help me complete the next step of this job with the parts already on the canvas.',
+    };
+  }
+
+  if (selectedPrimitive) {
+    return {
+      title: `Tune ${selectedPrimitive.label ?? labelForPrimitive(selectedPrimitive.kind)}`,
+      description: selectedInstructionForKind(selectedPrimitive.kind),
+      assistantPrompt: `Explain how a ${labelForPrimitive(selectedPrimitive.kind)} should behave in this machine and what I should connect to it next.`,
+    };
+  }
+
+  if (machineActivity.active) {
+    return {
+      title: 'The machine is alive',
+      description: 'Now tune it, extend it, or save it while the current idea is still working.',
+      assistantPrompt: 'Explain why this machine works and suggest the most useful next improvement.',
+    };
+  }
+
+  return {
+    title: 'Pick the next useful part',
+    description: 'Use the recommended drawer on the right. It now responds to what is already on the canvas.',
+    assistantPrompt: 'Look at my current machine and tell me the next part that will make it do something visible.',
+  };
+}
+
+function deriveBuildSteps(
+  manifest: ExperimentManifest,
+  placingKind: PrimitiveKind | null,
+  machineIsActive: boolean,
+): BuilderStep[] {
+  const hasParts = manifest.primitives.length > 0;
+
+  return [
+    {
+      label: 'Pick a part',
+      state: placingKind || hasParts ? 'done' : 'active',
+    },
+    {
+      label: 'Place it on the canvas',
+      state: hasParts ? 'done' : placingKind ? 'active' : 'upcoming',
+    },
+    {
+      label: 'Test and tune',
+      state: machineIsActive ? 'done' : hasParts && !placingKind ? 'active' : 'upcoming',
+    },
+  ];
+}
+
+function describePlacedPrimitive(
+  manifest: ExperimentManifest,
+  kind: PrimitiveKind,
+  x: number,
+  y: number,
+): { message: string; tone: NoticeTone } {
+  switch (kind) {
+    case 'motor':
+      return {
+        message: 'Motor placed. Drop a gear or wheel inside its green ring to make something move.',
+        tone: 'success',
+      };
+    case 'gear':
+      return isDrivenPlacement(manifest, kind, x, y)
+        ? {
+            message: 'Gear placed where it can spin right away. Add another touching gear if you want visible meshing.',
+            tone: 'success',
+          }
+        : {
+            message: 'Gear placed. It still needs a nearby motor or another gear to do anything visible.',
+            tone: 'warning',
+          };
+    case 'wheel':
+      return isDrivenPlacement(manifest, kind, x, y)
+        ? {
+            message: 'Wheel placed where it can pick up motion right away.',
+            tone: 'success',
+          }
+        : {
+            message: 'Wheel placed. Move it inside a motor ring or against a gear if nothing happens.',
+            tone: 'warning',
+          };
+    case 'conveyor':
+      return hasNearbyMotor(manifest, x, y)
+        ? {
+            message: 'Conveyor placed near a motor. Add cargo and a hopper to see throughput.',
+            tone: 'success',
+          }
+        : {
+            message: 'Conveyor placed. Add cargo and a hopper next, or park a motor nearby for speed.',
+            tone: 'info',
+          };
+    case 'hopper':
+      return hasPart(manifest, 'conveyor')
+        ? {
+            message: 'Hopper placed. Put it at the conveyor end, then add cargo to watch it fill.',
+            tone: 'success',
+          }
+        : {
+            message: 'Hopper placed. It will make more sense once a conveyor is feeding it.',
+            tone: 'warning',
+          };
+    case 'cargo-block':
+      return hasPart(manifest, 'conveyor')
+        ? {
+            message: 'Cargo placed. Drop it onto the conveyor to see it travel.',
+            tone: 'success',
+          }
+        : {
+            message: 'Cargo placed. Add a conveyor or hopper if you want it to do more than sit still.',
+            tone: 'warning',
+          };
+    case 'winch':
+      return hasPart(manifest, 'hook')
+        ? {
+            message: 'Winch placed. Use Quick Connect to attach it to the hook.',
+            tone: 'success',
+          }
+        : {
+            message: 'Winch placed. Add a hook below it, then use Quick Connect.',
+            tone: 'info',
+          };
+    case 'hook':
+      return hasPart(manifest, 'winch')
+        ? {
+            message: 'Hook placed. Use Quick Connect to hang it from the winch.',
+            tone: 'success',
+          }
+        : {
+            message: 'Hook placed. Add a winch above it if you want it to hoist.',
+            tone: 'warning',
+          };
+    case 'node':
+      return hasPart(manifest, 'node')
+        ? {
+            message: 'Node placed. Quick Connect can turn it into a beam with another node.',
+            tone: 'success',
+          }
+        : {
+            message: 'Node placed. Add a second node if you want a beam between them.',
+            tone: 'info',
+          };
+    case 'rail-segment':
+      return {
+        message: 'Rail placed. Add a locomotive, then set its trackId in the Inspector so it matches this rail.',
+        tone: 'info',
+      };
+    case 'locomotive':
+    case 'wagon':
+      return hasPart(manifest, 'rail-segment')
+        ? {
+            message: `${labelForPrimitive(kind)} placed. Set its trackId in the Inspector so it points at a real rail segment.`,
+            tone: 'warning',
+          }
+        : {
+            message: `${labelForPrimitive(kind)} placed. Add rail first, then set its trackId in the Inspector.`,
+            tone: 'warning',
+          };
+    default:
+      return {
+        message: `${labelForPrimitive(kind)} placed. Drag it to reposition or use the Inspector for safe edits.`,
+        tone: 'info',
+      };
+  }
+}
+
+function placementInstructionForKind(kind: PrimitiveKind) {
+  switch (kind) {
+    case 'gear':
+      return 'Drop it inside a motor ring or touching another gear if you want instant feedback.';
+    case 'wheel':
+      return 'Wheels respond best inside a motor ring or pressed against a powered gear.';
+    case 'conveyor':
+      return 'Conveyors come alive once cargo, a hopper, and a nearby motor join the setup.';
+    case 'rail-segment':
+      return 'Rails are the track. Locomotives still need their trackId set in the Inspector afterward.';
+    case 'hook':
+      return 'Hooks are most useful when they sit below a winch so Quick Connect can rope them together.';
+    default:
+      return 'Place it on the canvas, then test what it changed right away.';
+  }
+}
+
+function selectedInstructionForKind(kind: PrimitiveKind) {
+  switch (kind) {
+    case 'motor':
+      return 'Motors only feel satisfying when a gear, wheel, or conveyor can actually pick up their power.';
+    case 'gear':
+      return 'Gears need either motor reach or contact with another gear. Bigger gears trade speed for force.';
+    case 'wheel':
+      return 'Wheels can be powered directly by a motor or indirectly by a gear mesh.';
+    case 'conveyor':
+      return 'Conveyors are best tested with cargo on top and a hopper waiting at the far end.';
+    case 'rail-segment':
+      return 'Rails define the path, but locomotives and wagons still need the right trackId to follow them.';
+    case 'locomotive':
+    case 'wagon':
+      return 'Use the Inspector to point this train part at a real rail segment. Otherwise it has nowhere to go.';
+    default:
+      return 'Drag it to reposition it, or change its safe numeric fields in the Inspector.';
+  }
+}
+
+function hasPart(manifest: ExperimentManifest, kind: PrimitiveKind) {
+  return manifest.primitives.some((primitive) => primitive.kind === kind);
+}
+
+function hasNearbyMotor(manifest: ExperimentManifest, x: number, y: number) {
+  return manifest.primitives.some((primitive) => {
+    if (primitive.kind !== 'motor') {
+      return false;
+    }
+
+    const config = primitive.config as { x: number; y: number };
+    return Math.hypot(config.x - x, config.y - y) < 300;
+  });
+}
+
+function isDrivenPlacement(
+  manifest: ExperimentManifest,
+  kind: PrimitiveKind,
+  x: number,
+  y: number,
+) {
+  const nearMotor = manifest.primitives.some((primitive) => {
+    if (primitive.kind !== 'motor') {
+      return false;
+    }
+
+    const config = primitive.config as { x: number; y: number };
+    return Math.hypot(config.x - x, config.y - y) < 220;
+  });
+
+  if (nearMotor) {
+    return true;
+  }
+
+  return manifest.primitives.some((primitive) => {
+    if (primitive.kind !== 'gear' && primitive.kind !== 'wheel') {
+      return false;
+    }
+
+    const config = primitive.config as { x: number; y: number; teeth?: number; radius?: number };
+    const radius = primitive.kind === 'gear'
+      ? Math.max(24, Number(config.teeth ?? 24) * 1.4)
+      : Number(config.radius ?? 28);
+    const nextRadius = kind === 'gear' ? Math.max(24, 20 * 1.4) : 28;
+    return Math.hypot(config.x - x, config.y - y) <= radius + nextRadius + 20;
+  });
+}
+
+function labelForPrimitive(kind: PrimitiveKind) {
+  switch (kind) {
+    case 'rail-segment':
+      return 'Rail';
+    case 'rail-switch':
+      return 'Switch';
+    case 'cargo-block':
+      return 'Cargo';
+    case 'material-pile':
+      return 'Material Pile';
+    default:
+      return kind
+        .split('-')
+        .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+        .join(' ');
+  }
 }

@@ -28,6 +28,32 @@ export function movePrimitive(manifest: ExperimentManifest, primitiveId: string,
       if ('x' in primitive.config && 'y' in primitive.config) {
         return { ...primitive, config: { ...primitive.config, x, y } as PrimitiveConfig };
       }
+      if ('path' in primitive.config) {
+        const path = (primitive.config as { path: Array<{ x: number; y: number }> }).path;
+        const anchor = averagePoint(path);
+        const deltaX = x - anchor.x;
+        const deltaY = y - anchor.y;
+        return {
+          ...primitive,
+          config: {
+            ...primitive.config,
+            path: path.map((point) => ({ x: point.x + deltaX, y: point.y + deltaY })),
+          } as PrimitiveConfig,
+        };
+      }
+      if ('points' in primitive.config) {
+        const points = (primitive.config as { points: Array<{ x: number; y: number }> }).points;
+        const anchor = averagePoint(points);
+        const deltaX = x - anchor.x;
+        const deltaY = y - anchor.y;
+        return {
+          ...primitive,
+          config: {
+            ...primitive.config,
+            points: points.map((point) => ({ x: point.x + deltaX, y: point.y + deltaY })),
+          } as PrimitiveConfig,
+        };
+      }
       return primitive;
     }),
   };
@@ -149,4 +175,20 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
     default:
       return { id: `node-${nanoid(6)}`, kind: 'node', label: 'Node', config: { x, y } };
   }
+}
+
+function averagePoint(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) {
+    return { x: 0, y: 0 };
+  }
+
+  const total = points.reduce(
+    (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
+    { x: 0, y: 0 },
+  );
+
+  return {
+    x: total.x / points.length,
+    y: total.y / points.length,
+  };
 }

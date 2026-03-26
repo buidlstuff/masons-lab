@@ -47,22 +47,35 @@ export function MachineCanvas({
   const onTelemetryRef = useRef(onTelemetry);
   const onConnectionFlashRef = useRef(onConnectionFlash);
   const draggingIdRef = useRef<string | undefined>(undefined);
+  const hoveredIdRef = useRef<string | undefined>(undefined);
+  const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // Flash state: partId → timestamp when connection was first detected
   const flashTimesRef = useRef<Record<string, number>>({});
   // Previous motorDrives snapshot for change detection
   const prevDrivesRef = useRef<Record<string, string[]>>({});
 
-  // Sync all refs every render (cheap, no extra effect)
-  manifestRef.current = manifest;
-  runtimeRef.current = runtime;
-  selectedRef.current = selectedPrimitiveId;
-  placingRef.current = placingKind;
-  onPlaceRef.current = onPlacePrimitive;
-  onSelectRef.current = onSelectPrimitive;
-  onMoveRef.current = onMovePrimitive;
-  onTelemetryRef.current = onTelemetry;
-  onConnectionFlashRef.current = onConnectionFlash;
+  useEffect(() => {
+    manifestRef.current = manifest;
+    runtimeRef.current = runtime;
+    selectedRef.current = selectedPrimitiveId;
+    placingRef.current = placingKind;
+    onPlaceRef.current = onPlacePrimitive;
+    onSelectRef.current = onSelectPrimitive;
+    onMoveRef.current = onMovePrimitive;
+    onTelemetryRef.current = onTelemetry;
+    onConnectionFlashRef.current = onConnectionFlash;
+  }, [
+    manifest,
+    onConnectionFlash,
+    onMovePrimitive,
+    onPlacePrimitive,
+    onSelectPrimitive,
+    onTelemetry,
+    placingKind,
+    runtime,
+    selectedPrimitiveId,
+  ]);
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -95,10 +108,27 @@ export function MachineCanvas({
           manifestRef.current,
           runtimeRef.current,
           selectedRef.current,
+          hoveredIdRef.current,
+          draggingIdRef.current,
           placingRef.current,
           flashTimesRef.current,
         );
         onTelemetryRef.current(runtimeRef.current.telemetry);
+
+        const hoveredPrimitive = hoveredIdRef.current
+          ? manifestRef.current.primitives.find((primitive) => primitive.id === hoveredIdRef.current)
+          : undefined;
+        if (placingRef.current) {
+          instance.cursor('crosshair');
+        } else if (draggingIdRef.current) {
+          instance.cursor('grabbing');
+        } else if (hoveredPrimitive && isDraggablePrimitive(hoveredPrimitive)) {
+          instance.cursor('grab');
+        } else if (hoveredPrimitive) {
+          instance.cursor('pointer');
+        } else {
+          instance.cursor('default');
+        }
       };
 
       instance.mousePressed = () => {
@@ -115,19 +145,36 @@ export function MachineCanvas({
           manifestRef.current.primitives,
           x,
           y,
-          runtimeRef.current.bodyPositions,
+          runtimeRef.current,
         );
-        draggingIdRef.current = hit?.id;
+        const anchor = hit ? getPrimitiveAnchor(hit, manifestRef.current.primitives, runtimeRef.current) : undefined;
+        dragOffsetRef.current = anchor
+          ? { x: anchor.x - x, y: anchor.y - y }
+          : { x: 0, y: 0 };
+        draggingIdRef.current = hit && isDraggablePrimitive(hit) ? hit.id : undefined;
         onSelectRef.current(hit?.id);
       };
 
       instance.mouseDragged = () => {
         if (!draggingIdRef.current) return;
-        onMoveRef.current(draggingIdRef.current, instance.mouseX, instance.mouseY);
+        onMoveRef.current(
+          draggingIdRef.current,
+          instance.mouseX + dragOffsetRef.current.x,
+          instance.mouseY + dragOffsetRef.current.y,
+        );
       };
 
       instance.mouseReleased = () => {
         draggingIdRef.current = undefined;
+      };
+
+      instance.mouseMoved = () => {
+        hoveredIdRef.current = hitTest(
+          manifestRef.current.primitives,
+          instance.mouseX,
+          instance.mouseY,
+          runtimeRef.current,
+        )?.id;
       };
     }, hostRef.current);
 
@@ -159,7 +206,12 @@ export function MachineCanvas({
   return (
     <div className="machine-canvas-shell">
       <div className="machine-canvas-toolbar">
-        <span>{status}</span>
+        <div className="canvas-toolbar-main">
+          <span>{status}</span>
+          <span className={`canvas-mode-pill ${placingKind ? 'placing' : selectedPrimitiveId ? 'selected' : 'idle'}`}>
+            {placingKind ? `Place ${labelFor(placingKind)}` : selectedPrimitiveId ? 'Selected part' : 'Select and drag'}
+          </span>
+        </div>
         <span className="canvas-hint">{hint}</span>
       </div>
       {activeJobHint && (
@@ -180,6 +232,8 @@ function drawScene(
   manifest: ExperimentManifest,
   runtime: RuntimeSnapshot,
   selectedPrimitiveId: string | undefined,
+  hoveredPrimitiveId: string | undefined,
+  draggingPrimitiveId: string | undefined,
   placingKind: PrimitiveKind | null | undefined,
   flashTimes: Record<string, number>,
 ) {
@@ -188,22 +242,37 @@ function drawScene(
   drawRecipeDecor(instance, manifest.metadata.recipeId ?? '');
 
   if (!manifest.metadata.recipeId) {
-    drawConnectionOverlay(instance, manifest, runtime, selectedPrimitiveId, placingKind, instance.mouseX, instance.mouseY);
+    drawConnectionOverlay(instance, manifest, runtime, selectedPrimitiveId, placingKind);
   }
 
   for (const primitive of manifest.primitives) {
     const selected = primitive.id === selectedPrimitiveId;
-    drawPrimitive(instance, primitive, runtime, selected, manifest.primitives, flashTimes);
+    const hovered = primitive.id === hoveredPrimitiveId && primitive.id !== draggingPrimitiveId;
+    drawPrimitive(instance, primitive, runtime, selected, hovered, manifest.primitives, flashTimes);
   }
 
-  // Gear/wheel placement preview
-  if ((placingKind === 'gear' || placingKind === 'wheel') &&
-      instance.mouseX >= 0 && instance.mouseX <= instance.width &&
-      instance.mouseY >= 0 && instance.mouseY <= instance.height) {
+  if (
+    placingKind &&
+    instance.mouseX >= 0 &&
+    instance.mouseX <= instance.width &&
+    instance.mouseY >= 0 &&
+    instance.mouseY <= instance.height
+  ) {
     drawPlacingPreview(instance, manifest, placingKind, instance.mouseX, instance.mouseY);
   }
 
   drawGoalZones(instance, manifest.metadata.recipeId ?? '', runtime);
+  drawInteractionOverlay(
+    instance,
+    manifest,
+    runtime,
+    selectedPrimitiveId,
+    hoveredPrimitiveId,
+    draggingPrimitiveId,
+    placingKind,
+    instance.mouseX,
+    instance.mouseY,
+  );
 }
 
 // ─── Connection overlay ───────────────────────────────────────────────────────
@@ -214,8 +283,6 @@ function drawConnectionOverlay(
   runtime: RuntimeSnapshot,
   selectedPrimitiveId: string | undefined,
   placingKind: PrimitiveKind | null | undefined,
-  _mouseX: number,
-  _mouseY: number,
 ) {
   instance.push();
   const ctx = instance.drawingContext as CanvasRenderingContext2D;
@@ -372,41 +439,265 @@ function drawPlacingPreview(
   mx: number,
   my: number,
 ) {
-  instance.push();
-  instance.noFill();
+  const assessment = getPlacementAssessment(manifest, placingKind, mx, my);
+  const tone = toneColor(assessment.tone);
 
-  if (placingKind === 'gear') {
-    const radius = teethToRadius(20); // default teeth
-    // Check if inside any motor range
-    const inRange = manifest.primitives.some((p) => {
-      if (p.kind !== 'motor') return false;
-      const cfg = p.config as { x: number; y: number };
-      return Math.hypot(cfg.x - mx, cfg.y - my) < MOTOR_RANGE;
-    });
-    instance.stroke(inRange ? 71 : 148, inRange ? 197 : 163, inRange ? 165 : 163, inRange ? 180 : 100);
-    instance.strokeWeight(inRange ? 2 : 1.5);
-    instance.circle(mx, my, radius * 2);
-    // Tooth stubs
-    for (let i = 0; i < 20; i++) {
-      const a = (Math.PI * 2 * i) / 20;
-      instance.line(Math.cos(a) * radius + mx, Math.sin(a) * radius + my,
-                    Math.cos(a) * (radius + 7) + mx, Math.sin(a) * (radius + 7) + my);
+  instance.push();
+  instance.stroke(tone.stroke[0], tone.stroke[1], tone.stroke[2], 210);
+  instance.fill(tone.fill[0], tone.fill[1], tone.fill[2], 38);
+  instance.strokeWeight(2);
+
+  switch (placingKind) {
+    case 'gear': {
+      const radius = teethToRadius(20);
+      instance.circle(mx, my, radius * 2);
+      for (let i = 0; i < 20; i += 1) {
+        const angle = (Math.PI * 2 * i) / 20;
+        instance.line(
+          Math.cos(angle) * radius + mx,
+          Math.sin(angle) * radius + my,
+          Math.cos(angle) * (radius + 7) + mx,
+          Math.sin(angle) * (radius + 7) + my,
+        );
+      }
+      break;
     }
-  } else if (placingKind === 'wheel') {
-    const radius = 28;
-    const inRange = manifest.primitives.some((p) => {
-      if (p.kind !== 'motor') return false;
-      const cfg = p.config as { x: number; y: number };
-      return Math.hypot(cfg.x - mx, cfg.y - my) < MOTOR_RANGE;
-    });
-    instance.stroke(inRange ? 96 : 148, inRange ? 165 : 163, inRange ? 234 : 163, inRange ? 180 : 100);
-    instance.strokeWeight(inRange ? 2 : 1.5);
-    instance.circle(mx, my, radius * 2);
-    instance.line(mx - radius, my, mx + radius, my);
-    instance.line(mx, my - radius, mx, my + radius);
+    case 'wheel': {
+      const radius = 28;
+      instance.circle(mx, my, radius * 2);
+      instance.line(mx - radius, my, mx + radius, my);
+      instance.line(mx, my - radius, mx, my + radius);
+      break;
+    }
+    case 'motor':
+      instance.rect(mx - 28, my - 18, 56, 36, 10);
+      instance.noFill();
+      instance.circle(mx, my, MOTOR_RANGE * 2);
+      break;
+    case 'conveyor':
+      instance.strokeWeight(8);
+      instance.line(mx - 80, my, mx + 80, my);
+      break;
+    case 'hopper':
+      instance.quad(mx - 40, my - 10, mx + 40, my - 10, mx + 24, my + 60, mx - 24, my + 60);
+      break;
+    case 'rail-segment':
+      instance.strokeWeight(4);
+      instance.line(mx - 80, my, mx + 80, my);
+      for (let offset = -72; offset <= 72; offset += 24) {
+        instance.line(mx + offset, my - 8, mx + offset, my + 8);
+      }
+      break;
+    case 'winch':
+      instance.rect(mx - 20, my - 20, 40, 40, 8);
+      instance.circle(mx, my, 16);
+      break;
+    case 'hook':
+      instance.line(mx, my - 24, mx, my);
+      instance.arc(mx, my + 10, 24, 28, 0, Math.PI);
+      break;
+    case 'node':
+      instance.circle(mx, my, 16);
+      break;
+    case 'cargo-block':
+      instance.rect(mx - 12, my - 12, 24, 24, 4);
+      break;
+    case 'locomotive':
+      instance.rect(mx - 22, my - 18, 44, 24, 6);
+      break;
+    case 'wagon':
+      instance.rect(mx - 18, my - 16, 36, 20, 6);
+      break;
+    default:
+      instance.circle(mx, my, 18);
   }
 
   instance.pop();
+  drawPreviewCard(instance, mx, my, assessment.title, assessment.detail, assessment.tone);
+}
+
+function drawInteractionOverlay(
+  instance: p5,
+  manifest: ExperimentManifest,
+  runtime: RuntimeSnapshot,
+  selectedPrimitiveId: string | undefined,
+  hoveredPrimitiveId: string | undefined,
+  draggingPrimitiveId: string | undefined,
+  placingKind: PrimitiveKind | null | undefined,
+  mouseX: number,
+  mouseY: number,
+) {
+  const modeText = placingKind
+    ? `Place ${labelFor(placingKind)}`
+    : draggingPrimitiveId
+      ? 'Dragging part'
+      : selectedPrimitiveId
+        ? 'Part selected'
+        : 'Select mode';
+  drawModeChip(instance, 16, 16, modeText, placingKind ? 'good' : selectedPrimitiveId ? 'info' : 'warn');
+
+  if (placingKind && mouseX >= 0 && mouseX <= instance.width && mouseY >= 0 && mouseY <= instance.height) {
+    return;
+  }
+
+  const hoveredPrimitive = hoveredPrimitiveId
+    ? manifest.primitives.find((primitive) => primitive.id === hoveredPrimitiveId)
+    : undefined;
+
+  if (!hoveredPrimitive || draggingPrimitiveId) {
+    return;
+  }
+
+  const hoverDetail = isDraggablePrimitive(hoveredPrimitive)
+    ? 'Click to select. Drag to reposition.'
+    : 'Click to inspect. Use the Inspector for tuning.';
+  const anchor = getPrimitiveAnchor(hoveredPrimitive, manifest.primitives, runtime);
+  drawPreviewCard(
+    instance,
+    anchor.x,
+    anchor.y,
+    labelFor(hoveredPrimitive.kind),
+    hoverDetail,
+    hoveredPrimitive.id === selectedPrimitiveId ? 'good' : 'info',
+  );
+}
+
+function drawModeChip(
+  instance: p5,
+  x: number,
+  y: number,
+  text: string,
+  tone: 'good' | 'info' | 'warn',
+) {
+  const color = toneColor(tone);
+  instance.push();
+  instance.textSize(12);
+  const width = instance.textWidth(text) + 24;
+  instance.noStroke();
+  instance.fill(color.fill[0], color.fill[1], color.fill[2], 180);
+  instance.rect(x, y, width, 28, 999);
+  instance.fill(241, 245, 249, 240);
+  instance.textAlign(instance.LEFT, instance.CENTER);
+  instance.text(text, x + 12, y + 15);
+  instance.pop();
+}
+
+function drawPreviewCard(
+  instance: p5,
+  anchorX: number,
+  anchorY: number,
+  title: string,
+  detail: string,
+  tone: 'good' | 'info' | 'warn',
+) {
+  const color = toneColor(tone);
+  const width = 250;
+  const height = 62;
+  const x = Math.min(instance.width - width - 16, Math.max(16, anchorX + 18));
+  const y = Math.min(instance.height - height - 16, Math.max(52, anchorY - height - 10));
+
+  instance.push();
+  instance.noStroke();
+  instance.fill(6, 14, 20, 228);
+  instance.rect(x, y, width, height, 14);
+  instance.fill(color.fill[0], color.fill[1], color.fill[2], 255);
+  instance.rect(x, y, 6, height, 14, 0, 0, 14);
+  instance.fill(241, 245, 249, 255);
+  instance.textAlign(instance.LEFT, instance.TOP);
+  instance.textSize(12);
+  instance.text(title, x + 16, y + 12);
+  instance.fill(148, 163, 184, 255);
+  instance.textSize(10);
+  instance.text(detail, x + 16, y + 30, width - 28);
+  instance.pop();
+}
+
+function getPlacementAssessment(
+  manifest: ExperimentManifest,
+  placingKind: PrimitiveKind,
+  x: number,
+  y: number,
+): { tone: 'good' | 'info' | 'warn'; title: string; detail: string } {
+  switch (placingKind) {
+    case 'gear':
+      return canWakeRotatingPart(manifest, placingKind, x, y)
+        ? {
+            tone: 'good',
+            title: 'Good placement',
+            detail: 'This gear is close enough to power or mesh right away.',
+          }
+        : {
+            tone: 'warn',
+            title: 'Likely idle here',
+            detail: 'Move it inside a motor ring or touching another gear if you want motion.',
+          };
+    case 'wheel':
+      return canWakeRotatingPart(manifest, placingKind, x, y)
+        ? {
+            tone: 'good',
+            title: 'Good placement',
+            detail: 'This wheel should be able to pick up visible motion.',
+          }
+        : {
+            tone: 'warn',
+            title: 'Needs a driver',
+            detail: 'Wheels need a motor ring or a gear contact to feel alive.',
+          };
+    case 'conveyor':
+      return hasNearbyMotor(manifest, x, y)
+        ? {
+            tone: 'good',
+            title: 'Ready for throughput',
+            detail: 'This conveyor is already near power. Add cargo and a hopper next.',
+          }
+        : {
+            tone: 'info',
+            title: 'Good base',
+            detail: 'Still fine to place here. Add cargo, a hopper, and maybe a motor nearby.',
+          };
+    case 'hook':
+      return hasKind(manifest, 'winch')
+        ? {
+            tone: 'good',
+            title: 'Ready to hoist',
+            detail: 'Use Quick Connect once the hook is where you want it.',
+          }
+        : {
+            tone: 'warn',
+            title: 'No winch yet',
+            detail: 'This hook will need a winch before it can do much.',
+          };
+    case 'locomotive':
+    case 'wagon':
+      return hasKind(manifest, 'rail-segment')
+        ? {
+            tone: 'warn',
+            title: 'Track needs one more step',
+            detail: 'After placing, set trackId in the Inspector so it matches a real rail segment.',
+          }
+        : {
+            tone: 'warn',
+            title: 'No rail yet',
+            detail: 'Place rail first. Then set trackId in the Inspector so this can move.',
+          };
+    default:
+      return {
+        tone: 'info',
+        title: `Place ${labelFor(placingKind)}`,
+        detail: 'Drop it, then test the reaction right away.',
+      };
+  }
+}
+
+function toneColor(tone: 'good' | 'info' | 'warn') {
+  switch (tone) {
+    case 'good':
+      return { stroke: [71, 197, 165] as const, fill: [16, 76, 63] as const };
+    case 'warn':
+      return { stroke: [251, 191, 36] as const, fill: [87, 55, 12] as const };
+    default:
+      return { stroke: [96, 165, 250] as const, fill: [24, 50, 84] as const };
+  }
 }
 
 // ─── Grid ─────────────────────────────────────────────────────────────────────
@@ -452,11 +743,12 @@ function drawPrimitive(
   primitive: PrimitiveInstance,
   runtime: RuntimeSnapshot,
   selected: boolean,
+  hovered: boolean,
   primitives: PrimitiveInstance[],
   flashTimes: Record<string, number>,
 ) {
-  const highlight = selected ? '#f8fafc' : '#1d4f5f';
-  const accent = selected ? '#fbbf24' : '#5eead4';
+  const highlight = selected ? '#f8fafc' : hovered ? '#8ee4d2' : '#1d4f5f';
+  const accent = selected ? '#fbbf24' : hovered ? '#8ee4d2' : '#5eead4';
 
   // Connection flash ring (expanding circle when part first gets driven)
   const flashStart = flashTimes[primitive.id];
@@ -820,25 +1112,170 @@ function hitTest(
   primitives: PrimitiveInstance[],
   x: number,
   y: number,
-  bodyPositions?: Record<string, { x: number; y: number; angle: number }>,
+  runtime: RuntimeSnapshot,
 ) {
   return [...primitives].reverse().find((primitive) => {
     switch (primitive.kind) {
       case 'beam':
-      case 'rail-segment':
-      case 'conveyor':
       case 'rope':
-      case 'locomotive':
-      case 'wagon':
         return false;
+      case 'rail-segment': {
+        const points = (primitive.config as { points: Array<{ x: number; y: number }> }).points;
+        return distanceToPolyline(points, x, y) < 18;
+      }
+      case 'conveyor': {
+        const path = (primitive.config as { path: Array<{ x: number; y: number }> }).path;
+        return distanceToPolyline(path, x, y) < 18;
+      }
+      case 'locomotive': {
+        const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
+        const point = getTrackPoint(track, runtime.trainProgress);
+        return Math.abs(point.x - x) < 26 && Math.abs(point.y - y) < 22;
+      }
+      case 'wagon': {
+        const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
+        const offset = (primitive.config as { offset: number }).offset;
+        const point = getTrackPoint(track, Math.max(0, runtime.trainProgress + offset));
+        return Math.abs(point.x - x) < 22 && Math.abs(point.y - y) < 20;
+      }
       default: {
-        const phys = bodyPositions?.[primitive.id];
+        const phys = runtime.bodyPositions?.[primitive.id];
         const px = phys ? phys.x : ('x' in primitive.config ? (primitive.config as { x: number }).x : null);
         const py = phys ? phys.y : ('y' in primitive.config ? (primitive.config as { y: number }).y : null);
         if (px === null || py === null) return false;
         return Math.hypot(px - x, py - y) < 28;
       }
     }
+  });
+}
+
+function getPrimitiveAnchor(
+  primitive: PrimitiveInstance,
+  primitives: PrimitiveInstance[],
+  runtime: RuntimeSnapshot,
+) {
+  if ('x' in primitive.config && 'y' in primitive.config) {
+    return getLivePos(primitive, runtime);
+  }
+  if ('path' in primitive.config) {
+    const path = (primitive.config as { path: Array<{ x: number; y: number }> }).path;
+    return averagePoint(path);
+  }
+  if ('points' in primitive.config) {
+    const points = (primitive.config as { points: Array<{ x: number; y: number }> }).points;
+    return averagePoint(points);
+  }
+  if (primitive.kind === 'locomotive') {
+    const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
+    return getTrackPoint(track, runtime.trainProgress);
+  }
+  if (primitive.kind === 'wagon') {
+    const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
+    const offset = (primitive.config as { offset: number }).offset;
+    return getTrackPoint(track, Math.max(0, runtime.trainProgress + offset));
+  }
+  return { x: 0, y: 0 };
+}
+
+function isDraggablePrimitive(primitive: PrimitiveInstance) {
+  return 'x' in primitive.config && 'y' in primitive.config
+    || 'path' in primitive.config
+    || 'points' in primitive.config;
+}
+
+function distanceToPolyline(points: Array<{ x: number; y: number }>, x: number, y: number) {
+  if (points.length === 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+  if (points.length === 1) {
+    return Math.hypot(points[0].x - x, points[0].y - y);
+  }
+
+  let closest = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    closest = Math.min(closest, distanceToSegment(points[index], points[index + 1], x, y));
+  }
+  return closest;
+}
+
+function distanceToSegment(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  x: number,
+  y: number,
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+
+  if (dx === 0 && dy === 0) {
+    return Math.hypot(x - start.x, y - start.y);
+  }
+
+  const t = Math.max(0, Math.min(1, ((x - start.x) * dx + (y - start.y) * dy) / (dx * dx + dy * dy)));
+  const px = start.x + dx * t;
+  const py = start.y + dy * t;
+  return Math.hypot(px - x, py - y);
+}
+
+function averagePoint(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) {
+    return { x: 0, y: 0 };
+  }
+
+  const total = points.reduce(
+    (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
+    { x: 0, y: 0 },
+  );
+
+  return {
+    x: total.x / points.length,
+    y: total.y / points.length,
+  };
+}
+
+function hasKind(manifest: ExperimentManifest, kind: PrimitiveKind) {
+  return manifest.primitives.some((primitive) => primitive.kind === kind);
+}
+
+function hasNearbyMotor(manifest: ExperimentManifest, x: number, y: number) {
+  return manifest.primitives.some((primitive) => {
+    if (primitive.kind !== 'motor') {
+      return false;
+    }
+    const config = primitive.config as { x: number; y: number };
+    return Math.hypot(config.x - x, config.y - y) < CONVEYOR_MOTOR_RANGE;
+  });
+}
+
+function canWakeRotatingPart(
+  manifest: ExperimentManifest,
+  placingKind: PrimitiveKind,
+  x: number,
+  y: number,
+) {
+  const nearMotor = manifest.primitives.some((primitive) => {
+    if (primitive.kind !== 'motor') {
+      return false;
+    }
+    const config = primitive.config as { x: number; y: number };
+    return Math.hypot(config.x - x, config.y - y) < MOTOR_RANGE;
+  });
+
+  if (nearMotor) {
+    return true;
+  }
+
+  return manifest.primitives.some((primitive) => {
+    if (primitive.kind !== 'gear' && primitive.kind !== 'wheel') {
+      return false;
+    }
+
+    const anchor = primitive.config as { x: number; y: number; teeth?: number; radius?: number };
+    const radius = primitive.kind === 'gear'
+      ? teethToRadius(Number(anchor.teeth ?? 24))
+      : (anchor.radius ?? 28);
+    const nextRadius = placingKind === 'gear' ? teethToRadius(20) : 28;
+    return Math.hypot(anchor.x - x, anchor.y - y) <= radius + nextRadius + 16;
   });
 }
 
