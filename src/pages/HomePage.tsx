@@ -4,12 +4,17 @@ import { BlueprintCard } from '../components/BlueprintCard';
 import { JobCard } from '../components/JobCard';
 import { MachineCard } from '../components/MachineCard';
 import { db } from '../lib/db';
+import { tierForXp, TIER_NAMES } from '../lib/xp';
 
 export function HomePage() {
   const machines = useLiveQuery(() => db.machines.orderBy('updatedAt').reverse().toArray(), []);
   const jobs = useLiveQuery(() => db.jobs.toArray(), []);
   const progress = useLiveQuery(() => db.jobProgress.toArray(), []);
   const blueprints = useLiveQuery(() => db.blueprints.toArray(), []);
+  const xpRecord = useLiveQuery(() => db.settings.get('xp'), []);
+  const xp = xpRecord ? Number(xpRecord.value) : 0;
+  const tier = tierForXp(xp);
+  const tierName = TIER_NAMES[tier];
 
   const featured = machines?.filter((machine) => machine.featured) ?? [];
   const saved = machines?.filter((machine) => !machine.featured) ?? [];
@@ -42,6 +47,18 @@ export function HomePage() {
             <li>{jobs?.length ?? 0} site jobs ({playableJobs.length} playable now)</li>
             <li>Hybrid AI + manual build mode</li>
           </ul>
+          <div className="xp-bar-block">
+            <div className="xp-bar-header">
+              <span className={`tier-badge tier-${tier}`}>Tier {tier} — {tierName}</span>
+              <span className="muted">{xp} XP</span>
+            </div>
+            <div className="xp-bar">
+              <div
+                className="xp-bar-fill"
+                style={{ width: `${Math.min(100, (xp / 1000) * 100)}%` }}
+              />
+            </div>
+          </div>
         </div>
       </section>
 

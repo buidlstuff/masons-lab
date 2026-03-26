@@ -47,6 +47,10 @@ export interface PhysicsFrame {
   gearMeshes: Record<string, string[]>;
   /** loco progress 0-1 along its track (forwarded to RuntimeSnapshot.trainProgress) */
   trainProgress: number;
+  /** true when loco has passed 85% of track */
+  wagonDelivered: boolean;
+  /** gear chain telemetry — null when no gears are being driven */
+  gearTelemetry: { inputRpm: number; outputRpm: number; gearRatio: number } | null;
 }
 
 export interface PhysicsWorld {
@@ -288,7 +292,8 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
   // ── driveMotors ───────────────────────────────────────────────────────────
   // Sets angular velocity on gears and wheels driven by active motors.
   // BFS propagates velocity through the gear/wheel mesh map.
-  function driveMotors() {
+  // Returns the driven map so tick() can compute gear telemetry.
+  function driveMotors(): Map<string, number> {
     const driven = new Map<string, number>(); // id → angularVelocity
 
     for (const motor of manifest.primitives.filter((p) => p.kind === 'motor')) {
@@ -332,6 +337,7 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       const body = bodyMap.get(id);
       if (body) Matter.Body.setAngularVelocity(body, angVel);
     }
+    return driven;
   }
 
   // ── tickConveyors ─────────────────────────────────────────────────────────
@@ -449,7 +455,7 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
     _prevHopperFill: number,
     prevTrainProgress: number,
   ): PhysicsFrame {
-    driveMotors();
+    const drivenVels = driveMotors();
     tickConveyors();
     tickHopper();
 
@@ -530,6 +536,24 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       gearMeshes[id] = meshes.map((m) => m.id);
     }
 
+    // Gear chain telemetry: find driven gears, compute input/output RPM
+    let gearTelemetry: PhysicsFrame['gearTelemetry'] = null;
+    const drivenGears = manifest.primitives.filter(
+      (p) => p.kind === 'gear' && drivenVels.has(p.id),
+    );
+    if (drivenGears.length >= 1) {
+      const vels = drivenGears.map((g) => Math.abs(drivenVels.get(g.id)!));
+      const maxVel = Math.max(...vels);
+      const minVel = Math.min(...vels);
+      const inputRpm = Math.round(maxVel * 30 / Math.PI);
+      const outputRpm = Math.round(minVel * 30 / Math.PI);
+      const gearRatio = minVel > 0.001 ? +(maxVel / minVel).toFixed(2) : 1;
+      gearTelemetry = { inputRpm, outputRpm, gearRatio };
+    }
+
+    // Wagon delivered: loco past 85% of its track
+    const wagonDelivered = Boolean(locoPrim) && locoProgress > 0.85;
+
     return {
       rotations,
       hookY,
@@ -538,6 +562,8 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       motorDrives,
       gearMeshes,
       trainProgress: locoProgress,
+      wagonDelivered,
+      gearTelemetry,
     };
   }
 

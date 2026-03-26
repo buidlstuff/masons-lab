@@ -105,9 +105,17 @@ export function useMachineSimulation(
             ...prev.telemetry,
             hookHeight: frame.hookY !== null ? Math.round(frame.hookY) : prev.telemetry.hookHeight,
             hopperFill: frame.hopperFill !== null ? frame.hopperFill : prev.telemetry.hopperFill,
+            wagonDelivered: frame.wagonDelivered,
             trainSpeed: frame.trainProgress !== prev.trainProgress
               ? Number(((frame.trainProgress - prev.trainProgress) / dt * 10).toFixed(1))
               : prev.telemetry.trainSpeed,
+            ...(frame.gearTelemetry
+              ? {
+                  inputRpm: frame.gearTelemetry.inputRpm,
+                  outputRpm: frame.gearTelemetry.outputRpm,
+                  gearRatio: frame.gearTelemetry.gearRatio,
+                }
+              : {}),
           },
         };
         snapshotRef.current = next;

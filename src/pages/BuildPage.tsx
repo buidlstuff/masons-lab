@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AssistantPanel } from '../components/AssistantPanel';
 import { ControlPanel } from '../components/ControlPanel';
+import { HudOverlay } from '../components/HudOverlay';
 import { InspectorPanel } from '../components/InspectorPanel';
 import { MachineCanvas } from '../components/MachineCanvas';
 import { PartPalette } from '../components/PartPalette';
@@ -10,9 +11,10 @@ import { editExperiment, explainExperiment, generateExperiment } from '../lib/ap
 import { createBlueprintFromExperiment, mountBlueprintToManifest } from '../lib/blueprints';
 import { db } from '../lib/db';
 import { addPrimitive, connectPrimitives, deletePrimitive, movePrimitive, updatePrimitive } from '../lib/editor';
-import { isJobComplete } from '../lib/jobs';
+import { getGoalProgress, isJobComplete } from '../lib/jobs';
 import { createDraftFromBlueprint, createDraftFromMachine, createEmptyDraft } from '../lib/seed-data';
 import { useMachineSimulation } from '../lib/simulation';
+import { awardJobXp, TIER_NAMES } from '../lib/xp';
 import type {
   BuildTelemetry,
   DraftRecord,
@@ -30,6 +32,7 @@ export function BuildPage() {
   const sourceMachineId = searchParams.get('machine');
   const sourceBlueprintId = searchParams.get('blueprint');
   const jobId = searchParams.get('job');
+  const shareParam = searchParams.get('share');
   const draft = useLiveQuery(() => (draftId ? db.drafts.get(draftId) : undefined), [draftId]);
   const machineFromQuery = useLiveQuery(
     () => (sourceMachineId ? db.machines.get(sourceMachineId) : undefined),
@@ -50,6 +53,8 @@ export function BuildPage() {
   const [busy, setBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string>();
   const [saveModal, setSaveModal] = useState<{ title: string; learned: string } | null>(null);
+  const [xpToast, setXpToast] = useState<{ gained: number; newXp: number; tierName?: string } | null>(null);
+  const jobCompletedRef = useRef(false);
 
   useEffect(() => {
     async function bootstrapDraft() {
@@ -68,6 +73,24 @@ export function BuildPage() {
       // draftId in URL and draft still loading — wait (useLiveQuery will re-fire this effect).
       if (draftId) {
         return;
+      }
+
+      // Share param: decode and import manifest directly
+      if (shareParam) {
+        try {
+          const decoded = JSON.parse(decodeURIComponent(atob(shareParam))) as ExperimentManifest;
+          const newDraft = createEmptyDraft();
+          newDraft.manifest = decoded;
+          await db.drafts.put(newDraft);
+          setManifest(decoded);
+          setControlValues(
+            Object.fromEntries(decoded.controls.map((c) => [c.id, c.defaultValue ?? false])),
+          );
+          navigate(`/build/${newDraft.draftId}`, { replace: true });
+          return;
+        } catch {
+          // Bad share param — fall through to empty draft
+        }
       }
 
       // No draftId yet — create one from machine, blueprint, or empty.
@@ -101,7 +124,7 @@ export function BuildPage() {
     }
 
     void bootstrapDraft();
-  }, [blueprintFromQuery, draft, draftId, jobId, machineFromQuery, navigate]);
+  }, [blueprintFromQuery, draft, draftId, jobId, machineFromQuery, navigate, shareParam]);
 
   const runtime = useMachineSimulation(
     manifest ??
@@ -126,16 +149,28 @@ export function BuildPage() {
   );
 
   const jobComplete = isJobComplete(job, telemetry);
+  // Reset once-per-session flag if the job changes
+  useEffect(() => { jobCompletedRef.current = false; }, [jobId]);
 
   useEffect(() => {
-    if (!job || !jobComplete) {
-      return;
-    }
+    if (!job || !jobComplete || jobCompletedRef.current) return;
+    jobCompletedRef.current = true;
+
     void db.jobProgress.put({
       id: job.jobId,
       jobId: job.jobId,
       completed: true,
       lastPlayedAt: new Date().toISOString(),
+    });
+
+    void awardJobXp(job.tier).then(({ newXp, oldTier, newTier }) => {
+      const gained = [0, 100, 200, 400, 800][job.tier] ?? 100;
+      setXpToast({
+        gained,
+        newXp,
+        tierName: newTier > oldTier ? TIER_NAMES[newTier] : undefined,
+      });
+      setTimeout(() => setXpToast(null), 5000);
     });
   }, [job, jobComplete]);
 
@@ -248,6 +283,19 @@ export function BuildPage() {
     await persistDraft(nextManifest);
   }
 
+  function handleShare() {
+    if (!manifest) return;
+    try {
+      const encoded = btoa(encodeURIComponent(JSON.stringify(manifest)));
+      const url = `${window.location.origin}/build?share=${encoded}`;
+      void navigator.clipboard.writeText(url).then(() => {
+        setStatusMessage('Share link copied to clipboard!');
+      });
+    } catch {
+      setStatusMessage('Could not copy link.');
+    }
+  }
+
   if (!manifest) {
     return (
       <div className="page centered-page">
@@ -279,20 +327,40 @@ export function BuildPage() {
           <button type="button" onClick={handleDuplicateDraft}>
             Duplicate
           </button>
+          <button type="button" onClick={handleShare}>
+            Share
+          </button>
           <Link to="/">Back to Yard</Link>
         </div>
       </div>
 
-      {job ? (
-        <section className={`job-banner ${jobComplete ? 'complete' : ''}`}>
-          <div>
-            <p className="eyebrow">Active Job</p>
-            <strong>{job.title}</strong>
-            <p>{job.objective}</p>
-          </div>
-          <div className="badge">{jobComplete ? 'Completed' : 'In Progress'}</div>
-        </section>
-      ) : null}
+      {job ? (() => {
+        const gp = getGoalProgress(job, telemetry);
+        const pct = Math.min(100, gp.target > 0 ? (gp.current / gp.target) * 100 : 0);
+        return (
+          <section className={`job-banner ${jobComplete ? 'complete' : ''}`}>
+            <div className="job-banner-info">
+              <p className="eyebrow">Active Job — Tier {job.tier}</p>
+              <strong>{job.title}</strong>
+              <p>{job.objective}</p>
+            </div>
+            <div className="job-goal-block">
+              <div className="job-goal-label">
+                <span>{gp.label}</span>
+                <span className="job-goal-value">
+                  {gp.met ? '✓ Done' : `${gp.current}${gp.unit ? ` ${gp.unit}` : ''} / ${gp.target}${gp.unit ? ` ${gp.unit}` : ''}`}
+                </span>
+              </div>
+              <div className="job-goal-bar">
+                <div className="job-goal-fill" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+            <div className={`badge ${jobComplete ? 'badge-success' : ''}`}>
+              {jobComplete ? '★ Complete' : 'In Progress'}
+            </div>
+          </section>
+        );
+      })() : null}
 
       {jobComplete && job ? (
         <section className="job-complete-card">
@@ -353,7 +421,8 @@ export function BuildPage() {
           />
         </div>
 
-        <div className="canvas-column">
+        <div className="canvas-column" style={{ position: 'relative' }}>
+          <HudOverlay hud={manifest.hud} telemetry={telemetry} />
           <MachineCanvas
             manifest={manifest}
             runtime={runtime}
@@ -468,6 +537,16 @@ export function BuildPage() {
           </section>
         </div>
       </div>
+
+      {xpToast && (
+        <div className="xp-toast">
+          <span className="xp-toast-gained">+{xpToast.gained} XP</span>
+          <span className="xp-toast-total">{xpToast.newXp} total</span>
+          {xpToast.tierName && (
+            <span className="xp-toast-tier">Tier unlocked: {xpToast.tierName}!</span>
+          )}
+        </div>
+      )}
 
       {saveModal !== null && (
         <div className="modal-backdrop" onClick={() => setSaveModal(null)}>

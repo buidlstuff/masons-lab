@@ -363,6 +363,173 @@ button:disabled {
   color: #60a5fa;
 }
 
+/* ── HUD overlay ────────────────────────────────────────────── */
+.hud-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.hud-widget {
+  position: absolute;
+  background: rgba(7, 14, 22, 0.82);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  backdrop-filter: blur(4px);
+}
+
+.hud-widget.hud-top-left     { top: 52px; left: 12px; }
+.hud-widget.hud-top-right    { top: 52px; right: 12px; }
+.hud-widget.hud-bottom-left  { bottom: 12px; left: 12px; }
+.hud-widget.hud-bottom-right { bottom: 12px; right: 12px; }
+
+.hud-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.hud-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #47c5a5;
+  line-height: 1.2;
+}
+
+.hud-unit {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* ── Goal progress bar in job banner ───────────────────────── */
+.job-banner {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 24px;
+  background: rgba(71,197,165,0.06);
+  border: 1px solid rgba(71,197,165,0.2);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+
+.job-banner.complete {
+  background: rgba(74,222,128,0.08);
+  border-color: rgba(74,222,128,0.35);
+}
+
+.job-banner-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.job-banner-info strong { font-size: 0.95rem; }
+.job-banner-info p { margin: 2px 0 0; font-size: 0.82rem; color: var(--text-muted); }
+
+.job-goal-block {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.job-goal-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  margin-bottom: 5px;
+  color: var(--text-muted);
+}
+
+.job-goal-value { font-weight: 600; color: var(--text-primary); }
+
+.job-goal-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.job-goal-fill {
+  height: 100%;
+  background: #47c5a5;
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+
+.badge-success {
+  background: rgba(74,222,128,0.15);
+  border-color: rgba(74,222,128,0.35);
+  color: #4ade80;
+}
+
+/* ── XP toast ───────────────────────────────────────────────── */
+.xp-toast {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  z-index: 100;
+  background: rgba(7, 14, 22, 0.95);
+  border: 1px solid rgba(71,197,165,0.4);
+  border-radius: 12px;
+  padding: 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: slide-up 0.3s ease, fade-in 0.3s ease;
+  min-width: 180px;
+}
+
+.xp-toast-gained {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: #47c5a5;
+}
+
+.xp-toast-total {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.xp-toast-tier {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #fbbf24;
+  margin-top: 4px;
+}
+
+/* ── XP bar on home page ────────────────────────────────────── */
+.xp-bar-block {
+  margin-top: 14px;
+}
+
+.xp-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 0.8rem;
+}
+
+.xp-bar {
+  height: 6px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.xp-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #47c5a5, #fbbf24);
+  border-radius: 999px;
+  transition: width 0.6s ease;
+}
+
 /* Save modal */
 .modal-backdrop {
   position: fixed;
