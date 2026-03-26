@@ -363,6 +363,243 @@ button:disabled {
   color: #60a5fa;
 }
 
+/* ── Starter overlay ────────────────────────────────────────── */
+.starter-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 14, 22, 0.88);
+  backdrop-filter: blur(6px);
+  pointer-events: none; /* card itself has pointer-events */
+}
+
+.starter-card {
+  pointer-events: auto;
+  background: rgba(13, 24, 36, 0.98);
+  border: 1px solid rgba(71, 197, 165, 0.3);
+  border-radius: 16px;
+  padding: 32px 36px;
+  max-width: 440px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fade-in 0.25s ease, slide-up 0.25s ease;
+}
+
+.starter-card h2 { font-size: 1.35rem; margin: 0; }
+.starter-card .muted { margin: 0; font-size: 0.85rem; }
+
+.starter-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.starter-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.starter-step:hover {
+  background: rgba(71,197,165,0.1);
+  border-color: rgba(71,197,165,0.3);
+}
+
+.starter-step-primary {
+  background: rgba(71,197,165,0.1);
+  border-color: rgba(71,197,165,0.35);
+}
+
+.starter-step-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(71,197,165,0.2);
+  color: #47c5a5;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.starter-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.starter-step-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.starter-step-desc {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.starter-skip {
+  font-size: 0.78rem;
+  text-align: center;
+  margin: 0;
+}
+
+/* ── Beginner palette ───────────────────────────────────────── */
+.palette-mode-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px 10px;
+}
+
+.palette-mode-btn {
+  flex: 1;
+  padding: 5px 0;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.palette-mode-btn.active {
+  background: rgba(71,197,165,0.12);
+  color: #47c5a5;
+  border-color: rgba(71,197,165,0.25);
+}
+
+.palette-beginner-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 12px 8px;
+}
+
+.palette-beginner-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.palette-beginner-item:hover {
+  background: rgba(71,197,165,0.09);
+  border-color: rgba(71,197,165,0.25);
+}
+
+.palette-beginner-item.active {
+  background: rgba(71,197,165,0.16);
+  border-color: rgba(71,197,165,0.45);
+}
+
+.palette-beginner-icon {
+  font-size: 1.1rem;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.palette-beginner-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.palette-beginner-label {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.palette-beginner-tagline {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.palette-beginner-check {
+  font-size: 0.72rem;
+  color: #47c5a5;
+  flex-shrink: 0;
+}
+
+.palette-more-details {
+  margin-top: 4px;
+}
+
+.palette-more-summary {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px 2px;
+  list-style: none;
+  user-select: none;
+}
+
+.palette-more-summary:hover { color: var(--text-primary); }
+.palette-more-summary::marker { display: none; }
+.palette-more-summary::-webkit-details-marker { display: none; }
+
+/* ── Canvas job hint bar ────────────────────────────────────── */
+.canvas-job-hint {
+  background: rgba(251,191,36,0.1);
+  border-bottom: 1px solid rgba(251,191,36,0.2);
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  color: #fbbf24;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.canvas-job-hint-icon {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+/* ── Connection flash toast ─────────────────────────────────── */
+.connection-toast {
+  position: absolute;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  background: rgba(71,197,165,0.95);
+  color: #0a1a14;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 8px 20px;
+  border-radius: 999px;
+  pointer-events: none;
+  animation: fade-in 0.2s ease, slide-up 0.2s ease;
+  white-space: nowrap;
+}
+
 /* ── HUD overlay ────────────────────────────────────────────── */
 .hud-overlay {
   position: absolute;

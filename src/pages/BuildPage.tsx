@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { AssistantPanel } from '../components/AssistantPanel';
 import { ControlPanel } from '../components/ControlPanel';
 import { HudOverlay } from '../components/HudOverlay';
+import { StarterOverlay } from '../components/StarterOverlay';
 import { InspectorPanel } from '../components/InspectorPanel';
 import { MachineCanvas } from '../components/MachineCanvas';
 import { PartPalette } from '../components/PartPalette';
@@ -54,6 +55,8 @@ export function BuildPage() {
   const [statusMessage, setStatusMessage] = useState<string>();
   const [saveModal, setSaveModal] = useState<{ title: string; learned: string } | null>(null);
   const [xpToast, setXpToast] = useState<{ gained: number; newXp: number; tierName?: string } | null>(null);
+  const [flashToast, setFlashToast] = useState(false);
+  const flashCountRef = useRef(0);
   const jobCompletedRef = useRef(false);
 
   useEffect(() => {
@@ -283,6 +286,34 @@ export function BuildPage() {
     await persistDraft(nextManifest);
   }
 
+  // Contextual step hint shown in the canvas toolbar during active jobs
+  function deriveJobHint(): string | undefined {
+    if (!job) return undefined;
+    const prims = manifest?.primitives ?? [];
+    const has = (k: string) => prims.some((p) => p.kind === k);
+    switch (job.goalType) {
+      case 'fill-hopper':
+        if (!has('conveyor')) return 'Step 1: Place a Conveyor on the canvas';
+        if (!has('hopper'))   return 'Step 2: Place a Hopper at the end of the conveyor';
+        if (!has('cargo-block')) return 'Step 3: Place Cargo Blocks on the conveyor';
+        if (!has('motor'))   return 'Step 4: Add a Motor near the conveyor to run it';
+        return 'Machine running — watch the hopper fill up!';
+      case 'gear-down':
+        if (!has('motor')) return 'Step 1: Place a Motor';
+        if (prims.filter((p) => p.kind === 'gear').length < 2)
+          return 'Step 2: Place at least two Gears inside the motor\'s green ring';
+        if ((telemetry.outputRpm ?? 999) > 45)
+          return 'Step 3: Make the output gear bigger to slow it below 45 RPM';
+        return 'Output speed is low enough — you\'ve got it!';
+      case 'deliver-wagon':
+        if (!has('rail-segment')) return 'Step 1: Place a Rail Segment';
+        if (!has('locomotive'))   return 'Step 2: Place a Locomotive and set its trackId in the Inspector';
+        return 'Train is running — let it reach 85% of the track to deliver!';
+      default:
+        return job.hints[0];
+    }
+  }
+
   function handleShare() {
     if (!manifest) return;
     try {
@@ -423,11 +454,19 @@ export function BuildPage() {
 
         <div className="canvas-column" style={{ position: 'relative' }}>
           <HudOverlay hud={manifest.hud} telemetry={telemetry} />
+          <StarterOverlay
+            visible={manifest.primitives.length === 0}
+            onSelectKind={setPlacingKind}
+          />
+          {flashToast && (
+            <div className="connection-toast">⚙ It&apos;s working!</div>
+          )}
           <MachineCanvas
             manifest={manifest}
             runtime={runtime}
             selectedPrimitiveId={selectedPrimitiveId}
             placingKind={placingKind}
+            activeJobHint={deriveJobHint()}
             onPlacePrimitive={(x, y) => {
               void persistDraft(addPrimitive(manifest, placingKind ?? 'node', x, y));
               setPlacingKind(null);
@@ -437,6 +476,12 @@ export function BuildPage() {
               void persistDraft(movePrimitive(manifest, primitiveId, x, y));
             }}
             onTelemetry={setTelemetry}
+            onConnectionFlash={() => {
+              if (flashCountRef.current >= 3) return; // stop after 3 toasts
+              flashCountRef.current += 1;
+              setFlashToast(true);
+              setTimeout(() => setFlashToast(false), 2000);
+            }}
           />
         </div>
 
