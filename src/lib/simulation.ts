@@ -90,13 +90,14 @@ export function useMachineSimulation(
         // ── Physics mode (free build) ──────────────────────────────────────
         Matter.Engine.update(pw.engine, dt * 1000);
         const prev = snapshotRef.current;
-        const frame = pw.tick(dt, prev.rotations, prev.hookY, prev.hopperFill);
+        const frame = pw.tick(dt, prev.rotations, prev.hookY, prev.hopperFill, prev.trainProgress);
         const next: RuntimeSnapshot = {
           ...prev,
           time: prev.time + dt,
           rotations: frame.rotations,
           hookY: frame.hookY !== null ? frame.hookY : prev.hookY,
           hopperFill: frame.hopperFill !== null ? frame.hopperFill : prev.hopperFill,
+          trainProgress: frame.trainProgress,
           bodyPositions: frame.bodyPositions,
           motorDrives: frame.motorDrives,
           gearMeshes: frame.gearMeshes,
@@ -104,6 +105,9 @@ export function useMachineSimulation(
             ...prev.telemetry,
             hookHeight: frame.hookY !== null ? Math.round(frame.hookY) : prev.telemetry.hookHeight,
             hopperFill: frame.hopperFill !== null ? frame.hopperFill : prev.telemetry.hopperFill,
+            trainSpeed: frame.trainProgress !== prev.trainProgress
+              ? Number(((frame.trainProgress - prev.trainProgress) / dt * 10).toFixed(1))
+              : prev.telemetry.trainSpeed,
           },
         };
         snapshotRef.current = next;

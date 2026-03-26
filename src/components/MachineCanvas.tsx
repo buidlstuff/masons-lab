@@ -111,11 +111,15 @@ export function MachineCanvas({
     const sel = manifest.primitives.find((p) => p.id === selectedPrimitiveId);
     if (!sel) return 'Click a part to select · Drag to reposition';
     switch (sel.kind) {
-      case 'motor': return 'Motor selected — place a Gear inside its range ring to drive it';
-      case 'gear': return 'Gear selected — place another Gear touching this one to mesh them';
+      case 'motor': return 'Motor selected — place a Gear or Wheel inside its range ring · place Conveyor endpoint within 300px';
+      case 'gear': return 'Gear selected — place another Gear or Wheel touching this one to mesh them';
+      case 'wheel': return 'Wheel selected — place inside Motor range to spin · touching another Gear/Wheel to mesh';
+      case 'conveyor': return 'Conveyor selected — place Cargo Blocks on it to carry them · Motor within 300px boosts belt speed';
       case 'winch': return 'Winch selected — place a Hook below it, then use Quick Connect → Winch to Hook';
       case 'node': return 'Node selected — place another Node and use Quick Connect → Connect Nodes with Beam';
       case 'hook': return 'Hook selected — use Quick Connect to attach it to a Winch';
+      case 'hopper': return 'Hopper selected — drop Cargo Blocks above it to fill · watch the fill level rise';
+      case 'locomotive': return 'Locomotive selected — place a Rail Segment, set trackId to match · it will follow the rail';
       default: return `${sel.label ?? sel.kind} selected — drag to move · Inspector to adjust`;
     }
   }, [manifest.primitives, placingKind, selectedPrimitiveId]);
@@ -161,37 +165,54 @@ function drawConnectionOverlay(
     if (prim.kind === 'motor') {
       const { x, y } = prim.config as { x: number; y: number };
       const isSelected = prim.id === selectedPrimitiveId;
-      const drivenGears = runtime.motorDrives?.[prim.id] ?? [];
+      const drivenIds = runtime.motorDrives?.[prim.id] ?? [];
 
-      // Draw motor drive-range ring (faint, always visible)
+      // Drive-range ring (220px radius)
       instance.noFill();
       instance.stroke(71, 197, 165, isSelected ? 60 : 28);
       instance.strokeWeight(1);
-      instance.circle(x, y, 440); // 220px radius shown as diameter
+      instance.circle(x, y, 440);
 
-      // Draw lines from motor to each gear it drives
-      for (const gearId of drivenGears) {
-        const gear = manifest.primitives.find((p) => p.id === gearId);
-        if (!gear) continue;
-        const gPos = getLivePos(gear, runtime);
-        instance.stroke(71, 197, 165, 80);
+      // Lines from motor to driven parts (gears = teal, wheels = blue)
+      for (const drivenId of drivenIds) {
+        const driven = manifest.primitives.find((p) => p.id === drivenId);
+        if (!driven) continue;
+        const dPos = getLivePos(driven, runtime);
+        const isWheel = driven.kind === 'wheel';
+        const r = isWheel ? 96 : 71;
+        const g = isWheel ? 165 : 197;
+        const b = isWheel ? 234 : 165;
+        instance.stroke(r, g, b, 80);
         instance.strokeWeight(1);
         (instance.drawingContext as CanvasRenderingContext2D).setLineDash([4, 6]);
-        instance.line(x, y, gPos.x, gPos.y);
+        instance.line(x, y, dPos.x, dPos.y);
         (instance.drawingContext as CanvasRenderingContext2D).setLineDash([]);
-        // Arrow tip at the gear
-        instance.fill(71, 197, 165, 80);
+        instance.fill(r, g, b, 80);
         instance.noStroke();
-        instance.circle(gPos.x, gPos.y, 8);
+        instance.circle(dPos.x, dPos.y, 8);
       }
 
-      // Label: show if no gears are connected yet
-      if (drivenGears.length === 0 && isSelected) {
+      // Conveyor boost range ring (300px radius, amber)
+      const nearConveyor = manifest.primitives.some((p) => {
+        if (p.kind !== 'conveyor') return false;
+        const cCfg = p.config as { path: Array<{ x: number; y: number }> };
+        return cCfg.path.some((pt) => Math.hypot(pt.x - x, pt.y - y) < 300);
+      });
+      if (nearConveyor || isSelected) {
+        instance.noFill();
+        instance.stroke(245, 158, 11, isSelected ? 40 : 18);
+        instance.strokeWeight(1);
+        (instance.drawingContext as CanvasRenderingContext2D).setLineDash([3, 8]);
+        instance.circle(x, y, 600); // 300px radius
+        (instance.drawingContext as CanvasRenderingContext2D).setLineDash([]);
+      }
+
+      if (drivenIds.length === 0 && isSelected) {
         instance.noStroke();
         instance.fill(71, 197, 165, 140);
         instance.textSize(11);
         instance.textAlign(instance.CENTER, instance.TOP);
-        instance.text('Place a gear inside this ring', x, y + 26);
+        instance.text('Place a Gear or Wheel inside this ring', x, y + 26);
       }
     }
 
@@ -217,16 +238,33 @@ function drawConnectionOverlay(
       }
     }
 
-    // Gear mesh connections
-    if (prim.kind === 'gear') {
+    // Conveyor → cargo block flow indicators
+    if (prim.kind === 'conveyor') {
+      const cCfg = prim.config as { path: Array<{ x: number; y: number }>; direction: string };
+      const isSelected = prim.id === selectedPrimitiveId;
+      if (isSelected && cCfg.path.length >= 2) {
+        // Highlight belt endpoints to show motor connection zone
+        for (const pt of [cCfg.path[0], cCfg.path[cCfg.path.length - 1]]) {
+          instance.noFill();
+          instance.stroke(245, 158, 11, 50);
+          instance.strokeWeight(1);
+          instance.circle(pt.x, pt.y, 600); // 300px zone indicator
+        }
+      }
+    }
+
+    // Gear/wheel mesh connections
+    if (prim.kind === 'gear' || prim.kind === 'wheel') {
       const pos = getLivePos(prim, runtime);
       for (const meshId of runtime.gearMeshes?.[prim.id] ?? []) {
-        const meshGear = manifest.primitives.find((p) => p.id === meshId);
-        if (!meshGear) continue;
-        const mPos = getLivePos(meshGear, runtime);
+        const meshPart = manifest.primitives.find((p) => p.id === meshId);
+        if (!meshPart) continue;
+        const mPos = getLivePos(meshPart, runtime);
         // Only draw each pair once (lower id draws)
         if (prim.id < meshId) {
-          instance.stroke(94, 234, 212, 50);
+          // gear-gear = teal, gear-wheel or wheel-wheel = blue
+          const mixed = prim.kind !== meshPart.kind;
+          instance.stroke(mixed ? 96 : 94, mixed ? 165 : 234, mixed ? 234 : 212, 60);
           instance.strokeWeight(1);
           instance.line(pos.x, pos.y, mPos.x, mPos.y);
         }
