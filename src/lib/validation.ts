@@ -1,13 +1,6 @@
 import { parseExperimentManifest } from './schema';
 import type { ExperimentManifest, PrimitiveKind } from './types';
 
-const ALLOWED_AI_RECIPES = new Set([
-  'gear-train-lab',
-  'conveyor-loader',
-  'winch-crane',
-  'rail-cart-loop',
-]);
-
 const ALLOWED_AI_PRIMITIVES = new Set<PrimitiveKind>([
   'node',
   'beam',
@@ -84,12 +77,16 @@ export function validateExperimentManifest(input: unknown): ValidationResult {
     }
   }
 
-  if (!manifest.metadata.recipeId || !ALLOWED_AI_RECIPES.has(manifest.metadata.recipeId)) {
-    errors.push('Experiment recipe is not allowed in the vertical slice.');
-  }
-
   if (manifest.primitives.length > 80) {
     errors.push('Primitive count exceeds the stage 1 safety budget.');
+  }
+
+  if (manifest.primitives.length === 0) {
+    errors.push('Experiment needs at least one part.');
+  }
+
+  if (manifest.metadata.recipeId) {
+    warnings.push('Recipe-backed manifests are deprecated. Starter projects should run on the honest sandbox path.');
   }
 
   if (manifest.primitives.length > 40) {
@@ -122,27 +119,19 @@ export function validateExperimentManifest(input: unknown): ValidationResult {
 }
 
 function smokeTestManifest(manifest: ExperimentManifest): string | null {
-  switch (manifest.metadata.recipeId) {
-    case 'gear-train-lab': {
-      const gearCount = manifest.primitives.filter((primitive) => primitive.kind === 'gear').length;
-      return gearCount >= 2 ? null : 'Gear Train Lab requires at least two gears.';
-    }
-    case 'conveyor-loader': {
-      const conveyor = manifest.primitives.some((primitive) => primitive.kind === 'conveyor');
-      const hopper = manifest.primitives.some((primitive) => primitive.kind === 'hopper');
-      return conveyor && hopper ? null : 'Conveyor Loader requires a conveyor and a hopper.';
-    }
-    case 'winch-crane': {
-      const winch = manifest.primitives.some((primitive) => primitive.kind === 'winch');
-      const hook = manifest.primitives.some((primitive) => primitive.kind === 'hook');
-      return winch && hook ? null : 'Winch Crane requires a winch and a hook.';
-    }
-    case 'rail-cart-loop': {
-      const rail = manifest.primitives.some((primitive) => primitive.kind === 'rail-segment');
-      const loco = manifest.primitives.some((primitive) => primitive.kind === 'locomotive');
-      return rail && loco ? null : 'Rail Cart Loop requires rail and a locomotive.';
-    }
-    default:
-      return 'Unknown recipe.';
+  const hasMotor = manifest.primitives.some((primitive) => primitive.kind === 'motor');
+  const gearCount = manifest.primitives.filter((primitive) => primitive.kind === 'gear').length;
+  const conveyorCount = manifest.primitives.filter((primitive) => primitive.kind === 'conveyor').length;
+  const cargoCount = manifest.primitives.filter((primitive) => primitive.kind === 'cargo-block').length;
+  const hopperCount = manifest.primitives.filter((primitive) => primitive.kind === 'hopper').length;
+
+  if (gearCount > 0 && !hasMotor) {
+    return 'Gear builds need at least one motor so the machine can do something visible.';
   }
+
+  if (conveyorCount > 0 && cargoCount === 0 && hopperCount === 0) {
+    return 'Conveyor builds should include cargo or a hopper so the motion is legible.';
+  }
+
+  return null;
 }

@@ -8,14 +8,16 @@ describe('database seed', () => {
     await db.open();
   });
 
-  it('seeds featured machines, blueprints, and jobs', async () => {
+  it('seeds honest showcase machines and starter projects', async () => {
     await ensureSeedData();
     const machines = await db.machines.toArray();
     const blueprints = await db.blueprints.toArray();
     const jobs = await db.jobs.toArray();
 
-    expect(machines.length).toBe(4);
-    expect(blueprints.length).toBe(10);
-    expect(jobs.length).toBe(12);
+    expect(machines.length).toBe(3);
+    expect(blueprints.length).toBe(0);
+    expect(jobs.length).toBe(3);
+    expect(machines.every((machine) => !machine.experiment.metadata.recipeId)).toBe(true);
+    expect(jobs.every((job) => job.kind === 'starter-project')).toBe(true);
   });
 });

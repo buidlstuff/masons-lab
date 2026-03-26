@@ -42,7 +42,24 @@ export type BehaviorRecipeKind =
 
 export type ControlKind = 'slider' | 'toggle' | 'button';
 
-export type GoalKind = 'fill-hopper' | 'gear-down' | 'deliver-wagon';
+export type GoalKind =
+  | 'spin-gear-train'
+  | 'feed-the-hopper'
+  | 'build-the-loader'
+  | 'fill-hopper'
+  | 'gear-down'
+  | 'deliver-wagon';
+
+export type ProjectSuccessCheck =
+  | 'has-motor'
+  | 'first-gear-live'
+  | 'gear-train-live'
+  | 'has-conveyor'
+  | 'has-hopper'
+  | 'cargo-on-conveyor'
+  | 'hopper-catching-cargo'
+  | 'motor-near-conveyor'
+  | 'powered-loader-target';
 
 export type BlueprintCategory =
   | 'chassis'
@@ -410,6 +427,18 @@ export interface SiteJobDefinition {
   hints: string[];
   objective: string;
   playable?: boolean;
+  kind?: 'starter-project';
+  initialDraft?: 'empty';
+  playModeUnlockStep?: number;
+  steps?: Array<{
+    stepId: string;
+    title: string;
+    instruction: string;
+    allowedPartKinds: PrimitiveKind[];
+    successCheck: ProjectSuccessCheck;
+    successCopy: string;
+    assistantPrompt: string;
+  }>;
 }
 
 export interface JobProgressRecord {

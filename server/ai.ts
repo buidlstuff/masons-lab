@@ -16,8 +16,8 @@ type ToolUseBlock<T = Record<string, unknown>> = { type: 'tool_use'; input: T };
 
 function buildExperimentSchema() {
   const raw = zodToJsonSchema(experimentManifestSchema as never) as { $schema?: string; [key: string]: unknown };
-  const { $schema: _unused, ...experimentSchema } = raw;
-  return experimentSchema;
+  delete raw.$schema;
+  return raw;
 }
 
 export async function generateExperimentWithAi(prompt: string): Promise<GenerateExperimentResult> {
@@ -39,11 +39,11 @@ export async function generateExperimentWithAi(prompt: string): Promise<Generate
       model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
       max_tokens: 4096,
       system:
-        "You are Mason's Lab Assistant. Only produce stage-1 construction yard machines. Stay inside the four allowed recipes: gear-train-lab, conveyor-loader, winch-crane, rail-cart-loop.",
+        "You are Mason's Lab Assistant. Only produce small honest sandbox machines where every visible part truly affects the outcome. Prefer motors, gears, conveyors, hoppers, cargo, wheels, and simple structures. Do not use recipeId or scripted recipe assumptions.",
       messages: [
         {
           role: 'user',
-          content: `Create one machine for this request: ${prompt}`,
+          content: `Create one honest sandbox machine for this request: ${prompt}`,
         },
       ],
       tools: [
@@ -120,7 +120,7 @@ export async function editExperimentWithAi(prompt: string, experiment: Experimen
       model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
       max_tokens: 4096,
       system:
-        'You are editing a stage-1 construction machine. Preserve stable ids for unchanged parts. Only make bounded edits within the existing recipe family.',
+        'You are editing an honest sandbox machine. Preserve stable ids for unchanged parts. Only make bounded edits that keep the machine causal and do not add recipeId or scripted behaviors.',
       messages: [
         {
           role: 'user',
@@ -261,10 +261,9 @@ function generateFallback(prompt: string): GenerateExperimentResult {
   const text = prompt.toLowerCase();
   const machine =
     FEATURED.find((candidate) =>
-      (candidate.experiment.metadata.recipeId === 'gear-train-lab' && /(gear|rpm|ratio|torque)/.test(text)) ||
-      (candidate.experiment.metadata.recipeId === 'conveyor-loader' && /(conveyor|hopper|cargo|load|gravel)/.test(text)) ||
-      (candidate.experiment.metadata.recipeId === 'winch-crane' && /(crane|winch|hook|lift)/.test(text)) ||
-      (candidate.experiment.metadata.recipeId === 'rail-cart-loop' && /(rail|wagon|train|cart)/.test(text))
+      (/spin the gears/i.test(candidate.experiment.metadata.title) && /(gear|rpm|ratio|torque|spin)/.test(text)) ||
+      (/feed the hopper/i.test(candidate.experiment.metadata.title) && /(conveyor|hopper|cargo|belt|feed)/.test(text)) ||
+      (/build the loader/i.test(candidate.experiment.metadata.title) && /(loader|power|throughput|motor)/.test(text))
     ) ?? FEATURED[0];
 
   const experiment = structuredClone(machine.experiment);
@@ -282,7 +281,6 @@ function generateFallback(prompt: string): GenerateExperimentResult {
       family: experiment.family,
       title: experiment.metadata.title,
       confidence: 0.78,
-      suggestedRecipeId: experiment.metadata.recipeId,
     },
     experiment,
   };
@@ -327,20 +325,13 @@ function editFallback(prompt: string, experiment: ExperimentManifest): EditExper
     }
   }
 
-  if (/(second wagon|add wagon)/.test(lower) && next.metadata.recipeId === 'rail-cart-loop') {
-    if (!next.primitives.some((primitive) => primitive.id === 'wagon-2')) {
-      next.primitives.push({
-        id: 'wagon-2',
-        kind: 'wagon',
-        label: 'Extra Wagon',
-        config: { trackId: 'track-main', offset: -0.16, capacity: 6 },
-      });
-      next.behaviors = next.behaviors.map((behavior) =>
-        behavior.id === 'follow-1'
-          ? { ...behavior, targets: [...behavior.targets, 'wagon-2'] }
-          : behavior,
-      );
-    }
+  if (/(add motor|power it)/.test(lower) && !next.primitives.some((primitive) => primitive.kind === 'motor')) {
+    next.primitives.push({
+      id: 'motor-added',
+      kind: 'motor',
+      label: 'Added Motor',
+      config: { x: 220, y: 360, rpm: 75, torque: 1.2, powerState: true },
+    });
   }
 
   next.metadata.createdBy = {

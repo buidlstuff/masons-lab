@@ -8,6 +8,9 @@ interface PartPaletteProps {
   selectedPrimitive?: PrimitiveInstance;
   selectedKind?: PrimitiveKind | null;
   activeJobHint?: string;
+  allowedKinds?: PrimitiveKind[];
+  projectTitle?: string;
+  projectStepTitle?: string;
   onSelectKind: (kind: PrimitiveKind | null) => void;
 }
 
@@ -21,6 +24,9 @@ export function PartPalette({
   selectedPrimitive,
   selectedKind,
   activeJobHint,
+  allowedKinds,
+  projectTitle,
+  projectStepTitle,
   onSelectKind,
 }: PartPaletteProps) {
   const [beginner, setBeginner] = useState(() => {
@@ -35,6 +41,14 @@ export function PartPalette({
   const suggestions = useMemo(
     () => deriveSuggestions(manifest, selectedPrimitive),
     [manifest, selectedPrimitive],
+  );
+  const guidedKinds = useMemo(
+    () => (allowedKinds ? Array.from(new Set(allowedKinds)) : null),
+    [allowedKinds],
+  );
+  const visibleSuggestions = useMemo(
+    () => guidedKinds ? suggestions.filter((suggestion) => guidedKinds.includes(suggestion.kind)) : suggestions,
+    [guidedKinds, suggestions],
   );
   const canvasKinds = useMemo(
     () => Object.entries(counts)
@@ -59,7 +73,13 @@ export function PartPalette({
       <div className="panel-header compact">
         <div>
           <p className="eyebrow">Part Drawer</p>
-          <h3>{selectedPrimitive ? `Works with ${labelForPart(selectedPrimitive.kind)}` : 'Pick the next part'}</h3>
+          <h3>
+            {guidedKinds
+              ? projectStepTitle ?? `Step for ${projectTitle ?? 'current project'}`
+              : selectedPrimitive
+                ? `Works with ${labelForPart(selectedPrimitive.kind)}`
+                : 'Pick the next part'}
+          </h3>
         </div>
         {selectedKind ? (
           <button type="button" className="ghost-button" onClick={() => onSelectKind(null)}>
@@ -69,24 +89,28 @@ export function PartPalette({
       </div>
 
       <div className="palette-context-card">
-        <p className="palette-context-label">Right now</p>
+        <p className="palette-context-label">{guidedKinds ? 'Project step' : 'Right now'}</p>
         <strong>
-          {selectedPrimitive
-            ? `${labelForPart(selectedPrimitive.kind)} selected`
-            : manifest.primitives.length === 0
-              ? 'Start with a part that reacts fast'
-              : 'Recommended parts match the current canvas'}
+          {guidedKinds
+            ? `${projectTitle ?? 'Starter project'} is only showing the parts that matter right now`
+            : selectedPrimitive
+              ? `${labelForPart(selectedPrimitive.kind)} selected`
+              : manifest.primitives.length === 0
+                ? 'Start with a part that reacts fast'
+                : 'Recommended parts match the current canvas'}
         </strong>
         <p className="muted">
-          {selectedPrimitive
-            ? connectionHintForKind(selectedPrimitive.kind)
-            : activeJobHint ?? 'Motors, gears, conveyors, and rails give the fastest visible feedback.'}
+          {guidedKinds
+            ? activeJobHint ?? 'Finish this step first. More parts unlock after the project is actually working.'
+            : selectedPrimitive
+              ? connectionHintForKind(selectedPrimitive.kind)
+              : activeJobHint ?? 'Motors, gears, conveyors, and rails give the fastest visible feedback.'}
         </p>
       </div>
 
-      {suggestions.length > 0 ? (
+      {visibleSuggestions.length > 0 ? (
         <div className="palette-suggestion-list">
-          {suggestions.map((suggestion) => (
+          {visibleSuggestions.map((suggestion) => (
             <button
               key={suggestion.kind}
               type="button"
@@ -116,6 +140,27 @@ export function PartPalette({
         </div>
       ) : null}
 
+      {guidedKinds ? (
+        <div className="palette-beginner-list">
+          {guidedKinds.map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              className={`palette-beginner-item ${selectedKind === kind ? 'active' : ''}`}
+              onClick={() => onSelectKind(selectedKind === kind ? null : kind)}
+            >
+              <span className="palette-beginner-icon">{iconForPart(kind)}</span>
+              <div className="palette-beginner-info">
+                <span className="palette-beginner-label">{labelForPart(kind)}</span>
+                <span className="palette-beginner-tagline">{taglineForPart(kind)}</span>
+              </div>
+              {counts[kind] ? <span className="palette-beginner-check">x{counts[kind]}</span> : null}
+            </button>
+          ))}
+          <p className="palette-hint muted">More parts unlock after this step works.</p>
+        </div>
+      ) : (
+        <>
       <div className="palette-mode-toggle">
         <button
           type="button"
@@ -214,6 +259,8 @@ export function PartPalette({
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
 
       {selectedKind ? (

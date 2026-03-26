@@ -12,8 +12,14 @@ import { editExperiment, explainExperiment, generateExperiment } from '../lib/ap
 import { createBlueprintFromExperiment, mountBlueprintToManifest } from '../lib/blueprints';
 import { db } from '../lib/db';
 import { addPrimitive, connectPrimitives, deletePrimitive, movePrimitive, updatePrimitive } from '../lib/editor';
-import { getGoalProgress, isJobComplete } from '../lib/jobs';
-import { createDraftFromBlueprint, createDraftFromMachine, createEmptyDraft } from '../lib/seed-data';
+import {
+  countActiveCargo,
+  countActiveGearPairs,
+  countPoweredConveyors,
+  evaluateProject,
+  getGoalProgress,
+} from '../lib/jobs';
+import { createDraftFromBlueprint, createDraftFromMachine, createDraftFromProject, createEmptyDraft } from '../lib/seed-data';
 import { useMachineSimulation, type RuntimeSnapshot } from '../lib/simulation';
 import { awardJobXp, TIER_NAMES } from '../lib/xp';
 import type {
@@ -59,6 +65,7 @@ export function BuildPage() {
   const [assistantPromptSeed, setAssistantPromptSeed] = useState<string | null>(null);
   const flashCountRef = useRef(0);
   const jobCompletedRef = useRef(false);
+  const completedStepIdsRef = useRef<string[]>([]);
   const statusTimeoutRef = useRef<number | undefined>(undefined);
   const assistantRef = useRef<HTMLDivElement | null>(null);
 
@@ -91,6 +98,10 @@ export function BuildPage() {
       // draftId in URL but draft not yet in DB (stale/invalid URL) — fall through to create.
       // draftId in URL and draft still loading — wait (useLiveQuery will re-fire this effect).
       if (draftId) {
+        return;
+      }
+
+      if (jobId && !job) {
         return;
       }
 
@@ -137,13 +148,20 @@ export function BuildPage() {
         return;
       }
 
+      if (job?.initialDraft === 'empty') {
+        const nextDraft = createDraftFromProject(job);
+        await db.drafts.put(nextDraft);
+        applyDraft(nextDraft);
+        return;
+      }
+
       const nextDraft = createEmptyDraft();
       await db.drafts.put(nextDraft);
       applyDraft(nextDraft);
     }
 
     void bootstrapDraft();
-  }, [blueprintFromQuery, draft, draftId, jobId, machineFromQuery, navigate, shareParam]);
+  }, [blueprintFromQuery, draft, draftId, job, jobId, machineFromQuery, navigate, shareParam]);
 
   const runtime = useMachineSimulation(
     manifest ??
@@ -167,9 +185,36 @@ export function BuildPage() {
     [manifest, selectedPrimitiveId],
   );
 
-  const jobComplete = isJobComplete(job, telemetry);
+  const projectState = useMemo(
+    () => (job && manifest ? evaluateProject(job, manifest, runtime) : null),
+    [job, manifest, runtime],
+  );
+  const projectUnlocked = projectState?.unlockedAllParts ?? true;
+  const activeProjectStep = projectState?.currentStep ?? null;
+  const jobComplete = projectState?.complete ?? false;
   // Reset once-per-session flag if the job changes
-  useEffect(() => { jobCompletedRef.current = false; }, [jobId]);
+  useEffect(() => {
+    jobCompletedRef.current = false;
+    completedStepIdsRef.current = [];
+  }, [jobId]);
+
+  useEffect(() => {
+    if (!projectState) {
+      completedStepIdsRef.current = [];
+      return;
+    }
+
+    const previousIds = completedStepIdsRef.current;
+    const completedSteps = projectState.steps.filter((step) => step.completed);
+    const newlyCompleted = completedSteps.filter((step) => !previousIds.includes(step.stepId));
+    const latestStep = newlyCompleted[newlyCompleted.length - 1];
+
+    if (latestStep && !projectState.complete) {
+      showStatus(latestStep.successCopy, 'success');
+    }
+
+    completedStepIdsRef.current = completedSteps.map((step) => step.stepId);
+  }, [projectState, showStatus]);
 
   useEffect(() => {
     if (!job || !jobComplete || jobCompletedRef.current) return;
@@ -302,34 +347,6 @@ export function BuildPage() {
     await persistDraft(nextManifest);
   }
 
-  // Contextual step hint shown in the canvas toolbar during active jobs
-  function deriveJobHint(): string | undefined {
-    if (!job) return undefined;
-    const prims = manifest?.primitives ?? [];
-    const has = (k: string) => prims.some((p) => p.kind === k);
-    switch (job.goalType) {
-      case 'fill-hopper':
-        if (!has('conveyor')) return 'Step 1: Place a Conveyor on the canvas';
-        if (!has('hopper'))   return 'Step 2: Place a Hopper at the end of the conveyor';
-        if (!has('cargo-block')) return 'Step 3: Place Cargo Blocks on the conveyor';
-        if (!has('motor'))   return 'Step 4: Add a Motor near the conveyor to run it';
-        return 'Machine running — watch the hopper fill up!';
-      case 'gear-down':
-        if (!has('motor')) return 'Step 1: Place a Motor';
-        if (prims.filter((p) => p.kind === 'gear').length < 2)
-          return 'Step 2: Place at least two Gears inside the motor\'s green ring';
-        if ((telemetry.outputRpm ?? 999) > 45)
-          return 'Step 3: Make the output gear bigger to slow it below 45 RPM';
-        return 'Output speed is low enough — you\'ve got it!';
-      case 'deliver-wagon':
-        if (!has('rail-segment')) return 'Step 1: Place a Rail Segment';
-        if (!has('locomotive'))   return 'Step 2: Place a Locomotive and set its trackId in the Inspector';
-        return 'Train is running — let it reach 85% of the track to deliver!';
-      default:
-        return job.hints[0];
-    }
-  }
-
   function handleShare() {
     if (!manifest) return;
     try {
@@ -343,23 +360,25 @@ export function BuildPage() {
     }
   }
 
-  const activeJobHint = manifest ? deriveJobHint() : undefined;
+  const activeJobHint = activeProjectStep?.instruction ?? (jobComplete ? job?.hints[0] : undefined);
   const machineActivity = manifest
-    ? deriveMachineActivity(manifest, runtime, telemetry)
+    ? deriveMachineActivity(manifest, runtime)
     : { active: false, label: 'Preparing the canvas', tone: 'info' as NoticeTone };
   const builderFocus = manifest
-    ? deriveBuilderFocus(manifest, placingKind, selectedPrimitive, activeJobHint, machineActivity)
+    ? deriveBuilderFocus(manifest, placingKind, selectedPrimitive, activeProjectStep, machineActivity)
     : {
         title: 'Preparing the yard',
         description: 'Loading the current draft.',
         assistantPrompt: 'Explain how to get started in Mason\'s Lab.',
       };
   const buildSteps = manifest
-    ? deriveBuildSteps(manifest, placingKind, machineActivity.active)
+    ? job && projectState
+      ? deriveProjectSteps(projectState)
+      : deriveBuildSteps(manifest, placingKind, machineActivity.active)
     : [];
   const contextualConnectPrompt = selectedPrimitive
     ? `Stuck on ${labelForPrimitive(selectedPrimitive.kind)}? Ask the assistant what it should connect to next.`
-    : 'Need a hand? Load a prompt into the assistant from here instead of hunting for the right tab.';
+    : activeProjectStep?.assistantPrompt ?? 'Need a hand? Load a prompt into the assistant from here instead of hunting for the right tab.';
 
   const openAssistantWithPrompt = useCallback(
     (prompt: string) => {
@@ -397,13 +416,23 @@ export function BuildPage() {
 
   const handleSelectKind = useCallback(
     (kind: PrimitiveKind | null) => {
+      if (
+        kind
+        && activeProjectStep
+        && !projectUnlocked
+        && !activeProjectStep.allowedPartKinds.includes(kind)
+      ) {
+        showStatus(`This step is focused on ${activeProjectStep.allowedPartKinds.map(labelForPrimitive).join(', ')}.`, 'warning');
+        return;
+      }
+
       setPlacingKind(kind);
       if (kind) {
         setSelectedPrimitiveId(undefined);
         showStatus(`Place ${labelForPrimitive(kind)} on the canvas. Press Escape to cancel.`, 'info');
       }
     },
-    [showStatus],
+    [activeProjectStep, projectUnlocked, showStatus],
   );
 
   const handleConnectWinch = useCallback(() => {
@@ -508,18 +537,22 @@ export function BuildPage() {
           <button type="button" className="primary-link" onClick={handleSaveMachine}>
             Save Machine
           </button>
-          <button type="button" onClick={handleSaveBlueprint}>
-            Save Blueprint
-          </button>
-          <button type="button" onClick={handleSaveBoth}>
-            Save Both
-          </button>
-          <button type="button" onClick={handleDuplicateDraft}>
-            Duplicate
-          </button>
-          <button type="button" onClick={handleShare}>
-            Share
-          </button>
+          {(projectUnlocked || !job) ? (
+            <>
+              <button type="button" onClick={handleSaveBlueprint}>
+                Save Blueprint
+              </button>
+              <button type="button" onClick={handleSaveBoth}>
+                Save Both
+              </button>
+              <button type="button" onClick={handleDuplicateDraft}>
+                Duplicate
+              </button>
+              <button type="button" onClick={handleShare}>
+                Share
+              </button>
+            </>
+          ) : null}
           <Link to="/">Back to Yard</Link>
         </div>
       </div>
@@ -537,7 +570,7 @@ export function BuildPage() {
           <span className={`builder-chip ${placingKind ? 'is-active' : ''}`}>Mode: {builderModeLabel}</span>
           <span className={`builder-chip is-${machineActivity.tone}`}>{machineActivity.label}</span>
           <span className="builder-chip">Canvas: {manifest.primitives.length} part{manifest.primitives.length === 1 ? '' : 's'}</span>
-          {job ? <span className="builder-chip">Job: {job.title}</span> : null}
+          {job ? <span className="builder-chip">Project: {job.title}</span> : null}
         </div>
 
         <div className="builder-step-strip">
@@ -551,8 +584,12 @@ export function BuildPage() {
 
         <div className="builder-compass-actions">
           {manifest.primitives.length === 0 && !placingKind ? (
-            <button type="button" className="primary-link" onClick={() => handleSelectKind('motor')}>
-              Start with a Motor
+            <button
+              type="button"
+              className="primary-link"
+              onClick={() => handleSelectKind(activeProjectStep?.allowedPartKinds[0] ?? 'motor')}
+            >
+              Start with {labelForPrimitive(activeProjectStep?.allowedPartKinds[0] ?? 'motor')}
             </button>
           ) : null}
           {placingKind ? (
@@ -577,18 +614,22 @@ export function BuildPage() {
       </section>
 
       {job ? (() => {
-        const gp = getGoalProgress(job, telemetry);
+        const gp = getGoalProgress(job, manifest, runtime);
         const pct = Math.min(100, gp.target > 0 ? (gp.current / gp.target) * 100 : 0);
         return (
           <section className={`job-banner ${jobComplete ? 'complete' : ''}`}>
             <div className="job-banner-info">
-              <p className="eyebrow">Active Job — Tier {job.tier}</p>
+              <p className="eyebrow">Active Project — Tier {job.tier}</p>
               <strong>{job.title}</strong>
-              <p>{job.objective}</p>
+              <p>{activeProjectStep ? activeProjectStep.instruction : job.objective}</p>
             </div>
             <div className="job-goal-block">
               <div className="job-goal-label">
-                <span>{gp.label}</span>
+                <span>
+                  {activeProjectStep
+                    ? `Step ${(projectState?.currentStepIndex ?? 0) + 1} of ${projectState?.steps.length ?? 0}: ${gp.label}`
+                    : gp.label}
+                </span>
                 <span className="job-goal-value">
                   {gp.met ? '✓ Done' : `${gp.current}${gp.unit ? ` ${gp.unit}` : ''} / ${gp.target}${gp.unit ? ` ${gp.unit}` : ''}`}
                 </span>
@@ -608,9 +649,9 @@ export function BuildPage() {
         <section className="job-complete-card">
           <div className="job-complete-star">★</div>
           <div className="job-complete-content">
-            <h2>Job Done, Mason!</h2>
-            <p>You completed <strong>{job.title}</strong>.</p>
-            <p className="muted">{job.hints[0] ?? 'Great work — try pushing the controls to see what else it can do!'}</p>
+            <h2>Project Complete</h2>
+            <p>You finished <strong>{job.title}</strong> with real machine feedback.</p>
+            <p className="muted">{job.hints[0] ?? 'Keep playing with the machine now that it works honestly.'}</p>
           </div>
           <div className="job-complete-actions">
             <button type="button" className="primary-link" onClick={handleSaveMachine}>
@@ -626,6 +667,13 @@ export function BuildPage() {
           <AssistantPanel
             manifest={manifest}
             busy={busy}
+            project={job ? {
+              title: job.title,
+              unlocked: projectUnlocked,
+              currentStepTitle: activeProjectStep?.title,
+              currentStepInstruction: activeProjectStep?.instruction,
+              assistantPrompt: activeProjectStep?.assistantPrompt,
+            } : undefined}
             promptSeed={assistantPromptSeed}
             onPromptSeedConsumed={() => setAssistantPromptSeed(null)}
             blueprints={blueprints ?? []}
@@ -669,6 +717,14 @@ export function BuildPage() {
           <HudOverlay hud={manifest.hud} telemetry={telemetry} />
           <StarterOverlay
             visible={manifest.primitives.length === 0 && !placingKind}
+            title={job?.title}
+            summary={job?.summary}
+            steps={job?.steps?.map((step) => ({
+              num: String((job.steps?.findIndex((candidate) => candidate.stepId === step.stepId) ?? 0) + 1),
+              kind: step.allowedPartKinds[0],
+              label: step.title,
+              desc: step.instruction,
+            }))}
             onSelectKind={handleSelectKind}
           />
           {flashToast && (
@@ -701,6 +757,9 @@ export function BuildPage() {
             selectedPrimitive={selectedPrimitive}
             selectedKind={placingKind}
             activeJobHint={activeJobHint}
+            allowedKinds={!projectUnlocked ? activeProjectStep?.allowedPartKinds : undefined}
+            projectTitle={job?.title}
+            projectStepTitle={activeProjectStep?.title}
             onSelectKind={handleSelectKind}
           />
           {manifest.controls.length > 0 ? (
@@ -731,36 +790,38 @@ export function BuildPage() {
             }}
           />
 
-          <details className="panel small-panel disclosure-panel">
-            <summary className="disclosure-summary">
-              <div>
-                <p className="eyebrow">Workshop Shelf</p>
-                <h3>Mount a saved blueprint</h3>
+          {(projectUnlocked || !job) ? (
+            <details className="panel small-panel disclosure-panel">
+              <summary className="disclosure-summary">
+                <div>
+                  <p className="eyebrow">Workshop Shelf</p>
+                  <h3>Mount a saved blueprint</h3>
+                </div>
+                <span className="muted">{(blueprints ?? []).length} saved</span>
+              </summary>
+              <div className="blueprint-list disclosure-content">
+                {(blueprints ?? []).slice(0, 8).map((blueprintRecord) => (
+                  <article key={blueprintRecord.recordId} className="blueprint-row">
+                    <div>
+                      <strong>{blueprintRecord.blueprint.title}</strong>
+                      <p className="muted">{blueprintRecord.blueprint.summary}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint));
+                        showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
+                      }}
+                    >
+                      Mount
+                    </button>
+                  </article>
+                ))}
               </div>
-              <span className="muted">{(blueprints ?? []).length} saved</span>
-            </summary>
-            <div className="blueprint-list disclosure-content">
-              {(blueprints ?? []).slice(0, 8).map((blueprintRecord) => (
-                <article key={blueprintRecord.recordId} className="blueprint-row">
-                  <div>
-                    <strong>{blueprintRecord.blueprint.title}</strong>
-                    <p className="muted">{blueprintRecord.blueprint.summary}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint));
-                      showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
-                    }}
-                  >
-                    Mount
-                  </button>
-                </article>
-              ))}
-            </div>
-          </details>
+            </details>
+          ) : null}
 
-          {(selectedPrimitive?.kind === 'winch' || selectedPrimitive?.kind === 'hook' || selectedPrimitive?.kind === 'node') ? (
+          {(projectUnlocked || !job) && (selectedPrimitive?.kind === 'winch' || selectedPrimitive?.kind === 'hook' || selectedPrimitive?.kind === 'node') ? (
             <section className="panel small-panel">
             <div className="panel-header compact">
               <div>
@@ -864,27 +925,27 @@ interface BuilderStep {
 function deriveMachineActivity(
   manifest: ExperimentManifest,
   runtime: RuntimeSnapshot,
-  telemetry: BuildTelemetry,
 ): MachineActivity {
-  const movingParts = Object.values(runtime.rotations).filter((rotation) => Math.abs(rotation) > 0.05).length;
-  if (movingParts > 0) {
+  const liveGearPairs = countActiveGearPairs(manifest, runtime);
+  if (liveGearPairs > 0) {
     return {
       active: true,
-      label: `${movingParts} part${movingParts === 1 ? '' : 's'} moving`,
+      label: `${liveGearPairs} live gear mesh${liveGearPairs === 1 ? '' : 'es'}`,
       tone: 'success',
     };
   }
 
-  const drivenParts = Object.values(runtime.motorDrives ?? {}).reduce((count, ids) => count + ids.length, 0);
-  if (drivenParts > 0) {
+  const poweredConveyors = countPoweredConveyors(manifest);
+  const activeCargo = countActiveCargo(manifest, runtime);
+  if (activeCargo > 0) {
     return {
       active: true,
-      label: `${drivenParts} driven connection${drivenParts === 1 ? '' : 's'} live`,
+      label: `${activeCargo} cargo block${activeCargo === 1 ? '' : 's'} riding the conveyor`,
       tone: 'success',
     };
   }
 
-  const hopperFill = telemetry.hopperFill ?? runtime.hopperFill ?? 0;
+  const hopperFill = runtime.hopperFill ?? 0;
   if (hopperFill > 0) {
     return {
       active: true,
@@ -893,10 +954,18 @@ function deriveMachineActivity(
     };
   }
 
-  if ((telemetry.trainSpeed ?? 0) > 0) {
+  if (poweredConveyors > 0) {
     return {
       active: true,
-      label: `Train moving at ${telemetry.trainSpeed}`,
+      label: `${poweredConveyors} powered conveyor${poweredConveyors === 1 ? '' : 's'} ready`,
+      tone: 'success',
+    };
+  }
+
+  if ((runtime.telemetry.trainSpeed ?? 0) > 0) {
+    return {
+      active: true,
+      label: `Train moving at ${runtime.telemetry.trainSpeed}`,
       tone: 'success',
     };
   }
@@ -920,7 +989,7 @@ function deriveBuilderFocus(
   manifest: ExperimentManifest,
   placingKind: PrimitiveKind | null,
   selectedPrimitive: PrimitiveInstance | undefined,
-  activeJobHint: string | undefined,
+  activeProjectStep: { title: string; instruction: string; assistantPrompt: string } | null,
   machineActivity: MachineActivity,
 ): BuilderFocus {
   if (placingKind) {
@@ -931,19 +1000,19 @@ function deriveBuilderFocus(
     };
   }
 
+  if (activeProjectStep) {
+    return {
+      title: activeProjectStep.title,
+      description: activeProjectStep.instruction,
+      assistantPrompt: activeProjectStep.assistantPrompt,
+    };
+  }
+
   if (manifest.primitives.length === 0) {
     return {
       title: 'Build one thing that moves in under 30 seconds',
       description: 'Start with a motor, then drop a gear or wheel inside its green ring so the canvas gives you immediate feedback.',
       assistantPrompt: 'Build a simple motor and gear demo I can remix by hand.',
-    };
-  }
-
-  if (activeJobHint) {
-    return {
-      title: 'Follow the active job',
-      description: activeJobHint,
-      assistantPrompt: 'Help me complete the next step of this job with the parts already on the canvas.',
     };
   }
 
@@ -991,6 +1060,17 @@ function deriveBuildSteps(
       state: machineIsActive ? 'done' : hasParts && !placingKind ? 'active' : 'upcoming',
     },
   ];
+}
+
+function deriveProjectSteps(projectState: NonNullable<ReturnType<typeof evaluateProject>>): BuilderStep[] {
+  return projectState.steps.map((step, index) => ({
+    label: step.title,
+    state: step.completed
+      ? 'done'
+      : index === projectState.currentStepIndex
+        ? 'active'
+        : 'upcoming',
+  }));
 }
 
 function describePlacedPrimitive(

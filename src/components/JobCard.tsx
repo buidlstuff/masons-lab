@@ -31,7 +31,7 @@ export function JobCard({ job, completed = false }: JobCardProps) {
       <div className="job-card-bottom">
         <p className="muted">{job.objective}</p>
         <Link to={`/jobs/${job.jobId}`}>
-          {job.playable === false ? 'Preview' : completed ? 'Replay' : 'Start Job'}
+          {job.playable === false ? 'Preview' : completed ? 'Replay Project' : 'Start Project'}
         </Link>
       </div>
     </article>

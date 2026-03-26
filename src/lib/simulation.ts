@@ -52,6 +52,7 @@ export function useMachineSimulation(
   // Rebuild the physics world whenever the manifest changes.
   // Recipe manifests (recipeId set) stay on the scripted simulation path.
   useEffect(() => {
+    let cancelled = false;
     physicsRef.current?.cleanup();
     physicsRef.current = null;
 
@@ -62,9 +63,14 @@ export function useMachineSimulation(
 
     const initial = createInitialSnapshot(manifest);
     snapshotRef.current = initial;
-    setSnapshot(initial);
+    queueMicrotask(() => {
+      if (!cancelled) {
+        setSnapshot(initial);
+      }
+    });
 
     return () => {
+      cancelled = true;
       physicsRef.current?.cleanup();
       physicsRef.current = null;
     };

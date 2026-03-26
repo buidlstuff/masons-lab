@@ -199,9 +199,7 @@ export function MachineCanvas({
     }
   })();
 
-  const status = manifest.metadata.recipeId
-    ? `Recipe: ${manifest.metadata.recipeId}`
-    : 'Free Build — Physics Active';
+  const status = 'Live Sandbox — Every placed part should matter';
 
   return (
     <div className="machine-canvas-shell">
@@ -239,11 +237,7 @@ function drawScene(
 ) {
   instance.background(7, 14, 22);
   drawGrid(instance);
-  drawRecipeDecor(instance, manifest.metadata.recipeId ?? '');
-
-  if (!manifest.metadata.recipeId) {
-    drawConnectionOverlay(instance, manifest, runtime, selectedPrimitiveId, placingKind);
-  }
+  drawConnectionOverlay(instance, manifest, runtime, selectedPrimitiveId, placingKind);
 
   for (const primitive of manifest.primitives) {
     const selected = primitive.id === selectedPrimitiveId;
@@ -261,7 +255,6 @@ function drawScene(
     drawPlacingPreview(instance, manifest, placingKind, instance.mouseX, instance.mouseY);
   }
 
-  drawGoalZones(instance, manifest.metadata.recipeId ?? '', runtime);
   drawInteractionOverlay(
     instance,
     manifest,
@@ -707,33 +700,6 @@ function drawGrid(instance: p5) {
   instance.strokeWeight(1);
   for (let x = 0; x < instance.width; x += 32) instance.line(x, 0, x, instance.height);
   for (let y = 0; y < instance.height; y += 32) instance.line(0, y, instance.width, y);
-}
-
-function drawRecipeDecor(instance: p5, recipeId: string) {
-  instance.noStroke();
-  if (recipeId === 'conveyor-loader') {
-    instance.fill(18, 28, 34);
-    instance.rect(0, 470, instance.width, 90);
-  }
-  if (recipeId === 'rail-cart-loop') {
-    instance.fill(15, 23, 28);
-    instance.rect(0, 400, instance.width, 160);
-  }
-}
-
-function drawGoalZones(instance: p5, recipeId: string, runtime: RuntimeSnapshot) {
-  if (recipeId === 'winch-crane') {
-    instance.noFill();
-    instance.stroke(runtime.telemetry.loadPlaced ? '#4ade80' : '#fbbf24');
-    instance.strokeWeight(3);
-    instance.rect(760, 210, 120, 60, 8);
-  }
-  if (recipeId === 'rail-cart-loop') {
-    instance.noFill();
-    instance.stroke(runtime.telemetry.wagonDelivered ? '#4ade80' : '#60a5fa');
-    instance.strokeWeight(3);
-    instance.rect(840, 280, 90, 90, 8);
-  }
 }
 
 // ─── Primitive drawing ────────────────────────────────────────────────────────

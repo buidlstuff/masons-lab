@@ -4,6 +4,13 @@ import type { EditExperimentResult, ExperimentManifest, GenerateExperimentResult
 interface AssistantPanelProps {
   manifest: ExperimentManifest | null;
   busy: boolean;
+  project?: {
+    title: string;
+    unlocked: boolean;
+    currentStepTitle?: string;
+    currentStepInstruction?: string;
+    assistantPrompt?: string;
+  };
   promptSeed?: string | null;
   onPromptSeedConsumed?: () => void;
   blueprints?: SavedBlueprintRecord[];
@@ -16,6 +23,7 @@ interface AssistantPanelProps {
 export function AssistantPanel({
   manifest,
   busy,
+  project,
   promptSeed,
   onPromptSeedConsumed,
   blueprints,
@@ -24,7 +32,7 @@ export function AssistantPanel({
   onExplain,
   onMount,
 }: AssistantPanelProps) {
-  const canEditCurrentMachine = Boolean(manifest?.metadata.recipeId && manifest.primitives.length > 0);
+  const canEditCurrentMachine = Boolean(manifest && manifest.primitives.length > 0);
   const [mode, setMode] = useState<'chat' | 'compose'>('chat');
   const [prompt, setPrompt] = useState('');
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
@@ -32,10 +40,10 @@ export function AssistantPanel({
     {
       role: 'assistant',
       content:
-        "I'm your Lab Assistant. Ask me to build one of the yard machines, tweak the current one, or explain how it works.",
+        "I'm your Lab Assistant. Ask why the machine is stuck, what part to place next, or what changed when it finally works.",
     },
   ]);
-  const quickPrompts = useMemo(() => deriveQuickPrompts(manifest), [manifest]);
+  const quickPrompts = useMemo(() => deriveQuickPrompts(manifest, project), [manifest, project]);
 
   useEffect(() => {
     if (!promptSeed) {
@@ -120,10 +128,25 @@ export function AssistantPanel({
       <div className="panel-header">
         <div>
           <p className="eyebrow">Lab Assistant</p>
-          <h2>Build, tweak, explain</h2>
+          <h2>{project && !project.unlocked ? 'Rescue coach' : 'Build, tweak, explain'}</h2>
         </div>
         <span className="badge">{busy ? 'Working' : 'Ready'}</span>
       </div>
+
+      {project ? (
+        <div className="assistant-project-card">
+          <p className="eyebrow">Current Project</p>
+          <strong>{project.title}</strong>
+          <p className="muted">
+            {project.currentStepTitle
+              ? `${project.currentStepTitle}: ${project.currentStepInstruction}`
+              : 'The guided steps are complete. Now use the assistant to tune or extend the machine.'}
+          </p>
+          {!project.unlocked ? (
+            <p className="muted">Full AI compose tools unlock after the project is working.</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="assistant-tabs">
         <button
@@ -133,13 +156,15 @@ export function AssistantPanel({
         >
           Chat
         </button>
-        <button
-          type="button"
-          className={`tab-btn ${mode === 'compose' ? 'active' : ''}`}
-          onClick={() => setMode('compose')}
-        >
-          Compose
-        </button>
+        {(!project || project.unlocked) ? (
+          <button
+            type="button"
+            className={`tab-btn ${mode === 'compose' ? 'active' : ''}`}
+            onClick={() => setMode('compose')}
+          >
+            Compose
+          </button>
+        ) : null}
       </div>
 
       {mode === 'chat' ? (
@@ -182,15 +207,25 @@ export function AssistantPanel({
               ref={promptRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
-              placeholder='Try "Build a conveyor that feeds a hopper" or "Make the train slower."'
+              placeholder={project && !project.unlocked
+                ? 'Try "Why is nothing moving?" or "What part should I place next?"'
+                : 'Try "Build a conveyor that feeds a hopper" or "Make the loader faster."'}
               rows={5}
               disabled={busy}
             />
             <div className="button-row">
-              <button type="button" onClick={() => void handleGenerate()} disabled={busy}>
+              <button
+                type="button"
+                onClick={() => void handleGenerate()}
+                disabled={busy || Boolean(project && !project.unlocked)}
+              >
                 Create
               </button>
-              <button type="button" onClick={() => void handleEdit()} disabled={busy || !canEditCurrentMachine}>
+              <button
+                type="button"
+                onClick={() => void handleEdit()}
+                disabled={busy || !canEditCurrentMachine || Boolean(project && !project.unlocked)}
+              >
                 Edit
               </button>
               <button type="button" onClick={() => void handleExplain()} disabled={busy || !canEditCurrentMachine}>
@@ -232,22 +267,48 @@ export function AssistantPanel({
   );
 }
 
-function deriveQuickPrompts(manifest: ExperimentManifest | null) {
+function deriveQuickPrompts(
+  manifest: ExperimentManifest | null,
+  project?: {
+    unlocked: boolean;
+    assistantPrompt?: string;
+  },
+) {
+  if (project && !project.unlocked) {
+    return [
+      {
+        label: 'Why is nothing moving?',
+        prompt: 'Why is nothing moving yet? Tell me the one concrete thing to change next.',
+        action: 'explain' as const,
+      },
+      {
+        label: 'What part comes next?',
+        prompt: project.assistantPrompt ?? 'What part should I place next, and where should it go?',
+        action: 'explain' as const,
+      },
+      {
+        label: 'Explain what changed',
+        prompt: 'Explain what changed in this machine after my last placement.',
+        action: 'explain' as const,
+      },
+    ];
+  }
+
   if (!manifest || manifest.primitives.length === 0) {
     return [
       {
-        label: 'Build a starter gear train',
-        prompt: 'Build a motor with two gears so I can learn by dragging parts around.',
+        label: 'Build a gear demo',
+        prompt: 'Build a tiny motor and gear machine that I can remix by hand.',
         action: 'generate' as const,
       },
       {
-        label: 'Build a hopper loader',
-        prompt: 'Build a conveyor and hopper setup that shows cargo moving right away.',
+        label: 'Build a hopper demo',
+        prompt: 'Build a conveyor and hopper setup that shows real cargo movement right away.',
         action: 'generate' as const,
       },
       {
-        label: 'Show me a rail demo',
-        prompt: 'Build a simple rail setup and explain what I need to tune to make the train move.',
+        label: 'Build a loader demo',
+        prompt: 'Build a powered conveyor loader that clearly shows what the motor changes.',
         action: 'generate' as const,
       },
     ];
