@@ -314,6 +314,12 @@ export function MachineCanvas({
         return 'Rack — place a rotating part near one end to drive linear motion';
       case 'spring-linear':
         return 'Linear spring — it stores stretch and compression between the anchor and plate';
+      case 'crane-arm':
+        return 'Crane arm — it pivots around the left end and can sweep loads through an arc';
+      case 'counterweight':
+        return 'Counterweight — a heavy block that can balance or collide with other parts';
+      case 'bucket':
+        return 'Bucket — it collects nearby material and dumps when it tips far enough';
       case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
       case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
       case 'winch':    return 'Winch — place a Hook below, then Quick Connect → Winch to Hook';
@@ -658,6 +664,18 @@ function drawPlacingPreview(
       instance.line(mx - 24, my, mx + 12, my);
       instance.rect(mx + 12, my - 8, 24, 16, 4);
       break;
+    case 'crane-arm':
+      instance.line(mx, my, mx + 120, my);
+      instance.circle(mx, my, 12);
+      break;
+    case 'counterweight':
+      instance.rect(mx - 12, my - 16, 24, 32, 4);
+      break;
+    case 'bucket':
+      instance.rect(mx - 20, my + 8, 40, 8, 4);
+      instance.line(mx - 20, my + 8, mx - 20, my - 14);
+      instance.line(mx + 20, my + 8, mx + 20, my - 14);
+      break;
     case 'motor':
       instance.rect(mx - 28, my - 18, 56, 36, 10);
       instance.noFill();
@@ -929,9 +947,15 @@ function getPlacementAssessment(
           }
         : {
             tone: 'info',
-            title: 'Add a driver',
-            detail: 'Place a gear, pulley, or flywheel near one end to make the rack move.',
+          title: 'Add a driver',
+          detail: 'Place a gear, pulley, or flywheel near one end to make the rack move.',
           };
+    case 'bucket':
+      return {
+        tone: 'info',
+        title: 'Ready to scoop',
+        detail: 'Buckets react best when there is falling material nearby to collect.',
+      };
     case 'conveyor':
       return hasNearbyMotor(manifest, x, y)
         ? {
@@ -1273,6 +1297,57 @@ function drawPrimitive(
         instance.textSize(10);
         instance.textAlign(instance.CENTER, instance.BOTTOM);
         instance.text(`cmp ${Math.round(compression * 100)}%`, pos.x, pos.y - 10);
+      }
+      break;
+    }
+    case 'crane-arm': {
+      const cfg = primitive.config as { x: number; y: number; length?: number };
+      const pos = runtime.bodyPositions?.[primitive.id] ?? { x: cfg.x + (cfg.length ?? 120) / 2, y: cfg.y, angle: 0 };
+      const length = cfg.length ?? 120;
+      instance.push();
+      instance.translate(pos.x, pos.y);
+      instance.rotate(pos.angle ?? 0);
+      instance.fill(selected ? '#fbbf24' : '#475569');
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, length, 10, 4);
+      instance.pop();
+      instance.fill(selected ? '#fbbf24' : '#94a3b8');
+      instance.noStroke();
+      instance.circle(cfg.x, cfg.y, 12);
+      break;
+    }
+    case 'counterweight': {
+      const pos = runtime.bodyPositions?.[primitive.id] ?? getLivePos(primitive, runtime);
+      instance.fill(selected ? '#fbbf24' : '#64748b');
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.rect(pos.x - 12, pos.y - 16, 24, 32, 4);
+      break;
+    }
+    case 'bucket': {
+      const cfg = primitive.config as { width?: number; depth?: number };
+      const pos = runtime.bodyPositions?.[primitive.id] ?? getLivePos(primitive, runtime);
+      const angle = runtime.bodyPositions?.[primitive.id]?.angle ?? 0;
+      const width = cfg.width ?? 40;
+      const depth = cfg.depth ?? 30;
+      const contents = runtime.bucketContents?.[primitive.id] ?? 0;
+      const state = runtime.bucketStates?.[primitive.id] ?? 'collecting';
+      instance.push();
+      instance.translate(pos.x, pos.y);
+      instance.rotate(angle);
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.fill(selected ? '#fbbf24' : '#cbd5e1');
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, depth / 2, width, 8, 3);
+      instance.line(-width / 2, depth / 2, -width / 2, -depth / 2);
+      instance.line(width / 2, depth / 2, width / 2, -depth / 2);
+      instance.pop();
+      if (selected) {
+        instance.noStroke();
+        instance.fill('#f8fafc');
+        instance.textSize(10);
+        instance.textAlign(instance.CENTER, instance.BOTTOM);
+        instance.text(`${state} · ${contents}`, pos.x, pos.y - depth / 2 - 6);
       }
       break;
     }

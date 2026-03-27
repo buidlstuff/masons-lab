@@ -448,6 +448,12 @@ function taglineForPart(kind: PrimitiveKind) {
       return 'Turns spin into sliding';
     case 'spring-linear':
       return 'Stores stretch and squeeze';
+    case 'crane-arm':
+      return 'Pivots to sweep a tool';
+    case 'counterweight':
+      return 'Adds balancing mass';
+    case 'bucket':
+      return 'Scoops and dumps material';
     case 'pulley':
       return 'Smooth rotating transfer';
     case 'chain-sprocket':
@@ -511,6 +517,12 @@ function iconForPart(kind: PrimitiveKind): string {
       return 'R';
     case 'spring-linear':
       return 'S';
+    case 'crane-arm':
+      return 'A';
+    case 'counterweight':
+      return 'C';
+    case 'bucket':
+      return 'B';
     case 'pulley':
       return 'P';
     case 'chain-sprocket':

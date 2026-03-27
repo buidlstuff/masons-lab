@@ -112,9 +112,12 @@ export function buildMatterWorld(
   let lostCargoCount = 0;
   let throughput = 0;
   const motorPistonMap = new Map<string, string[]>();
+  const motorWinchMap = new Map<string, string[]>();
   const gearRackMap = new Map<string, string>();
   const pistonExtensionsState: Record<string, number> = {};
   const springCompressionsState: Record<string, number> = {};
+  const bucketContentsState: Record<string, number> = {};
+  const bucketStateMap: Record<string, 'collecting' | 'dumping'> = {};
 
   const conveyorSupports: Array<{
     conveyorId: string;
@@ -310,6 +313,26 @@ export function buildMatterWorld(
         );
       }
     }
+
+    if (prim.kind === 'crane-arm') {
+      const cfg = prim.config as { x: number; y: number; length?: number };
+      const armBody = bodyMap.get(prim.id);
+      if (armBody) {
+        const length = cfg.length ?? 120;
+        Matter.World.add(
+          engine.world,
+          Matter.Constraint.create({
+            pointA: { x: cfg.x, y: cfg.y },
+            bodyB: armBody,
+            pointB: { x: -length / 2, y: 0 },
+            length: 0,
+            stiffness: 0.9,
+            damping: 0.5,
+            label: `arm-pivot-${prim.id}`,
+          }),
+        );
+      }
+    }
   }
 
   // ── Pin gears to their spawn point (spin in place) ────────────────────────
@@ -442,6 +465,19 @@ export function buildMatterWorld(
       })
       .map((p) => p.id);
     motorPistonMap.set(motor.id, pistonIds);
+  }
+
+  // Motor → winch proximity map
+  for (const motor of manifest.primitives.filter((p) => p.kind === 'motor')) {
+    const mCfg = motor.config as { x: number; y: number };
+    const winchIds = manifest.primitives
+      .filter((p) => p.kind === 'winch')
+      .filter((p) => {
+        const wCfg = p.config as { x: number; y: number };
+        return Math.hypot(wCfg.x - mCfg.x, wCfg.y - mCfg.y) < 220;
+      })
+      .map((p) => p.id);
+    motorWinchMap.set(motor.id, winchIds);
   }
 
   // Gear → rack proximity map
@@ -766,7 +802,7 @@ export function buildMatterWorld(
     }
   }
 
-  function tickPistons() {
+  function tickPistons(dt: number) {
     for (const prim of manifest.primitives.filter((p) => p.kind === 'piston')) {
       const powered = [...activeMotorIds].some((motorId) => (motorPistonMap.get(motorId) ?? []).includes(prim.id));
       const cfg = prim.config as { x: number; y: number; stroke?: number; speed?: number; orientation?: string };
@@ -776,8 +812,8 @@ export function buildMatterWorld(
       if (!rodBody) continue;
       const ext = pistonExtensionsState[prim.id] ?? 0;
       const nextExt = powered
-        ? Math.min(1, ext + (speed / Math.max(1, stroke)) * _dt)
-        : Math.max(0, ext - (speed / Math.max(1, stroke)) * _dt);
+        ? Math.min(1, ext + (speed / Math.max(1, stroke)) * dt)
+        : Math.max(0, ext - (speed / Math.max(1, stroke)) * dt);
       pistonExtensionsState[prim.id] = nextExt;
       const vertical = cfg.orientation === 'vertical';
       Matter.Body.setPosition(rodBody, {
@@ -815,6 +851,50 @@ export function buildMatterWorld(
       const rest = cfg.restLength ?? 40;
       const current = Math.hypot(plateBody.position.x - cfg.x, plateBody.position.y - cfg.y);
       springCompressionsState[prim.id] = Math.max(0, Math.min(1, 1 - current / Math.max(1, rest)));
+    }
+  }
+
+  function tickWinches(dt: number) {
+    for (const prim of manifest.primitives.filter((p) => p.kind === 'winch')) {
+      const powered = [...activeMotorIds].some((motorId) => (motorWinchMap.get(motorId) ?? []).includes(prim.id));
+      if (!powered) continue;
+      const cfg = prim.config as { speed?: number };
+      const winchBody = bodyMap.get(prim.id);
+      if (!winchBody) continue;
+      for (const constraint of ropeConstraints) {
+        if (constraint.bodyA !== winchBody) continue;
+        const delta = Math.min((cfg.speed ?? 10) * dt, 2);
+        constraint.length = Math.max(50, constraint.length - delta);
+      }
+    }
+  }
+
+  function tickBuckets() {
+    for (const prim of manifest.primitives.filter((p) => p.kind === 'bucket')) {
+      const bucketBody = bodyMap.get(prim.id);
+      if (!bucketBody) continue;
+      const rawAngle = ((bucketBody.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const state = bucketStateMap[prim.id] ?? 'collecting';
+      if (state === 'collecting' && rawAngle > 1.745) {
+        bucketStateMap[prim.id] = 'dumping';
+        bucketContentsState[prim.id] = 0;
+      } else if (state === 'dumping' && rawAngle < 1.047) {
+        bucketStateMap[prim.id] = 'collecting';
+      }
+
+      if (bucketStateMap[prim.id] !== 'dumping') {
+        let count = 0;
+        const bx = bucketBody.position.x;
+        const by = bucketBody.position.y;
+        for (const matPrim of manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind))) {
+          const matBody = bodyMap.get(matPrim.id);
+          if (!matBody || collectedCargoIds.has(matPrim.id)) continue;
+          if (Math.hypot(matBody.position.x - bx, matBody.position.y - by) < 30) {
+            count += 1;
+          }
+        }
+        bucketContentsState[prim.id] = count;
+      }
     }
   }
 
@@ -881,11 +961,13 @@ export function buildMatterWorld(
         flywheelHops += 1;
       }
     }
-    tickPistons();
+    tickWinches(_dt);
+    tickPistons(_dt);
     tickRacks();
     tickSprings();
     const conveyorFrame = tickConveyors();
     const collectedThisTick = tickHopper();
+    tickBuckets();
     recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
     throughput = throughput * 0.84 + (collectedThisTick > 0 ? (collectedThisTick / Math.max(_dt, 0.016)) : 0) * 0.16;
 
@@ -989,8 +1071,8 @@ export function buildMatterWorld(
       lostCargoCount,
       stableCargoSpawns: Object.fromEntries(cargoSpawnMap.entries()),
       pistonExtensions: { ...pistonExtensionsState },
-      bucketContents: {},
-      bucketStates: {},
+      bucketContents: { ...bucketContentsState },
+      bucketStates: { ...bucketStateMap },
       springCompressions: { ...springCompressionsState },
       sandParticlePositions: [],
     };
@@ -1169,6 +1251,38 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
           frictionAir: 0.3,
         },
       );
+    }
+
+    case 'crane-arm': {
+      const cfg = prim.config as { x: number; y: number; length?: number };
+      const length = cfg.length ?? 120;
+      return Matter.Bodies.rectangle(cfg.x + length / 2, cfg.y, length, 10, {
+        label: prim.id,
+        density: 0.001,
+        frictionAir: 0.1,
+      });
+    }
+
+    case 'counterweight': {
+      const cfg = prim.config as { x: number; y: number; mass?: number };
+      return Matter.Bodies.rectangle(cfg.x, cfg.y, 24, 32, {
+        label: prim.id,
+        mass: cfg.mass ?? 5,
+        frictionAir: 0.05,
+        restitution: 0.1,
+      });
+    }
+
+    case 'bucket': {
+      const cfg = prim.config as { x: number; y: number; width?: number; depth?: number };
+      const width = cfg.width ?? 40;
+      const depth = cfg.depth ?? 30;
+      return Matter.Bodies.rectangle(cfg.x, cfg.y + depth / 2, width, 8, {
+        label: prim.id,
+        density: 0.001,
+        frictionAir: 0.1,
+        restitution: 0.05,
+      });
     }
 
     case 'motor': {

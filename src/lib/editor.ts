@@ -141,6 +141,12 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
       return { id: `rack-${nanoid(6)}`, kind, label: 'Rack', config: { x, y, width: 80, orientation: 'horizontal' } };
     case 'spring-linear':
       return { id: `spring-${nanoid(6)}`, kind, label: 'Linear Spring', config: { x, y, orientation: 'horizontal', restLength: 40, stiffness: 0.05 } };
+    case 'crane-arm':
+      return { id: `arm-${nanoid(6)}`, kind, label: 'Crane Arm', config: { x, y, length: 120 } };
+    case 'counterweight':
+      return { id: `counter-${nanoid(6)}`, kind, label: 'Counterweight', config: { x, y, mass: 5 } };
+    case 'bucket':
+      return { id: `bucket-${nanoid(6)}`, kind, label: 'Bucket', config: { x, y, width: 40, depth: 30 } };
     case 'winch':
       return { id: `winch-${nanoid(6)}`, kind, label: 'Winch', config: { x, y, speed: 30, ropeLength: 180 } };
     case 'rope':
