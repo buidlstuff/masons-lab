@@ -108,6 +108,7 @@ export function buildMatterWorld(
   const MATERIAL_KINDS: PrimitiveKind[] = ['cargo-block', 'ball', 'rock'];
   const engine = Matter.Engine.create({ gravity: { x: 0, y: 1.2 } });
   const bodyMap = new Map<string, Matter.Body>();
+  const primitiveMap = new Map(manifest.primitives.map((primitive) => [primitive.id, primitive] as const));
   const ropeConstraints: Array<{
     primitiveId: string;
     fromId: string;
@@ -121,6 +122,8 @@ export function buildMatterWorld(
   const cargoStates = new Map<string, CargoLifecycleState>();
   const collectedCargoIds = new Set<string>();
   const wagonCargoAssignments = new Map<string, { wagonId: string; slot: number }>();
+  const wagonCargoCooldowns = new Map<string, number>();
+  const wagonUnloadTimers = new Map<string, number>();
   let lostCargoCount = 0;
   let throughput = 0;
   const motorPistonMap = new Map<string, string[]>();
@@ -152,7 +155,7 @@ export function buildMatterWorld(
   }> = [];
 
   function primitiveCurrentPoint(primitiveId: string) {
-    const primitive = manifest.primitives.find((item) => item.id === primitiveId);
+    const primitive = primitiveMap.get(primitiveId);
     if (!primitive) return { x: 0, y: 0 };
     const body = bodyMap.get(primitive.id);
     if (body) return { x: body.position.x, y: body.position.y };
@@ -163,7 +166,7 @@ export function buildMatterWorld(
   }
 
   function anchorForPrimitive(primitiveId: string) {
-    const primitive = manifest.primitives.find((item) => item.id === primitiveId);
+    const primitive = primitiveMap.get(primitiveId);
     if (!primitive) {
       return { pointA: { x: 0, y: 0 } };
     }
@@ -196,6 +199,74 @@ export function buildMatterWorld(
   }) {
     const prefix = ropePrefixLength(entry.fromId, entry.viaIds);
     entry.constraint.length = Math.max(24, entry.totalLength - prefix);
+  }
+
+  function listAssignedCargoForWagon(wagonId: string) {
+    return [...wagonCargoAssignments.entries()]
+      .filter(([, entry]) => entry.wagonId === wagonId)
+      .sort((a, b) => a[1].slot - b[1].slot);
+  }
+
+  function compactWagonAssignments(wagonId: string) {
+    const assignedCargo = listAssignedCargoForWagon(wagonId);
+    assignedCargo.forEach(([cargoId, entry], slot) => {
+      if (entry.slot !== slot) {
+        wagonCargoAssignments.set(cargoId, { wagonId, slot });
+      }
+    });
+    return listAssignedCargoForWagon(wagonId);
+  }
+
+  function findWagonUnloadTarget(
+    wagonPos: { x: number; y: number },
+  ): { x: number; y: number; vx: number; vy: number; priority: number; dist: number } | null {
+    let best: { x: number; y: number; vx: number; vy: number; priority: number; dist: number } | null = null;
+
+    const considerTarget = (
+      priority: number,
+      x: number,
+      y: number,
+      vx: number,
+      vy: number,
+      maxDist: number,
+    ) => {
+      const dist = Math.hypot(x - wagonPos.x, y - wagonPos.y);
+      if (dist > maxDist) return;
+      if (!best || priority < best.priority || (priority === best.priority && dist < best.dist)) {
+        best = { x, y, vx, vy, priority, dist };
+      }
+    };
+
+    for (const primitive of manifest.primitives) {
+      if (primitive.kind === 'hopper') {
+        const cfg = primitive.config as { x: number; y: number };
+        considerTarget(0, cfg.x, cfg.y - 46, 0, 1.6, 110);
+      }
+
+      if (primitive.kind === 'chute') {
+        const cfg = primitive.config as { x: number; y: number; length?: number; angle?: number };
+        const angle = ((cfg.angle ?? 30) * Math.PI) / 180;
+        const halfLength = (cfg.length ?? 100) / 2;
+        const topX = cfg.x - Math.cos(angle) * halfLength;
+        const topY = cfg.y - Math.sin(angle) * halfLength;
+        considerTarget(1, topX, topY - 18, Math.cos(angle) * 1.2, Math.sin(angle) * 1.2, 86);
+      }
+
+      if (primitive.kind === 'silo-bin') {
+        const cfg = primitive.config as { x: number; y: number; width?: number; height?: number };
+        const height = cfg.height ?? 100;
+        considerTarget(1, cfg.x, cfg.y - height / 2 - 22, 0, 1.4, 92);
+      }
+
+      if (primitive.kind === 'conveyor') {
+        const path = (primitive.config as { path: Array<{ x: number; y: number }> }).path;
+        const closest = closestPointOnPolyline(path, wagonPos.x, wagonPos.y);
+        if (!closest) continue;
+        considerTarget(2, closest.x, closest.y - 18, closest.dx * 2.2, closest.dy * 0.8, 60);
+      }
+    }
+
+    return best;
   }
 
   // Ground + boundary walls
@@ -385,8 +456,8 @@ export function buildMatterWorld(
 
     if (prim.kind === 'rope' || isTransmissionConnectorKind(prim.kind)) {
       const cfg = prim.config as { fromId: string; toId: string; length: number; viaIds?: string[] };
-      const fromPrim = manifest.primitives.find((item) => item.id === cfg.fromId);
-      const toPrim = manifest.primitives.find((item) => item.id === cfg.toId);
+      const fromPrim = primitiveMap.get(cfg.fromId);
+      const toPrim = primitiveMap.get(cfg.toId);
       const actsAsTransmission = prim.kind !== 'rope'
         || (fromPrim && toPrim && isRotatingPrimitiveKind(fromPrim.kind) && isRotatingPrimitiveKind(toPrim.kind));
       if (actsAsTransmission && fromPrim && toPrim && isRotatingPrimitiveKind(fromPrim.kind) && isRotatingPrimitiveKind(toPrim.kind)) {
@@ -403,7 +474,7 @@ export function buildMatterWorld(
       } else if (prim.kind === 'rope') {
         const hookBody = bodyMap.get(cfg.toId);
         if (!fromPrim || !hookBody) continue;
-        const viaIds = (cfg.viaIds ?? []).filter((viaId) => manifest.primitives.some((item) => item.id === viaId));
+        const viaIds = (cfg.viaIds ?? []).filter((viaId) => primitiveMap.has(viaId));
         const anchorId = viaIds.at(-1) ?? cfg.fromId;
         const anchor = anchorForPrimitive(anchorId);
         const constraint = Matter.Constraint.create({
@@ -854,8 +925,8 @@ export function buildMatterWorld(
   }
 
   function getMotorState(motorId: string) {
-    const motor = manifest.primitives.find((primitive) => primitive.id === motorId && primitive.kind === 'motor');
-    if (!motor) {
+    const motor = primitiveMap.get(motorId);
+    if (!motor || motor.kind !== 'motor') {
       return { powered: false, rpm: 0 };
     }
     const cfg = motor.config as { rpm: number; powerState: boolean };
@@ -1098,7 +1169,7 @@ export function buildMatterWorld(
       if (!rackBody || !gearId) continue;
       const gearBody = bodyMap.get(gearId);
       if (!gearBody) continue;
-      const gearPrim = manifest.primitives.find((p) => p.id === gearId);
+      const gearPrim = primitiveMap.get(gearId);
       if (!gearPrim) continue;
       const radius = rotatingRadius(gearPrim);
       const linearVel = gearBody.angularVelocity * radius;
@@ -1164,10 +1235,19 @@ export function buildMatterWorld(
     }
   }
 
-  function tickWagons() {
+  function tickWagons(dt: number) {
     const wagonLoads: Record<string, number> = {};
     const wagons = manifest.primitives.filter((p) => p.kind === 'wagon');
     if (wagons.length === 0) return wagonLoads;
+
+    for (const [cargoId, cooldown] of [...wagonCargoCooldowns.entries()]) {
+      const nextCooldown = cooldown - dt;
+      if (nextCooldown <= 0) {
+        wagonCargoCooldowns.delete(cargoId);
+      } else {
+        wagonCargoCooldowns.set(cargoId, nextCooldown);
+      }
+    }
 
     for (const [cargoId] of [...wagonCargoAssignments.entries()]) {
       const body = bodyMap.get(cargoId);
@@ -1178,16 +1258,44 @@ export function buildMatterWorld(
 
     for (const wagon of wagons) {
       const cfg = wagon.config as { trackId: string; offset: number; capacity?: number };
-      const trackPrim = manifest.primitives.find((p) => p.id === cfg.trackId);
-      const wagonProgress = Math.max(0, (locoProgress + cfg.offset) % 1);
+      const trackPrim = primitiveMap.get(cfg.trackId);
+      const wagonProgress = wrapUnitProgress(locoProgress + cfg.offset);
       const wagonPos = trackPoint(trackPrim, wagonProgress);
       const capacity = cfg.capacity ?? 6;
 
-      let loadedCount = [...wagonCargoAssignments.values()].filter((entry) => entry.wagonId === wagon.id).length;
-      if (loadedCount < capacity) {
+      let assignedCargo = compactWagonAssignments(wagon.id);
+      const unloadTarget = findWagonUnloadTarget(wagonPos);
+      if (assignedCargo.length > 0 && unloadTarget) {
+        const target = unloadTarget;
+        const nextTimer = Math.max(0, (wagonUnloadTimers.get(wagon.id) ?? 0) - dt);
+        if (nextTimer <= 0) {
+          const [cargoId] = assignedCargo[0];
+          const body = bodyMap.get(cargoId);
+          if (body) {
+            wagonCargoAssignments.delete(cargoId);
+            wagonCargoCooldowns.set(cargoId, 0.7);
+            Matter.Body.setStatic(body, false);
+            Matter.Body.setPosition(body, { x: target.x, y: target.y });
+            Matter.Body.setVelocity(body, { x: target.vx, y: target.vy });
+            Matter.Body.setAngle(body, 0);
+            Matter.Body.setAngularVelocity(body, 0);
+            cargoStates.set(cargoId, 'airborne');
+          }
+          wagonUnloadTimers.set(wagon.id, 0.28);
+        } else {
+          wagonUnloadTimers.set(wagon.id, nextTimer);
+        }
+      } else {
+        wagonUnloadTimers.delete(wagon.id);
+      }
+
+      assignedCargo = compactWagonAssignments(wagon.id);
+      let loadedCount = assignedCargo.length;
+      if (loadedCount < capacity && !unloadTarget) {
         for (const material of manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind))) {
           const body = bodyMap.get(material.id);
           if (!body || collectedCargoIds.has(material.id) || wagonCargoAssignments.has(material.id)) continue;
+          if ((wagonCargoCooldowns.get(material.id) ?? 0) > 0) continue;
           if ((material.config as { attachedToId?: string }).attachedToId) continue;
           if (Math.abs(body.position.x - wagonPos.x) > 24 || Math.abs(body.position.y - wagonPos.y) > 20) continue;
           wagonCargoAssignments.set(material.id, { wagonId: wagon.id, slot: loadedCount });
@@ -1198,9 +1306,7 @@ export function buildMatterWorld(
         }
       }
 
-      const assignedCargo = [...wagonCargoAssignments.entries()]
-        .filter(([, entry]) => entry.wagonId === wagon.id)
-        .sort((a, b) => a[1].slot - b[1].slot);
+      assignedCargo = compactWagonAssignments(wagon.id);
       wagonLoads[wagon.id] = assignedCargo.length;
 
       for (const [cargoId, entry] of assignedCargo) {
@@ -1228,14 +1334,14 @@ export function buildMatterWorld(
   function tickLocomotive(dt: number, prevProgress: number): number {
     if (!locoPrim) return prevProgress;
     const cfg = locoPrim.config as { speed: number; trackId: string; drivePartId?: string };
-    const trackPrim = manifest.primitives.find((p) => p.id === cfg.trackId);
+    const trackPrim = primitiveMap.get(cfg.trackId);
     if (cfg.drivePartId && trackPrim) {
-      const drivePrim = manifest.primitives.find((p) => p.id === cfg.drivePartId);
+      const drivePrim = primitiveMap.get(cfg.drivePartId);
       const driveBody = drivePrim ? bodyMap.get(drivePrim.id) : null;
       if (drivePrim && driveBody && isRotatingPrimitiveKind(drivePrim.kind)) {
         const linearSpeed = Math.abs(driveBody.angularVelocity * rotatingRadius(drivePrim));
         const delta = dt * (linearSpeed / Math.max(1, trackLength(trackPrim)));
-        return (prevProgress + delta) % 1;
+        return wrapUnitProgress(prevProgress + delta);
       }
     }
     const speedControl = manifest.controls.find(
@@ -1244,7 +1350,7 @@ export function buildMatterWorld(
     const speed = speedControl
       ? Number(currentControls[speedControl.id] ?? cfg.speed)
       : cfg.speed;
-    return (locoProgress + dt * Math.abs(speed) * 0.35) % 1;
+    return wrapUnitProgress(prevProgress + dt * Math.abs(speed) * 0.35);
   }
 
   // ── tick ──────────────────────────────────────────────────────────────────
@@ -1319,7 +1425,7 @@ export function buildMatterWorld(
     tickSprings();
     const conveyorFrame = tickConveyors();
     tickWaterZones(conveyorFrame.supportedCargoIds);
-    const wagonLoads = tickWagons();
+    const wagonLoads = tickWagons(_dt);
     const collectedThisTick = tickHopper();
     tickBuckets();
     recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
@@ -1330,7 +1436,7 @@ export function buildMatterWorld(
         || particle.position.x > CANVAS_W + 80
       ) {
         const pileId = particle.label.replace(/^sand-/, '').replace(/-\d+$/, '');
-        const pilePrim = manifest.primitives.find((p) => p.id === pileId);
+        const pilePrim = primitiveMap.get(pileId);
         if (!pilePrim) continue;
         const cfg = pilePrim.config as { x: number; y: number };
         Matter.Body.setPosition(particle, { x: cfg.x + (Math.random() - 0.5) * 20, y: cfg.y });
@@ -1344,7 +1450,7 @@ export function buildMatterWorld(
 
     for (const [id, body] of bodyMap) {
       bodyPositions[id] = { x: body.position.x, y: body.position.y, angle: body.angle };
-      const prim = manifest.primitives.find((p) => p.id === id);
+      const prim = primitiveMap.get(id);
       if (prim && isRotatingPrimitiveKind(prim.kind)) {
         rotations[id] = body.angle;
       }
@@ -1356,15 +1462,13 @@ export function buildMatterWorld(
 
     // Virtual positions for loco + wagons (not real physics bodies)
     if (locoPrim) {
-      const trackPrim = manifest.primitives.find(
-        (p) => p.id === (locoPrim.config as { trackId: string }).trackId,
-      );
+      const trackPrim = primitiveMap.get((locoPrim.config as { trackId: string }).trackId);
       const locoPos = trackPoint(trackPrim, locoProgress);
       bodyPositions[locoPrim.id] = { x: locoPos.x, y: locoPos.y, angle: 0 };
 
       for (const wagon of manifest.primitives.filter((p) => p.kind === 'wagon')) {
         const wCfg = wagon.config as { offset: number };
-        const wProgress = Math.max(0, (locoProgress + wCfg.offset) % 1);
+        const wProgress = wrapUnitProgress(locoProgress + wCfg.offset);
         const wPos = trackPoint(trackPrim, wProgress);
         bodyPositions[wagon.id] = { x: wPos.x, y: wPos.y, angle: 0 };
       }
@@ -1487,6 +1591,41 @@ function distToPolyline(points: Array<{ x: number; y: number }>, px: number, py:
     );
   }
   return closest;
+}
+
+function closestPointOnPolyline(
+  points: Array<{ x: number; y: number }>,
+  px: number,
+  py: number,
+): { x: number; y: number; dx: number; dy: number; dist: number } | null {
+  if (points.length < 2) return null;
+
+  let best: { x: number; y: number; dx: number; dy: number; dist: number } | null = null;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const ax = points[index].x;
+    const ay = points[index].y;
+    const bx = points[index + 1].x;
+    const by = points[index + 1].y;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) continue;
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+    const x = ax + t * dx;
+    const y = ay + t * dy;
+    const dist = Math.hypot(px - x, py - y);
+    const invLen = 1 / Math.sqrt(lenSq);
+    const unitX = dx * invLen;
+    const unitY = dy * invLen;
+    if (!best || dist < best.dist) {
+      best = { x, y, dx: unitX, dy: unitY, dist };
+    }
+  }
+  return best;
+}
+
+function wrapUnitProgress(value: number) {
+  return ((value % 1) + 1) % 1;
 }
 
 /**

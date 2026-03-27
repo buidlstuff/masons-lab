@@ -59,9 +59,53 @@ async function loadAssistantApi() {
   return import('../lib/api');
 }
 
-function getPrimitiveAnchor(primitive: PrimitiveInstance) {
+function averagePoint(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) {
+    return { x: 0, y: 0 };
+  }
+  const total = points.reduce(
+    (acc, point) => ({ x: acc.x + point.x, y: acc.y + point.y }),
+    { x: 0, y: 0 },
+  );
+  return { x: total.x / points.length, y: total.y / points.length };
+}
+
+function getPrimitiveAnchor(
+  primitive: PrimitiveInstance,
+  manifest: ExperimentManifest,
+  visited = new Set<string>(),
+): { x: number; y: number } {
+  if (visited.has(primitive.id)) {
+    return { x: 0, y: 0 };
+  }
+  const nextVisited = new Set(visited).add(primitive.id);
   if ('x' in primitive.config && 'y' in primitive.config) {
     return { x: primitive.config.x, y: primitive.config.y };
+  }
+  if ('path' in primitive.config) {
+    return averagePoint((primitive.config as { path: Array<{ x: number; y: number }> }).path);
+  }
+  if ('points' in primitive.config) {
+    return averagePoint((primitive.config as { points: Array<{ x: number; y: number }> }).points);
+  }
+  if (primitive.kind === 'locomotive' || primitive.kind === 'wagon') {
+    const track = manifest.primitives.find(
+      (item) => item.id === (primitive.config as { trackId?: string }).trackId && item.kind === 'rail-segment',
+    );
+    if (track?.kind === 'rail-segment') {
+      return averagePoint((track.config as { points: Array<{ x: number; y: number }> }).points);
+    }
+  }
+  if (primitive.kind === 'rope' || primitive.kind === 'belt-link' || primitive.kind === 'chain-link') {
+    const cfg = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
+    const ids = [cfg.fromId, ...(cfg.viaIds ?? []), cfg.toId];
+    const points: Array<{ x: number; y: number }> = ids
+      .map((id) => manifest.primitives.find((item) => item.id === id))
+      .filter((item): item is PrimitiveInstance => Boolean(item))
+      .map((item) => getPrimitiveAnchor(item, manifest, nextVisited));
+    if (points.length > 0) {
+      return averagePoint(points);
+    }
   }
   return { x: 0, y: 0 };
 }
@@ -71,13 +115,13 @@ function findNearestPrimitive(
   source: PrimitiveInstance,
   predicate: (primitive: PrimitiveInstance) => boolean,
 ) {
-  const sourceAnchor = getPrimitiveAnchor(source);
+  const sourceAnchor = getPrimitiveAnchor(source, manifest);
   return manifest.primitives
     .filter((primitive) => primitive.id !== source.id)
     .filter(predicate)
     .sort((a, b) => {
-      const aAnchor = getPrimitiveAnchor(a);
-      const bAnchor = getPrimitiveAnchor(b);
+      const aAnchor = getPrimitiveAnchor(a, manifest);
+      const bAnchor = getPrimitiveAnchor(b, manifest);
       return Math.hypot(aAnchor.x - sourceAnchor.x, aAnchor.y - sourceAnchor.y)
         - Math.hypot(bAnchor.x - sourceAnchor.x, bAnchor.y - sourceAnchor.y);
     })[0];
@@ -793,6 +837,72 @@ export function BuildPage() {
     showStatus(`Linked the locomotive to the ${driver.label ?? driver.kind}.`, 'success');
   }, [manifest, persistDraft, selectedPrimitive, showStatus]);
 
+  const handleRouteDriveLinkThroughIdler = useCallback(() => {
+    if (!manifest || !selectedPrimitive) return;
+    const beltIdlerKinds: PrimitiveKind[] = ['wheel', 'pulley', 'flywheel'];
+    const chainIdlerKinds: PrimitiveKind[] = ['chain-sprocket'];
+    const selectedKind = selectedPrimitive.kind;
+    const isBeltIdler = beltIdlerKinds.includes(selectedKind);
+    const isChainIdler = chainIdlerKinds.includes(selectedKind);
+    if (!isBeltIdler && !isChainIdler) return;
+
+    const idler = selectedPrimitive;
+    const idlerAnchor = getPrimitiveAnchor(idler, manifest);
+    const connector = manifest.primitives
+      .filter((primitive) => primitive.kind === (isChainIdler ? 'chain-link' : 'belt-link'))
+      .filter((primitive) => {
+        const config = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
+        return config.fromId !== idler.id
+          && config.toId !== idler.id
+          && !(config.viaIds ?? []).includes(idler.id);
+      })
+      .sort((a, b) => {
+        const aAnchor = getPrimitiveAnchor(a, manifest);
+        const bAnchor = getPrimitiveAnchor(b, manifest);
+        return Math.hypot(aAnchor.x - idlerAnchor.x, aAnchor.y - idlerAnchor.y)
+          - Math.hypot(bAnchor.x - idlerAnchor.x, bAnchor.y - idlerAnchor.y);
+      })[0];
+
+    if (!connector) {
+      showStatus(
+        isChainIdler
+          ? 'Place a chain link first, then Quick Connect can route it through this sprocket.'
+          : 'Place a belt link first, then Quick Connect can route it through this idler.',
+        'warning',
+      );
+      return;
+    }
+
+    const config = connector.config as { fromId: string; toId: string; length: number; viaIds?: string[] };
+    const nextViaIds = [...new Set([...(config.viaIds ?? []), idler.id])];
+    const ids = [config.fromId, ...nextViaIds, config.toId];
+    const nextLength = ids.reduce((total, id, index) => {
+      if (index === 0) return 0;
+      const current = manifest.primitives.find((primitive) => primitive.id === id);
+      const previous = manifest.primitives.find((primitive) => primitive.id === ids[index - 1]);
+      if (!current || !previous) return total;
+      const currentAnchor = getPrimitiveAnchor(current, manifest);
+      const previousAnchor = getPrimitiveAnchor(previous, manifest);
+      return total + Math.hypot(currentAnchor.x - previousAnchor.x, currentAnchor.y - previousAnchor.y);
+    }, 0);
+
+    void persistDraft(
+      updatePrimitive(manifest, connector.id, {
+        ...config,
+        viaIds: nextViaIds,
+        length: Math.max(config.length, nextLength),
+      }),
+      undefined,
+      { recordHistory: true },
+    );
+    showStatus(
+      isChainIdler
+        ? 'Routed the chain link through the sprocket.'
+        : 'Routed the drive link through the idler.',
+      'success',
+    );
+  }, [manifest, persistDraft, selectedPrimitive, showStatus]);
+
   const handleRouteRopeThroughPulley = useCallback(() => {
     if (!manifest || !selectedPrimitive) return;
     const pulley = selectedPrimitive.kind === 'pulley'
@@ -815,11 +925,25 @@ export function BuildPage() {
       return;
     }
 
-    const nextViaIds = [...new Set([...(rope.config as { viaIds?: string[] }).viaIds ?? [], pulley.id])];
+    const ropeConfig = rope.config as { fromId: string; toId: string; length: number; viaIds?: string[] };
+    const nextViaIds = [...new Set([...(ropeConfig.viaIds ?? []), pulley.id])];
+    const prevIds = [ropeConfig.fromId, ...(ropeConfig.viaIds ?? []), ropeConfig.toId];
+    const nextIds = [ropeConfig.fromId, ...nextViaIds, ropeConfig.toId];
+    const measurePath = (ids: string[]) => ids.reduce((total, id, index) => {
+      if (index === 0) return 0;
+      const current = manifest.primitives.find((primitive) => primitive.id === id);
+      const previous = manifest.primitives.find((primitive) => primitive.id === ids[index - 1]);
+      if (!current || !previous) return total;
+      const currentAnchor = getPrimitiveAnchor(current, manifest);
+      const previousAnchor = getPrimitiveAnchor(previous, manifest);
+      return total + Math.hypot(currentAnchor.x - previousAnchor.x, currentAnchor.y - previousAnchor.y);
+    }, 0);
+    const nextLength = ropeConfig.length + Math.max(0, measurePath(nextIds) - measurePath(prevIds));
     void persistDraft(
       updatePrimitive(manifest, rope.id, {
-        ...rope.config,
+        ...ropeConfig,
         viaIds: nextViaIds,
+        length: nextLength,
       }),
       undefined,
       { recordHistory: true },
@@ -1378,7 +1502,9 @@ export function BuildPage() {
                   : selectedPrimitive.kind === 'winch'
                     ? 'Use this to either hang the winch from a hook path or mount it onto a chassis.'
                     : selectedPrimitive.kind === 'pulley'
-                      ? 'Use this to route an existing rope or add a drive link between rotating parts.'
+                      ? 'Use this to route an existing rope or belt through the pulley, or add a drive link between rotating parts.'
+                      : selectedPrimitive.kind === 'chain-sprocket'
+                        ? 'Use this to add a chain link between rotating parts or route an existing chain through this sprocket.'
                   : 'Use this to mount or attach the selected part to the nearest compatible partner.'}
             </p>
             <div className="button-row vertical">
@@ -1416,6 +1542,13 @@ export function BuildPage() {
                 onClick={handleRouteRopeThroughPulley}
               >
                 Route Rope Through Pulley
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPrimitiveId || !['wheel', 'pulley', 'flywheel', 'chain-sprocket'].includes(selectedPrimitive.kind)}
+                onClick={handleRouteDriveLinkThroughIdler}
+              >
+                Route Drive Link Through Idler
               </button>
               <button
                 type="button"

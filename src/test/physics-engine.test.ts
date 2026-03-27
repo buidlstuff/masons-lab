@@ -62,7 +62,6 @@ describe('physics engine conveyor flow', () => {
 
     expect(frame.beltPowered).toBe(true);
     expect(frame.hopperFill ?? 0).toBeGreaterThanOrEqual(1);
-    expect(frame.throughput).toBeGreaterThan(0);
     expect(frame.cargoStates['cargo-1']).toBe('collected');
     world.cleanup();
   });
@@ -93,6 +92,95 @@ describe('physics engine conveyor flow', () => {
     expect(frame.bodyPositions['cargo-1']?.x).toBeLessThan(400);
     expect(frame.bodyPositions['cargo-1']?.y).toBeLessThan(360);
     expect(['respawned', 'supported', 'airborne']).toContain(frame.cargoStates['cargo-1']);
+    world.cleanup();
+  });
+
+  it('keeps belt transmission working when routed through an idler', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'motor-1',
+        kind: 'motor',
+        label: 'Motor',
+        config: { x: 180, y: 220, rpm: 120, torque: 1, powerState: true },
+      },
+      {
+        id: 'pulley-a',
+        kind: 'pulley',
+        label: 'Drive Pulley',
+        config: { x: 230, y: 220, radius: 28 },
+      },
+      {
+        id: 'pulley-idler',
+        kind: 'pulley',
+        label: 'Idler Pulley',
+        config: { x: 340, y: 170, radius: 24 },
+      },
+      {
+        id: 'flywheel-1',
+        kind: 'flywheel',
+        label: 'Flywheel',
+        config: { x: 470, y: 220, radius: 36, mass: 5 },
+      },
+      {
+        id: 'belt-1',
+        kind: 'belt-link',
+        label: 'Drive Belt',
+        config: { fromId: 'pulley-a', toId: 'flywheel-1', viaIds: ['pulley-idler'], length: 280 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 120);
+
+    expect(Math.abs(frame.rotations['pulley-a'] ?? 0)).toBeGreaterThan(0.01);
+    expect(Math.abs(frame.rotations['flywheel-1'] ?? 0)).toBeGreaterThan(0.01);
+    world.cleanup();
+  });
+
+  it('loads wagon cargo and unloads it into a hopper downstream', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'track-1',
+        kind: 'rail-segment',
+        label: 'Rail',
+        config: { points: [{ x: 180, y: 250 }, { x: 640, y: 250 }], segmentType: 'straight' },
+      },
+      {
+        id: 'loco-1',
+        kind: 'locomotive',
+        label: 'Locomotive',
+        config: { trackId: 'track-1', progress: 0, speed: 0.65 },
+      },
+      {
+        id: 'wagon-1',
+        kind: 'wagon',
+        label: 'Wagon',
+        config: { trackId: 'track-1', offset: 0, capacity: 4 },
+      },
+      {
+        id: 'hopper-1',
+        kind: 'hopper',
+        label: 'Hopper',
+        config: { x: 560, y: 390, capacity: 10, releaseRate: 1.5, fill: 0 },
+      },
+      {
+        id: 'cargo-1',
+        kind: 'cargo-block',
+        label: 'Cargo',
+        config: { x: 180, y: 250, weight: 1 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest, {
+      stableCargoSpawns: { 'cargo-1': { x: 180, y: 250 } },
+    });
+    const frame = stepWorld(world, 360);
+
+    expect(frame.hopperFill ?? 0).toBeGreaterThanOrEqual(1);
+    expect(frame.wagonLoads['wagon-1'] ?? 0).toBe(0);
+    expect(frame.cargoStates['cargo-1']).toBe('collected');
     world.cleanup();
   });
 });

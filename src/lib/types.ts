@@ -213,6 +213,7 @@ export interface RopeConfig {
   fromId: string;
   toId: string;
   length: number;
+  viaIds?: string[];
 }
 
 export interface BeltLinkConfig {

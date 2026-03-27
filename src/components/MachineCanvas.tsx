@@ -320,8 +320,8 @@ export function MachineCanvas({
       case 'pulley':
       case 'chain-sprocket':
         return sel.kind === 'pulley'
-          ? 'Pulley — use it as a rotating part, or Quick Connect to route a rope through it'
-          : 'Rotating part — place it in a motor ring, touch another rotating part, or Quick Connect a belt link';
+          ? 'Pulley — use it as a rotating part, or Quick Connect to route a rope or belt through it'
+          : 'Chain sprocket — place it in a motor ring, touch another rotating part, or Quick Connect a routed chain';
       case 'flywheel':
         return 'Flywheel — feed it from a motor, gear train, or belt link to store motion';
       case 'gearbox':
@@ -1725,7 +1725,7 @@ function drawPrimitive(
     case 'wagon': {
       const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
       const offset = (primitive.config as { offset: number }).offset;
-      const point = getTrackPoint(track, Math.max(0, runtime.trainProgress + offset));
+      const point = getTrackPoint(track, wrapUnitProgress(runtime.trainProgress + offset));
       instance.fill(selected ? '#fbbf24' : '#94a3b8');
       instance.stroke(selected ? '#fbbf24' : highlight);
       instance.rect(point.x - 18, point.y - 16, 36, 20, 6);
@@ -1972,7 +1972,7 @@ function hitTest(
       case 'wagon': {
         const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
         const offset = (primitive.config as { offset: number }).offset;
-        const point = getTrackPoint(track, Math.max(0, runtime.trainProgress + offset));
+        const point = getTrackPoint(track, wrapUnitProgress(runtime.trainProgress + offset));
         return Math.abs(point.x - x) < 22 && Math.abs(point.y - y) < 20;
       }
       default: {
@@ -2009,9 +2009,13 @@ function getPrimitiveAnchor(
   if (primitive.kind === 'wagon') {
     const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
     const offset = (primitive.config as { offset: number }).offset;
-    return getTrackPoint(track, Math.max(0, runtime.trainProgress + offset));
+    return getTrackPoint(track, wrapUnitProgress(runtime.trainProgress + offset));
   }
   return { x: 0, y: 0 };
+}
+
+function wrapUnitProgress(value: number) {
+  return ((value % 1) + 1) % 1;
 }
 
 function isDraggablePrimitive(primitive: PrimitiveInstance) {
