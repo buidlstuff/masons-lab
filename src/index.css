@@ -1,24 +1,24 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@400;500;700&display=swap');
 
 :root {
-  color-scheme: dark;
-  --bg: #071019;
-  --bg-panel: rgba(12, 24, 34, 0.86);
-  --bg-panel-strong: rgba(10, 20, 28, 0.96);
-  --line: rgba(99, 210, 186, 0.14);
-  --line-strong: rgba(99, 210, 186, 0.28);
-  --text: #edf6f7;
-  --muted: #8ea6ad;
-  --teal: #47c5a5;
-  --amber: #fec84b;
-  --orange: #ef7b45;
-  --blue: #60a5fa;
-  --danger: #f87171;
+  color-scheme: light;
+  --bg: #f3efe3;
+  --bg-panel: rgba(255, 251, 243, 0.86);
+  --bg-panel-strong: rgba(255, 248, 236, 0.96);
+  --line: rgba(61, 120, 132, 0.16);
+  --line-strong: rgba(61, 120, 132, 0.28);
+  --text: #18323a;
+  --muted: #5d7780;
+  --teal: #2f9a7d;
+  --amber: #d8971c;
+  --orange: #d86c36;
+  --blue: #418ad5;
+  --danger: #d05b5b;
   font-family: 'Space Grotesk', sans-serif;
   background:
-    radial-gradient(circle at top right, rgba(71, 197, 165, 0.18), transparent 30%),
-    radial-gradient(circle at bottom left, rgba(96, 165, 250, 0.16), transparent 28%),
-    linear-gradient(180deg, #08131d 0%, #061018 100%);
+    radial-gradient(circle at top right, rgba(255, 220, 134, 0.38), transparent 32%),
+    radial-gradient(circle at bottom left, rgba(114, 191, 208, 0.22), transparent 28%),
+    linear-gradient(180deg, #f6f2e5 0%, #eef6f2 100%);
   color: var(--text);
 }
 
@@ -31,9 +31,9 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    linear-gradient(rgba(71, 197, 165, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(71, 197, 165, 0.06) 1px, transparent 1px),
-    linear-gradient(180deg, #08131d 0%, #061018 100%);
+    linear-gradient(rgba(61, 120, 132, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(61, 120, 132, 0.05) 1px, transparent 1px),
+    linear-gradient(180deg, #f6f2e5 0%, #eef6f2 100%);
   background-size: 32px 32px, 32px 32px, auto;
 }
 
@@ -51,7 +51,7 @@ textarea {
 button,
 .primary-link {
   border: 1px solid var(--line-strong);
-  background: linear-gradient(180deg, rgba(71, 197, 165, 0.16), rgba(71, 197, 165, 0.1));
+  background: linear-gradient(180deg, rgba(255, 247, 221, 0.96), rgba(255, 255, 255, 0.84));
   color: var(--text);
   border-radius: 999px;
   padding: 0.8rem 1.2rem;
@@ -135,8 +135,8 @@ button:disabled {
   justify-content: space-between;
   padding: 1rem 1.5rem;
   backdrop-filter: blur(18px);
-  background: rgba(5, 12, 18, 0.8);
-  border-bottom: 1px solid rgba(71, 197, 165, 0.12);
+  background: rgba(255, 250, 241, 0.82);
+  border-bottom: 1px solid rgba(61, 120, 132, 0.12);
 }
 
 .brand-mark {
@@ -151,8 +151,8 @@ button:disabled {
   display: grid;
   place-items: center;
   border-radius: 16px;
-  background: linear-gradient(135deg, rgba(71, 197, 165, 0.24), rgba(254, 200, 75, 0.22));
-  border: 1px solid rgba(71, 197, 165, 0.26);
+  background: linear-gradient(135deg, rgba(255, 225, 140, 0.55), rgba(109, 195, 182, 0.38));
+  border: 1px solid rgba(61, 120, 132, 0.18);
   font-weight: 700;
 }
 
@@ -206,6 +206,7 @@ button:disabled {
   border-radius: 24px;
   padding: 1rem 1.1rem;
   backdrop-filter: blur(16px);
+  box-shadow: 0 18px 48px rgba(75, 90, 102, 0.08);
 }
 
 .hero-panel ul,
@@ -1613,6 +1614,150 @@ button:disabled {
 
 .small-panel {
   min-height: 0;
+}
+
+.task-ribbon,
+.recovery-strip,
+.build-help-drawer,
+.adult-tools-panel {
+  background: linear-gradient(180deg, rgba(255, 251, 242, 0.94), rgba(244, 249, 245, 0.88));
+}
+
+.task-ribbon {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.task-ribbon-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.task-ribbon-copy h2,
+.recovery-strip-copy strong {
+  margin: 0;
+}
+
+.task-ribbon-copy p,
+.recovery-strip-copy p {
+  margin: 0;
+}
+
+.task-ribbon-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.task-ribbon-steps {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.recovery-strip {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.recovery-strip-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.recovery-strip-actions {
+  justify-content: flex-end;
+}
+
+.build-layout-compact {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+
+.build-help-drawer {
+  padding: 0.8rem;
+}
+
+.adult-tools-panel .hero-actions {
+  align-items: stretch;
+}
+
+.machine-canvas-shell {
+  border: 1px solid rgba(61, 120, 132, 0.18);
+  background: rgba(255, 250, 241, 0.9);
+  box-shadow: 0 24px 50px rgba(84, 107, 92, 0.12);
+}
+
+.machine-canvas-toolbar {
+  border-bottom: 1px solid rgba(61, 120, 132, 0.12);
+  background: rgba(255, 251, 244, 0.9);
+  color: #517079;
+}
+
+.canvas-job-hint {
+  padding: 0.8rem 1rem;
+  background: rgba(255, 234, 168, 0.42);
+  border-bottom: 1px solid rgba(216, 151, 28, 0.22);
+  color: #6d4e0f;
+  font-weight: 600;
+}
+
+.machine-canvas {
+  padding: 1rem;
+  background:
+    radial-gradient(circle at top right, rgba(255, 235, 167, 0.45), transparent 24%),
+    linear-gradient(180deg, rgba(255,255,255,0.64), rgba(255,255,255,0.28));
+}
+
+.machine-canvas canvas {
+  border-radius: 26px;
+  border: 1px solid rgba(61, 120, 132, 0.18);
+  box-shadow: 0 30px 70px rgba(91, 118, 103, 0.16);
+}
+
+.assistant-panel,
+.palette-panel,
+.disclosure-panel,
+.small-panel {
+  background: linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(245, 250, 246, 0.88));
+}
+
+.palette-context-card,
+.assistant-project-card,
+.message,
+.palette-suggestion-card,
+.blueprint-row,
+.yard-start-card,
+.yard-draft-card,
+.yard-mini-summary {
+  background: rgba(255, 255, 255, 0.74);
+  border-color: rgba(61, 120, 132, 0.12);
+}
+
+.message-user {
+  background: rgba(65, 138, 213, 0.1);
+}
+
+.message-assistant {
+  background: rgba(47, 154, 125, 0.1);
+}
+
+.job-banner,
+.hero-shell,
+.detail-hero {
+  background: rgba(255, 250, 241, 0.78);
+}
+
+.page-build .right-rail {
+  position: sticky;
+  top: 92px;
+}
+
+.mission-card {
+  min-height: 140px;
+  border-radius: 22px;
 }
 
 /* Blueprint detail page */

@@ -16,6 +16,7 @@ export function HomePage() {
   const honestMachines = (machines ?? []).filter((machine) => !machine.featured && !machine.experiment.metadata.recipeId);
   const projects = (jobs ?? []).filter((job) => job.kind === 'starter-project' || job.playable !== false);
   const completedJobIds = new Set(progress?.filter((item) => item.completed).map((item) => item.jobId) ?? []);
+  const allStarterProjectsComplete = projects.length > 0 && projects.every((project) => completedJobIds.has(project.jobId));
   const nextProject = projects.find((project) => !completedJobIds.has(project.jobId)) ?? projects[0];
   const latestDraft = honestDrafts[0];
 
@@ -106,9 +107,27 @@ export function HomePage() {
         <div className="section-head">
           <div>
             <p className="eyebrow">Starter Projects</p>
-            <h2>Learn the sandbox through 3 small machines</h2>
+            <h2>{allStarterProjectsComplete ? 'Mission yard unlocked' : 'Learn the sandbox through 3 small machines'}</h2>
           </div>
         </div>
+        {allStarterProjectsComplete ? (
+          <div className="card-grid">
+            <Link to="/" className="yard-start-card mission-card">
+              <span className="yard-start-index">🗺</span>
+              <div>
+                <strong>Mission Map</strong>
+                <p>The current 3 districts are live. Future guided builds stay locked until more content is ready.</p>
+              </div>
+            </Link>
+            <Link to="/build" className="yard-start-card mission-card">
+              <span className="yard-start-index">∞</span>
+              <div>
+                <strong>Free Build</strong>
+                <p>Open the sunny yard with the full toybox and keep building on your own ideas.</p>
+              </div>
+            </Link>
+          </div>
+        ) : null}
         <div className="job-grid">
           {projects.map((job) => (
             <JobCard key={job.jobId} job={job} completed={completedJobIds.has(job.jobId)} />

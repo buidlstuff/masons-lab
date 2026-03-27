@@ -19,11 +19,20 @@ import {
   evaluateProject,
   getGoalProgress,
 } from '../lib/jobs';
+import {
+  ensureDraftPlayState,
+  latchProjectSteps,
+  latestCheckpointForJob,
+  START_CHECKPOINT_ID,
+  toggleDiagnostics,
+} from '../lib/play-state';
 import { createDraftFromBlueprint, createDraftFromMachine, createDraftFromProject, createEmptyDraft } from '../lib/seed-data';
 import { useMachineSimulation, type RuntimeSnapshot } from '../lib/simulation';
+import { playUiTone } from '../lib/sfx';
 import { awardJobXp, TIER_NAMES } from '../lib/xp';
 import type {
   BuildTelemetry,
+  DraftPlayState,
   DraftRecord,
   EditExperimentResult,
   ExperimentManifest,
@@ -54,6 +63,7 @@ export function BuildPage() {
   const blueprints = useLiveQuery(() => db.blueprints.orderBy('updatedAt').reverse().toArray(), []);
 
   const [manifest, setManifest] = useState<ExperimentManifest | null>(null);
+  const [playState, setPlayState] = useState<DraftPlayState | null>(null);
   const [selectedPrimitiveId, setSelectedPrimitiveId] = useState<string>();
   const [placingKind, setPlacingKind] = useState<PrimitiveKind | null>(null);
   const [controlValues, setControlValues] = useState<Record<string, string | number | boolean>>({});
@@ -65,17 +75,29 @@ export function BuildPage() {
   const [flashToast, setFlashToast] = useState(false);
   const [stepCelebrating, setStepCelebrating] = useState(false);
   const [assistantPromptSeed, setAssistantPromptSeed] = useState<string | null>(null);
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [adultToolsOpen, setAdultToolsOpen] = useState(false);
   const flashCountRef = useRef(0);
+  const undoStackRef = useRef<Array<{ manifest: ExperimentManifest; playState: DraftPlayState | null }>>([]);
   const jobCompletedRef = useRef(false);
-  const completedStepIdsRef = useRef<string[]>([]);
+  const previousHopperFillRef = useRef(0);
   const statusTimeoutRef = useRef<number | undefined>(undefined);
-  const assistantRef = useRef<HTMLDivElement | null>(null);
+  const currentManifestRef = useRef<ExperimentManifest | null>(null);
+  const currentPlayStateRef = useRef<DraftPlayState | null>(null);
 
   const showStatus = useCallback((message: string, tone: NoticeTone = 'info') => {
     window.clearTimeout(statusTimeoutRef.current);
     setStatusNotice({ message, tone });
     statusTimeoutRef.current = window.setTimeout(() => setStatusNotice(null), 4200);
   }, []);
+
+  useEffect(() => {
+    currentManifestRef.current = manifest;
+  }, [manifest]);
+
+  useEffect(() => {
+    currentPlayStateRef.current = playState;
+  }, [playState]);
 
   useEffect(
     () => () => {
@@ -89,6 +111,7 @@ export function BuildPage() {
       // Draft already loaded from DB — apply it.
       if (draft) {
         setManifest(draft.manifest);
+        setPlayState(ensureDraftPlayState(draft.playState, jobId ?? draft.playState?.jobId, draft.manifest));
         setControlValues(
           Object.fromEntries(
             draft.manifest.controls.map((control) => [control.id, control.defaultValue ?? false]),
@@ -113,8 +136,10 @@ export function BuildPage() {
           const decoded = JSON.parse(decodeURIComponent(atob(shareParam))) as ExperimentManifest;
           const newDraft = createEmptyDraft();
           newDraft.manifest = decoded;
+          newDraft.playState = ensureDraftPlayState(newDraft.playState, jobId ?? undefined, decoded);
           await db.drafts.put(newDraft);
           setManifest(decoded);
+          setPlayState(newDraft.playState);
           setControlValues(
             Object.fromEntries(decoded.controls.map((c) => [c.id, c.defaultValue ?? false])),
           );
@@ -128,6 +153,7 @@ export function BuildPage() {
       // No draftId yet — create one from machine, blueprint, or empty.
       function applyDraft(nextDraft: ReturnType<typeof createEmptyDraft>) {
         setManifest(nextDraft.manifest);
+        setPlayState(ensureDraftPlayState(nextDraft.playState, jobId ?? nextDraft.playState?.jobId, nextDraft.manifest));
         setControlValues(
           Object.fromEntries(
             nextDraft.manifest.controls.map((control) => [control.id, control.defaultValue ?? false]),
@@ -158,6 +184,7 @@ export function BuildPage() {
       }
 
       const nextDraft = createEmptyDraft();
+      nextDraft.playState = ensureDraftPlayState(nextDraft.playState, jobId ?? undefined, nextDraft.manifest);
       await db.drafts.put(nextDraft);
       applyDraft(nextDraft);
     }
@@ -180,6 +207,9 @@ export function BuildPage() {
         metadata: { recipeId: undefined },
       } as unknown as ExperimentManifest),
     controlValues,
+    {
+      stableCargoSpawns: playState?.lastStableCargoSpawns,
+    },
   );
 
   const selectedPrimitive = useMemo<PrimitiveInstance | undefined>(
@@ -188,8 +218,8 @@ export function BuildPage() {
   );
 
   const projectState = useMemo(
-    () => (job && manifest ? evaluateProject(job, manifest, runtime) : null),
-    [job, manifest, runtime],
+    () => (job && manifest ? evaluateProject(job, manifest, runtime, playState) : null),
+    [job, manifest, playState, runtime],
   );
   const projectUnlocked = projectState?.unlockedAllParts ?? true;
   const activeProjectStep = projectState?.currentStep ?? null;
@@ -197,41 +227,15 @@ export function BuildPage() {
   // Reset once-per-session flag if the job changes
   useEffect(() => {
     jobCompletedRef.current = false;
-    completedStepIdsRef.current = [];
   }, [jobId]);
 
   useEffect(() => {
-    if (!projectState) {
-      completedStepIdsRef.current = [];
-      return;
+    const currentFill = runtime.hopperFill ?? 0;
+    if (currentFill > previousHopperFillRef.current) {
+      playUiTone('capture');
     }
-
-    const previousIds = completedStepIdsRef.current;
-    const completedSteps = projectState.steps.filter((step) => step.completed);
-    const newlyCompleted = completedSteps.filter((step) => !previousIds.includes(step.stepId));
-    const latestStep = newlyCompleted[newlyCompleted.length - 1];
-
-    if (latestStep) {
-      // Trigger celebration pulse on every step completion
-      setStepCelebrating(true);
-      setTimeout(() => setStepCelebrating(false), 1800);
-
-      if (projectState.complete) {
-        setPlacingKind(null);
-        showStatus(latestStep.successCopy, 'success');
-      } else {
-        const nextKind = projectState.currentStep?.allowedPartKinds[0] ?? null;
-        setSelectedPrimitiveId(undefined);
-        setPlacingKind(nextKind);
-        showStatus(
-          `${latestStep.successCopy}${projectState.currentStep ? ` Next: ${projectState.currentStep.instruction}` : ''}`,
-          'success',
-        );
-      }
-    }
-
-    completedStepIdsRef.current = completedSteps.map((step) => step.stepId);
-  }, [projectState, showStatus]);
+    previousHopperFillRef.current = currentFill;
+  }, [runtime.hopperFill]);
 
   useEffect(() => {
     if (!job || !jobComplete || jobCompletedRef.current) return;
@@ -256,8 +260,30 @@ export function BuildPage() {
   }, [job, jobComplete]);
 
   const persistDraft = useCallback(
-    async (nextManifest: ExperimentManifest) => {
+    async (
+      nextManifest: ExperimentManifest,
+      nextPlayStateArg?: DraftPlayState | null,
+      options?: { recordHistory?: boolean },
+    ) => {
+      const currentManifest = currentManifestRef.current;
+      const currentPlayState = currentPlayStateRef.current;
+      const nextPlayState = normalizePlayStateForManifest(
+        nextManifest,
+        ensureDraftPlayState(nextPlayStateArg ?? currentPlayState ?? undefined, jobId ?? currentPlayState?.jobId, nextManifest),
+      );
+
+      if (options?.recordHistory && currentManifest) {
+        undoStackRef.current = [
+          ...undoStackRef.current.slice(-19),
+          {
+            manifest: structuredClone(currentManifest),
+            playState: currentPlayState ? structuredClone(currentPlayState) : null,
+          },
+        ];
+      }
+
       setManifest(nextManifest);
+      setPlayState(nextPlayState);
       if (!draftId) {
         return;
       }
@@ -266,12 +292,52 @@ export function BuildPage() {
         sourceMachineId: draft?.sourceMachineId,
         sourceBlueprintId: draft?.sourceBlueprintId,
         manifest: nextManifest,
+        playState: nextPlayState,
         updatedAt: new Date().toISOString(),
       };
       await db.drafts.put(nextDraft);
     },
-    [draft?.sourceBlueprintId, draft?.sourceMachineId, draftId],
+    [draft?.sourceBlueprintId, draft?.sourceMachineId, draftId, jobId],
   );
+
+  useEffect(() => {
+    if (!projectState || !playState || !manifest || !job) {
+      return;
+    }
+
+    const newlyLatched = projectState.steps.filter((step) => step.liveCompleted && !step.latched);
+    if (newlyLatched.length === 0) {
+      return;
+    }
+
+    const nextPlayState = latchProjectSteps(
+      ensureDraftPlayState(playState, job.jobId, manifest),
+      newlyLatched.map((step) => step.stepId),
+      manifest,
+    );
+    const nextProjectState = evaluateProject(job, manifest, runtime, nextPlayState);
+    const latestStep = newlyLatched[newlyLatched.length - 1];
+
+    setStepCelebrating(true);
+    setTimeout(() => setStepCelebrating(false), 1800);
+    playUiTone('success');
+    void persistDraft(manifest, nextPlayState);
+
+    if (latestStep) {
+      if (nextProjectState?.complete) {
+        setPlacingKind(null);
+        showStatus(latestStep.successCopy, 'success');
+      } else {
+        const nextKind = nextProjectState?.currentStep?.allowedPartKinds[0] ?? null;
+        setSelectedPrimitiveId(undefined);
+        setPlacingKind(nextKind);
+        showStatus(
+          `${latestStep.successCopy}${nextProjectState?.currentStep ? ` Next: ${nextProjectState.currentStep.instruction}` : ''}`,
+          'success',
+        );
+      }
+    }
+  }, [job, manifest, persistDraft, playState, projectState, runtime, showStatus]);
 
   function handleSaveMachine() {
     if (!manifest) return;
@@ -332,17 +398,19 @@ export function BuildPage() {
     if (!manifest) {
       return;
     }
+    const nextManifest = structuredClone({
+      ...manifest,
+      experimentId: crypto.randomUUID(),
+      metadata: {
+        ...manifest.metadata,
+        title: `${manifest.metadata.title} Remix`,
+        remixOfExperimentId: manifest.experimentId,
+      },
+    });
     const newDraft: DraftRecord = {
       draftId: crypto.randomUUID(),
-      manifest: structuredClone({
-        ...manifest,
-        experimentId: crypto.randomUUID(),
-        metadata: {
-          ...manifest.metadata,
-          title: `${manifest.metadata.title} Remix`,
-          remixOfExperimentId: manifest.experimentId,
-        },
-      }),
+      manifest: nextManifest,
+      playState: ensureDraftPlayState(playState ?? undefined, jobId ?? playState?.jobId, nextManifest),
       updatedAt: new Date().toISOString(),
       sourceMachineId: draft?.sourceMachineId,
       sourceBlueprintId: draft?.sourceBlueprintId,
@@ -356,12 +424,12 @@ export function BuildPage() {
     setControlValues(
       Object.fromEntries(nextManifest.controls.map((control) => [control.id, control.defaultValue ?? false])),
     );
-    await persistDraft(nextManifest);
+    await persistDraft(nextManifest, undefined, { recordHistory: true });
   }
 
   async function applyEdited(result: EditExperimentResult) {
     const nextManifest = result.experiment;
-    await persistDraft(nextManifest);
+    await persistDraft(nextManifest, undefined, { recordHistory: true });
   }
 
   function handleShare() {
@@ -408,7 +476,7 @@ export function BuildPage() {
   const openAssistantWithPrompt = useCallback(
     (prompt: string) => {
       setAssistantPromptSeed(prompt);
-      assistantRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setAssistantOpen(true);
       showStatus('Loaded a prompt into the assistant.', 'info');
     },
     [showStatus],
@@ -430,9 +498,10 @@ export function BuildPage() {
         nextManifest = updatePrimitive(nextManifest, placedPrimitive.id, guidedPlacement.configOverride);
         placedPrimitive = nextManifest.primitives[nextManifest.primitives.length - 1];
       }
-      void persistDraft(nextManifest);
+      void persistDraft(nextManifest, undefined, { recordHistory: true });
       setSelectedPrimitiveId(placedPrimitive?.id);
       setPlacingKind(null);
+      playUiTone('place');
 
       const placementFeedback = guidedPlacement?.feedback ?? describePlacedPrimitive(manifest, placingKind, nextPosition.x, nextPosition.y);
       showStatus(placementFeedback.message, placementFeedback.tone);
@@ -490,7 +559,7 @@ export function BuildPage() {
       return;
     }
 
-    void persistDraft(connectPrimitives(manifest, source.id, target.id));
+    void persistDraft(connectPrimitives(manifest, source.id, target.id), undefined, { recordHistory: true });
     showStatus('Connected the winch to the hook.', 'success');
   }, [manifest, persistDraft, selectedPrimitiveId, showStatus]);
 
@@ -512,7 +581,7 @@ export function BuildPage() {
       return;
     }
 
-    void persistDraft(connectPrimitives(manifest, selectedPrimitiveId, target.id));
+    void persistDraft(connectPrimitives(manifest, selectedPrimitiveId, target.id), undefined, { recordHistory: true });
     showStatus('Connected the two nodes with a beam.', 'success');
   }, [manifest, persistDraft, selectedPrimitiveId, showStatus]);
 
@@ -537,7 +606,7 @@ export function BuildPage() {
 
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedPrimitiveId && manifest) {
         event.preventDefault();
-        void persistDraft(deletePrimitive(manifest, selectedPrimitiveId));
+        void persistDraft(deletePrimitive(manifest, selectedPrimitiveId), undefined, { recordHistory: true });
         setSelectedPrimitiveId(undefined);
         showStatus('Part removed.', 'info');
       }
@@ -546,6 +615,78 @@ export function BuildPage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [manifest, persistDraft, placingKind, selectedPrimitiveId, showStatus]);
+
+  useEffect(() => {
+    function handleAdultToolsToggle() {
+      setAdultToolsOpen((current) => !current);
+    }
+
+    window.addEventListener('mason:toggle-adult-tools', handleAdultToolsToggle);
+    return () => window.removeEventListener('mason:toggle-adult-tools', handleAdultToolsToggle);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    const previous = undoStackRef.current.pop();
+    if (!previous) {
+      showStatus('Nothing to undo yet.', 'warning');
+      return;
+    }
+
+    setSelectedPrimitiveId(undefined);
+    void persistDraft(previous.manifest, previous.playState);
+    showStatus('Undid the last change.', 'info');
+  }, [persistDraft, showStatus]);
+
+  const handleResetStep = useCallback(() => {
+    if (!job || !playState) {
+      showStatus('This draft is not in a guided project.', 'warning');
+      return;
+    }
+
+    const checkpoint = latestCheckpointForJob(playState, job);
+    if (!checkpoint) {
+      showStatus('No tutorial checkpoint saved yet.', 'warning');
+      return;
+    }
+
+    setSelectedPrimitiveId(undefined);
+    setPlacingKind(job.steps?.[playState.latchedStepIds.length]?.allowedPartKinds[0] ?? null);
+    void persistDraft(checkpoint, playState);
+    showStatus('Restored the latest working tutorial checkpoint.', 'success');
+  }, [job, persistDraft, playState, showStatus]);
+
+  const handleResetDraft = useCallback(() => {
+    if (!manifest) {
+      return;
+    }
+
+    const resetManifest = playState?.stepCheckpointManifest[START_CHECKPOINT_ID]
+      ? structuredClone(playState.stepCheckpointManifest[START_CHECKPOINT_ID])
+      : createEmptyDraft().manifest;
+    const resetPlayState = ensureDraftPlayState(undefined, jobId ?? playState?.jobId, resetManifest);
+    undoStackRef.current = [];
+    setSelectedPrimitiveId(undefined);
+    setPlacingKind(job?.steps?.[0]?.allowedPartKinds[0] ?? null);
+    void persistDraft(resetManifest, resetPlayState);
+    showStatus('Reset the draft back to the project start.', 'success');
+  }, [job?.steps, jobId, manifest, persistDraft, playState, showStatus]);
+
+  const handleToggleDiagnostics = useCallback(() => {
+    if (!manifest) {
+      return;
+    }
+    const nextPlayState = toggleDiagnostics(
+      ensureDraftPlayState(playState ?? undefined, jobId ?? playState?.jobId, manifest),
+    );
+    void persistDraft(manifest, nextPlayState);
+    showStatus(nextPlayState.diagnosticsEnabled ? 'Diagnostics ON.' : 'Diagnostics OFF.', 'info');
+  }, [jobId, manifest, persistDraft, playState, showStatus]);
+
+  const handleClearLocalData = useCallback(async () => {
+    await db.delete();
+    window.localStorage.removeItem('mason-beginner-mode');
+    window.location.assign('/');
+  }, []);
 
   if (!manifest) {
     return (
@@ -563,59 +704,57 @@ export function BuildPage() {
       : manifest.primitives.length === 0
         ? 'Start mode'
         : 'Select mode';
+  const goalProgress = job ? getGoalProgress(job, manifest, runtime, playState) : null;
+  const goalPct = goalProgress ? Math.min(100, goalProgress.target > 0 ? (goalProgress.current / goalProgress.target) * 100 : 0) : 0;
+  const primaryStepKind = activeProjectStep?.allowedPartKinds[0] ?? null;
+  const recoveryHint = runtime.lostCargoCount > 0
+    ? `${runtime.lostCargoCount} cargo recovery${runtime.lostCargoCount === 1 ? '' : 'ies'} happened automatically.`
+    : runtime.beltPowered
+      ? 'The loader is powered. Keep testing the flow.'
+      : 'Undo, reset, and respawn are ready if the build gets messy.';
 
   return (
     <div className="page page-build">
       <div className="build-header">
         <div>
-          <p className="eyebrow">Builder</p>
+          <p className="eyebrow">Sunny Yard</p>
           <h1>{manifest.metadata.title}</h1>
           <p>{manifest.metadata.shortDescription}</p>
           {statusNotice ? (
             <p className={`builder-status builder-status-${statusNotice.tone}`}>{statusNotice.message}</p>
           ) : null}
         </div>
-        <div className="hero-actions">
+        <div className="hero-actions build-header-actions">
           <button type="button" className="primary-link" onClick={handleSaveMachine}>
-            Save Machine
+            Save to Shelf
           </button>
-          {(projectUnlocked || !job) ? (
-            <>
-              <button type="button" onClick={handleSaveBlueprint}>
-                Save Blueprint
-              </button>
-              <button type="button" onClick={handleSaveBoth}>
-                Save Both
-              </button>
-              <button type="button" onClick={handleDuplicateDraft}>
-                Duplicate
-              </button>
-              <button type="button" onClick={handleShare}>
-                Share
-              </button>
-            </>
-          ) : null}
+          <button type="button" onClick={() => setAssistantOpen((current) => !current)}>
+            {assistantOpen ? 'Hide Help' : 'Help'}
+          </button>
           <Link to="/">Back to Yard</Link>
         </div>
       </div>
 
-      <section className="panel builder-compass">
-        <div className="builder-compass-copy">
+      <section className="panel task-ribbon">
+        <div className="task-ribbon-copy">
           <div>
-            <p className="eyebrow">Build Loop</p>
-            <h2>{builderFocus.title}</h2>
+            <p className="eyebrow">{job ? `Project ${job.tier}` : 'Free Build'}</p>
+            <h2>{activeProjectStep?.title ?? builderFocus.title}</h2>
           </div>
-          <p>{builderFocus.description}</p>
+          <p>{activeProjectStep?.instruction ?? builderFocus.description}</p>
         </div>
 
-        <div className="builder-chip-row">
-          <span className={`builder-chip ${placingKind ? 'is-active' : ''}`}>Mode: {builderModeLabel}</span>
+        <div className="task-ribbon-metrics">
+          <span className={`builder-chip ${placingKind ? 'is-active' : ''}`}>{builderModeLabel}</span>
           <span className={`builder-chip is-${machineActivity.tone}`}>{machineActivity.label}</span>
+          <span className={`builder-chip ${runtime.beltPowered ? 'is-success' : ''}`}>
+            {runtime.beltPowered ? 'Powered belt' : 'Coasting belt'}
+          </span>
+          <span className="builder-chip">Flow: {Math.round(runtime.throughput ?? 0)}/s</span>
           <span className="builder-chip">Canvas: {manifest.primitives.length} part{manifest.primitives.length === 1 ? '' : 's'}</span>
-          {job ? <span className="builder-chip">Project: {job.title}</span> : null}
         </div>
 
-        <div className="builder-step-strip">
+        <div className="builder-step-strip task-ribbon-steps">
           {buildSteps.map((step) => (
             <div key={step.label} className={`builder-step builder-step-${step.state}`}>
               <span className="builder-step-dot" />
@@ -623,28 +762,27 @@ export function BuildPage() {
             </div>
           ))}
         </div>
+      </section>
 
-        <div className="builder-compass-actions">
-          {activeProjectStep && !placingKind ? (
-            <button
-              type="button"
-              className="primary-link"
-              onClick={() => handleSelectKind(activeProjectStep.allowedPartKinds[0] ?? 'motor')}
-            >
-              Place {labelForPrimitive(activeProjectStep.allowedPartKinds[0] ?? 'motor')}
+      <section className="panel recovery-strip">
+        <div className="recovery-strip-copy">
+          <p className="eyebrow">Recovery</p>
+          <strong>{contextualConnectPrompt}</strong>
+          <p className="muted">{recoveryHint}</p>
+        </div>
+        <div className="hero-actions recovery-strip-actions">
+          {primaryStepKind && !placingKind ? (
+            <button type="button" className="primary-link" onClick={() => handleSelectKind(primaryStepKind)}>
+              Place {labelForPrimitive(primaryStepKind)}
             </button>
           ) : null}
           {!activeProjectStep && manifest.primitives.length === 0 && !placingKind ? (
-            <button
-              type="button"
-              className="primary-link"
-              onClick={() => handleSelectKind('motor')}
-            >
+            <button type="button" className="primary-link" onClick={() => handleSelectKind('motor')}>
               Start with Motor
             </button>
           ) : null}
           {placingKind ? (
-            <button type="button" className="primary-link" onClick={() => setPlacingKind(null)}>
+            <button type="button" onClick={() => setPlacingKind(null)}>
               Cancel Placement
             </button>
           ) : null}
@@ -653,48 +791,47 @@ export function BuildPage() {
               Clear Selection
             </button>
           ) : null}
-          <button type="button" onClick={() => openAssistantWithPrompt(builderFocus.assistantPrompt)}>
-            Ask Assistant
+          <button type="button" onClick={handleUndo}>
+            Undo
           </button>
-        </div>
-
-        <div className="builder-assistant-prompt">
-          <strong>Fast help:</strong>
-          <span>{contextualConnectPrompt}</span>
+          {job ? (
+            <button type="button" onClick={handleResetStep}>
+              Reset Step
+            </button>
+          ) : null}
+          <button type="button" onClick={() => openAssistantWithPrompt(builderFocus.assistantPrompt)}>
+            Ask for Help
+          </button>
         </div>
       </section>
 
-      {job ? (() => {
-        const gp = getGoalProgress(job, manifest, runtime);
-        const pct = Math.min(100, gp.target > 0 ? (gp.current / gp.target) * 100 : 0);
-        return (
-          <section className={`job-banner ${jobComplete ? 'complete' : ''} ${stepCelebrating ? 'step-celebrating' : ''}`}>
-            <div className="job-banner-info">
-              <p className="eyebrow">Active Project — Tier {job.tier}</p>
-              <strong>{job.title}</strong>
-              <p>{activeProjectStep ? activeProjectStep.instruction : job.objective}</p>
+      {goalProgress && job ? (
+        <section className={`job-banner ${jobComplete ? 'complete' : ''} ${stepCelebrating ? 'step-celebrating' : ''}`}>
+          <div className="job-banner-info">
+            <p className="eyebrow">Progress</p>
+            <strong>{job.title}</strong>
+            <p>{activeProjectStep ? activeProjectStep.instruction : job.objective}</p>
+          </div>
+          <div className="job-goal-block">
+            <div className="job-goal-label">
+              <span>
+                {activeProjectStep
+                  ? `Step ${(projectState?.currentStepIndex ?? 0) + 1} of ${projectState?.steps.length ?? 0}: ${goalProgress.label}`
+                  : goalProgress.label}
+              </span>
+              <span className="job-goal-value">
+                {goalProgress.met ? 'Done' : `${goalProgress.current}${goalProgress.unit ? ` ${goalProgress.unit}` : ''} / ${goalProgress.target}${goalProgress.unit ? ` ${goalProgress.unit}` : ''}`}
+              </span>
             </div>
-            <div className="job-goal-block">
-              <div className="job-goal-label">
-                <span>
-                  {activeProjectStep
-                    ? `Step ${(projectState?.currentStepIndex ?? 0) + 1} of ${projectState?.steps.length ?? 0}: ${gp.label}`
-                    : gp.label}
-                </span>
-                <span className="job-goal-value">
-                  {gp.met ? '✓ Done' : `${gp.current}${gp.unit ? ` ${gp.unit}` : ''} / ${gp.target}${gp.unit ? ` ${gp.unit}` : ''}`}
-                </span>
-              </div>
-              <div className="job-goal-bar">
-                <div className="job-goal-fill" style={{ width: `${pct}%` }} />
-              </div>
+            <div className="job-goal-bar">
+              <div className="job-goal-fill" style={{ width: `${goalPct}%` }} />
             </div>
-            <div className={`badge ${jobComplete ? 'badge-success' : ''}`}>
-              {jobComplete ? '★ Complete' : 'In Progress'}
-            </div>
-          </section>
-        );
-      })() : null}
+          </div>
+          <div className={`badge ${jobComplete ? 'badge-success' : ''}`}>
+            {jobComplete ? 'Complete' : 'In Progress'}
+          </div>
+        </section>
+      ) : null}
 
       {jobComplete && job ? (
         <section className="job-complete-card">
@@ -713,8 +850,8 @@ export function BuildPage() {
         </section>
       ) : null}
 
-      <div className="build-layout">
-        <div className="left-rail" ref={assistantRef}>
+      {assistantOpen ? (
+        <section className="panel build-help-drawer">
           <AssistantPanel
             manifest={manifest}
             busy={busy}
@@ -729,7 +866,7 @@ export function BuildPage() {
             onPromptSeedConsumed={() => setAssistantPromptSeed(null)}
             blueprints={blueprints ?? []}
             onMount={(blueprintRecord) => {
-              void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint));
+              void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint), undefined, { recordHistory: true });
               showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
             }}
             onGenerate={async (prompt) => {
@@ -762,8 +899,50 @@ export function BuildPage() {
               }
             }}
           />
-        </div>
+        </section>
+      ) : null}
 
+      {adultToolsOpen ? (
+        <section className="panel adult-tools-panel">
+          <div className="panel-header compact">
+            <div>
+              <p className="eyebrow">Adult Tools</p>
+              <h3>Reset and diagnostics</h3>
+            </div>
+            <button type="button" className="ghost-button" onClick={() => setAdultToolsOpen(false)}>
+              Hide
+            </button>
+          </div>
+          <div className="hero-actions">
+            <button type="button" onClick={handleResetStep} disabled={!job}>
+              Reset Tutorial
+            </button>
+            <button type="button" onClick={handleResetDraft}>
+              Reset Draft
+            </button>
+            <button type="button" onClick={handleToggleDiagnostics}>
+              {playState?.diagnosticsEnabled ? 'Hide Diagnostics' : 'Show Diagnostics'}
+            </button>
+            <button type="button" onClick={handleSaveBlueprint}>
+              Save Blueprint
+            </button>
+            <button type="button" onClick={handleSaveBoth}>
+              Save Both
+            </button>
+            <button type="button" onClick={handleDuplicateDraft}>
+              Duplicate
+            </button>
+            <button type="button" onClick={handleShare}>
+              Share
+            </button>
+            <button type="button" className="danger-button" onClick={() => void handleClearLocalData()}>
+              Clear Local Data
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      <div className="build-layout build-layout-compact">
         <div className="canvas-column" style={{ position: 'relative' }}>
           <HudOverlay hud={manifest.hud} telemetry={telemetry} />
           <StarterOverlay
@@ -797,9 +976,10 @@ export function BuildPage() {
             onPlacePrimitive={handlePlacePrimitive}
             onSelectPrimitive={handleSelectPrimitive}
             onMovePrimitive={(primitiveId, x, y) => {
-              void persistDraft(movePrimitive(manifest, primitiveId, x, y));
+              void persistDraft(movePrimitive(manifest, primitiveId, x, y), undefined, { recordHistory: true });
             }}
             onTelemetry={setTelemetry}
+            diagnosticsEnabled={Boolean(playState?.diagnosticsEnabled)}
             onConnectionFlash={() => {
               if (flashCountRef.current >= 3) return; // stop after 3 toasts
               flashCountRef.current += 1;
@@ -810,7 +990,8 @@ export function BuildPage() {
               const prim = manifest.primitives.find((p) => p.id === primitiveId);
               if (!prim || prim.kind !== 'motor') return;
               const current = (prim.config as { powerState?: boolean }).powerState ?? true;
-              void persistDraft(updatePrimitive(manifest, primitiveId, { ...prim.config, powerState: !current }));
+              void persistDraft(updatePrimitive(manifest, primitiveId, { ...prim.config, powerState: !current }), undefined, { recordHistory: true });
+              playUiTone('power');
               showStatus(!current ? 'Motor ON.' : 'Motor OFF.', 'info');
             }}
           />
@@ -840,7 +1021,7 @@ export function BuildPage() {
             primitive={selectedPrimitive}
             manifest={manifest}
             onDelete={(primitiveId) => {
-              void persistDraft(deletePrimitive(manifest, primitiveId));
+              void persistDraft(deletePrimitive(manifest, primitiveId), undefined, { recordHistory: true });
               if (selectedPrimitiveId === primitiveId) {
                 setSelectedPrimitiveId(undefined);
               }
@@ -851,8 +1032,9 @@ export function BuildPage() {
               if (!primitive) {
                 return;
               }
-              void persistDraft(updatePrimitive(manifest, primitiveId, { ...primitive.config, [key]: value }));
+              void persistDraft(updatePrimitive(manifest, primitiveId, { ...primitive.config, [key]: value }), undefined, { recordHistory: true });
               if (key === 'powerState') {
+                playUiTone('power');
                 showStatus(value ? 'Motor powered ON.' : 'Motor powered OFF.', 'info');
               }
             }}
@@ -877,7 +1059,7 @@ export function BuildPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint));
+                        void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint), undefined, { recordHistory: true });
                         showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
                       }}
                     >
@@ -1007,6 +1189,34 @@ interface GuidedPlacement {
   guide?: ProjectCanvasGuide;
 }
 
+function normalizePlayStateForManifest(
+  manifest: ExperimentManifest,
+  playState: DraftPlayState,
+): DraftPlayState {
+  const cargoSpawns = Object.fromEntries(
+    manifest.primitives
+      .filter((primitive) => primitive.kind === 'cargo-block')
+      .map((primitive) => {
+        const cfg = primitive.config as { x: number; y: number };
+        return [primitive.id, { x: cfg.x, y: cfg.y }];
+      }),
+  );
+
+  return {
+    ...playState,
+    stepCheckpointManifest: playState.stepCheckpointManifest[START_CHECKPOINT_ID]
+      ? { ...playState.stepCheckpointManifest }
+      : {
+          ...playState.stepCheckpointManifest,
+          [START_CHECKPOINT_ID]: structuredClone(manifest),
+        },
+    lastStableCargoSpawns: {
+      ...playState.lastStableCargoSpawns,
+      ...cargoSpawns,
+    },
+  };
+}
+
 function deriveMachineActivity(
   manifest: ExperimentManifest,
   runtime: RuntimeSnapshot,
@@ -1026,6 +1236,14 @@ function deriveMachineActivity(
     return {
       active: true,
       label: `${activeCargo} cargo block${activeCargo === 1 ? '' : 's'} riding the conveyor`,
+      tone: 'success',
+    };
+  }
+
+  if (runtime.beltPowered) {
+    return {
+      active: true,
+      label: `Loader powered at ${Math.round(runtime.throughput ?? 0)}/s`,
       tone: 'success',
     };
   }

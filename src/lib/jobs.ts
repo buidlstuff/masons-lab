@@ -1,4 +1,11 @@
-import type { ExperimentManifest, PrimitiveInstance, PrimitiveKind, ProjectSuccessCheck, SiteJobDefinition } from './types';
+import type {
+  DraftPlayState,
+  ExperimentManifest,
+  PrimitiveInstance,
+  PrimitiveKind,
+  ProjectSuccessCheck,
+  SiteJobDefinition,
+} from './types';
 import type { RuntimeSnapshot } from './simulation';
 
 const MOTOR_RANGE = 220;
@@ -22,6 +29,8 @@ export interface EvaluatedProjectStep {
   successCopy: string;
   assistantPrompt: string;
   completed: boolean;
+  liveCompleted: boolean;
+  latched: boolean;
   progress: GoalProgress;
 }
 
@@ -38,16 +47,21 @@ export function evaluateProject(
   job: SiteJobDefinition | undefined,
   manifest: ExperimentManifest,
   runtime: RuntimeSnapshot,
+  playState?: DraftPlayState | null,
 ): ProjectEvaluation | null {
   if (!job?.steps?.length) {
     return null;
   }
 
+  const latchedStepIds = new Set(playState?.jobId === job.jobId ? playState?.latchedStepIds ?? [] : []);
   const steps = job.steps.map((step) => {
     const progress = evaluateSuccessCheck(step.successCheck, manifest, runtime);
+    const latched = latchedStepIds.has(step.stepId);
     return {
       ...step,
-      completed: progress.met,
+      completed: latched || progress.met,
+      liveCompleted: progress.met,
+      latched,
       progress: {
         ...progress,
         label: step.title,
@@ -77,16 +91,18 @@ export function isJobComplete(
   job: SiteJobDefinition | undefined,
   manifest: ExperimentManifest,
   runtime: RuntimeSnapshot,
+  playState?: DraftPlayState | null,
 ): boolean {
-  return evaluateProject(job, manifest, runtime)?.complete ?? false;
+  return evaluateProject(job, manifest, runtime, playState)?.complete ?? false;
 }
 
 export function getGoalProgress(
   job: SiteJobDefinition,
   manifest: ExperimentManifest,
   runtime: RuntimeSnapshot,
+  playState?: DraftPlayState | null,
 ): GoalProgress {
-  return evaluateProject(job, manifest, runtime)?.goal ?? finalGoalProgress(job, manifest, runtime);
+  return evaluateProject(job, manifest, runtime, playState)?.goal ?? finalGoalProgress(job, manifest, runtime);
 }
 
 function finalGoalProgress(

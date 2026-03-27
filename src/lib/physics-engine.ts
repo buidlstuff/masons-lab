@@ -18,7 +18,7 @@
  */
 
 import Matter from 'matter-js';
-import type { ExperimentManifest, PrimitiveInstance } from './types';
+import type { CargoLifecycleState, ExperimentManifest, PrimitiveInstance } from './types';
 
 // Must match MachineCanvas createCanvas(960, 560)
 const CANVAS_W = 960;
@@ -51,6 +51,15 @@ export interface PhysicsFrame {
   wagonDelivered: boolean;
   /** gear chain telemetry — null when no gears are being driven */
   gearTelemetry: { inputRpm: number; outputRpm: number; gearRatio: number } | null;
+  cargoStates: Record<string, CargoLifecycleState>;
+  throughput: number;
+  beltPowered: boolean;
+  lostCargoCount: number;
+  stableCargoSpawns: Record<string, { x: number; y: number }>;
+}
+
+export interface MatterWorldOptions {
+  stableCargoSpawns?: Record<string, { x: number; y: number }>;
 }
 
 export interface PhysicsWorld {
@@ -68,13 +77,35 @@ export interface PhysicsWorld {
 
 // ─── Main builder ─────────────────────────────────────────────────────────────
 
-export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
+export function buildMatterWorld(
+  manifest: ExperimentManifest,
+  options: MatterWorldOptions = {},
+): PhysicsWorld {
   const engine = Matter.Engine.create({ gravity: { x: 0, y: 1.2 } });
   const bodyMap = new Map<string, Matter.Body>();
   const ropeConstraints: Matter.Constraint[] = [];
-  // Cargo that has entered the hopper zone is marked collected so it doesn't
-  // bounce back out and drop the fill counter.
+  const cargoSpawnMap = new Map<string, { x: number; y: number }>();
+  const cargoIdleTimers = new Map<string, number>();
+  const cargoRespawnCounts = new Map<string, number>();
+  const cargoStates = new Map<string, CargoLifecycleState>();
   const collectedCargoIds = new Set<string>();
+  let lostCargoCount = 0;
+  let throughput = 0;
+
+  const conveyorSupports: Array<{
+    conveyorId: string;
+    body: Matter.Body;
+    ax: number;
+    ay: number;
+    bx: number;
+    by: number;
+  }> = [];
+  const hopperStructures: Array<{
+    hopperId: string;
+    x: number;
+    y: number;
+    walls: Matter.Body[];
+  }> = [];
 
   // Ground + boundary walls
   Matter.World.add(engine.world, [
@@ -94,6 +125,15 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
     }),
   ]);
 
+  for (const cargo of manifest.primitives.filter((primitive) => primitive.kind === 'cargo-block')) {
+    const cfg = cargo.config as { x: number; y: number };
+    cargoSpawnMap.set(
+      cargo.id,
+      options.stableCargoSpawns?.[cargo.id] ?? { x: cfg.x, y: cfg.y },
+    );
+    cargoStates.set(cargo.id, 'spawned');
+  }
+
   // ── Create a body for each positioned primitive ───────────────────────────
   for (const prim of manifest.primitives) {
     const body = createBodyForPrimitive(prim);
@@ -101,6 +141,69 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       bodyMap.set(prim.id, body);
       Matter.World.add(engine.world, body);
     }
+  }
+
+  // ── Conveyor support bodies ───────────────────────────────────────────────
+  for (const prim of manifest.primitives) {
+    if (prim.kind !== 'conveyor') continue;
+    const cfg = prim.config as { path: Array<{ x: number; y: number }> };
+    for (let index = 0; index < cfg.path.length - 1; index += 1) {
+      const start = cfg.path[index];
+      const end = cfg.path[index + 1];
+      const segLen = Math.hypot(end.x - start.x, end.y - start.y);
+      const angle = Math.atan2(end.y - start.y, end.x - start.x);
+      const centerX = (start.x + end.x) / 2;
+      const centerY = (start.y + end.y) / 2 + 12;
+      const support = Matter.Bodies.rectangle(centerX, centerY, segLen + 8, 14, {
+        isStatic: true,
+        angle,
+        label: `support-${prim.id}-${index}`,
+        friction: 0.9,
+        restitution: 0.02,
+      });
+      conveyorSupports.push({
+        conveyorId: prim.id,
+        body: support,
+        ax: start.x,
+        ay: start.y,
+        bx: end.x,
+        by: end.y,
+      });
+      Matter.World.add(engine.world, support);
+    }
+  }
+
+  // ── Hopper guide walls ────────────────────────────────────────────────────
+  for (const prim of manifest.primitives) {
+    if (prim.kind !== 'hopper') continue;
+    const cfg = prim.config as { x: number; y: number };
+    const leftWall = Matter.Bodies.rectangle(cfg.x - 24, cfg.y + 24, 12, 84, {
+      isStatic: true,
+      angle: 0.28,
+      label: `hopper-wall-left-${prim.id}`,
+      friction: 0.4,
+      restitution: 0.05,
+    });
+    const rightWall = Matter.Bodies.rectangle(cfg.x + 24, cfg.y + 24, 12, 84, {
+      isStatic: true,
+      angle: -0.28,
+      label: `hopper-wall-right-${prim.id}`,
+      friction: 0.4,
+      restitution: 0.05,
+    });
+    const binFloor = Matter.Bodies.rectangle(cfg.x, cfg.y + 70, 58, 10, {
+      isStatic: true,
+      label: `hopper-floor-${prim.id}`,
+      friction: 0.7,
+      restitution: 0.02,
+    });
+    hopperStructures.push({
+      hopperId: prim.id,
+      x: cfg.x,
+      y: cfg.y,
+      walls: [leftWall, rightWall, binFloor],
+    });
+    Matter.World.add(engine.world, [leftWall, rightWall, binFloor]);
   }
 
   // ── Create constraints ────────────────────────────────────────────────────
@@ -242,18 +345,19 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
     }
   }
 
-  // ── Motor → conveyor speed map ────────────────────────────────────────────
-  // A motor within 300px of any conveyor endpoint boosts that belt.
-  // conveyorMotorRpm: conveyor id → highest motor RPM driving it
-  const conveyorMotorRpm = new Map<string, number>();
+  // ── Motor → conveyor proximity map ────────────────────────────────────────
+  // A motor within 300px of a conveyor can boost that belt when powered.
+  const conveyorMotorMap = new Map<string, string[]>();
   for (const motor of manifest.primitives.filter((p) => p.kind === 'motor')) {
-    const mCfg = motor.config as { x: number; y: number; rpm: number };
+    const mCfg = motor.config as { x: number; y: number };
     for (const conv of manifest.primitives.filter((p) => p.kind === 'conveyor')) {
       const cCfg = conv.config as { path: Array<{ x: number; y: number }> };
       const near = distToPolyline(cCfg.path, mCfg.x, mCfg.y) < 300;
       if (near) {
-        const prev = conveyorMotorRpm.get(conv.id) ?? 0;
-        conveyorMotorRpm.set(conv.id, Math.max(prev, mCfg.rpm));
+        if (!conveyorMotorMap.has(conv.id)) {
+          conveyorMotorMap.set(conv.id, []);
+        }
+        conveyorMotorMap.get(conv.id)!.push(motor.id);
       }
     }
   }
@@ -266,6 +370,7 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
     : 0;
 
   let currentControls: Record<string, string | number | boolean> = {};
+  let activeMotorIds = new Set<string>();
 
   // ── applyControls ─────────────────────────────────────────────────────────
   function applyControls(controlValues: Record<string, string | number | boolean>) {
@@ -296,10 +401,17 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
   // Returns the driven map so tick() can compute gear telemetry.
   function driveMotors(): Map<string, number> {
     const driven = new Map<string, number>(); // id → angularVelocity
+    activeMotorIds = new Set<string>();
 
     for (const motor of manifest.primitives.filter((p) => p.kind === 'motor')) {
       const cfg = motor.config as { rpm: number; powerState: boolean };
-      if (!cfg.powerState) continue;
+      const powerControl = manifest.controls.find(
+        (c) => c.bind?.targetId === motor.id && c.bind?.path === 'powerState',
+      );
+      const powered = powerControl
+        ? Boolean(currentControls[powerControl.id] ?? cfg.powerState)
+        : cfg.powerState;
+      if (!powered) continue;
       const rpmControl = manifest.controls.find(
         (c) => c.bind?.targetId === motor.id && c.bind?.path === 'rpm',
       );
@@ -307,6 +419,7 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
         ? Number(currentControls[rpmControl.id] ?? cfg.rpm)
         : cfg.rpm;
       const angVel = (rpm * Math.PI) / 30; // RPM → rad/s
+      activeMotorIds.add(motor.id);
 
       // Drive gears in range
       for (const gearId of motorGearMap.get(motor.id) ?? []) {
@@ -341,12 +454,47 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
     return driven;
   }
 
+  function getMotorState(motorId: string) {
+    const motor = manifest.primitives.find((primitive) => primitive.id === motorId && primitive.kind === 'motor');
+    if (!motor) {
+      return { powered: false, rpm: 0 };
+    }
+    const cfg = motor.config as { rpm: number; powerState: boolean };
+    const powerControl = manifest.controls.find(
+      (control) => control.bind?.targetId === motor.id && control.bind?.path === 'powerState',
+    );
+    const rpmControl = manifest.controls.find(
+      (control) => control.bind?.targetId === motor.id && control.bind?.path === 'rpm',
+    );
+    return {
+      powered: powerControl ? Boolean(currentControls[powerControl.id] ?? cfg.powerState) : cfg.powerState,
+      rpm: rpmControl ? Number(currentControls[rpmControl.id] ?? cfg.rpm) : cfg.rpm,
+    };
+  }
+
+  function getConveyorDrive(conveyorId: string) {
+    let maxRpm = 0;
+    for (const motorId of conveyorMotorMap.get(conveyorId) ?? []) {
+      const state = getMotorState(motorId);
+      if (!state.powered || !activeMotorIds.has(motorId)) continue;
+      maxRpm = Math.max(maxRpm, state.rpm);
+    }
+    return {
+      powered: maxRpm > 0,
+      rpm: maxRpm,
+    };
+  }
+
   // ── tickConveyors ─────────────────────────────────────────────────────────
-  // For each conveyor path segment, nudge nearby cargo blocks along the belt.
-  // Motor RPM near the belt endpoint boosts effective speed.
+  // Cargo now rides on thin physical supports while the belt adds tangential
+  // drive along the segment. That keeps blocks from tunneling through the lane.
   function tickConveyors() {
     const cargoBlocks = manifest.primitives.filter((p) => p.kind === 'cargo-block');
-    if (cargoBlocks.length === 0) return;
+    const supportedCargoIds = new Set<string>();
+    let anyPowered = false;
+    if (cargoBlocks.length === 0) {
+      return { supportedCargoIds, beltPowered: anyPowered };
+    }
 
     for (const prim of manifest.primitives) {
       if (prim.kind !== 'conveyor') continue;
@@ -357,11 +505,9 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       };
       if (cfg.path.length < 2) continue;
 
-      // Effective speed: config speed, boosted by motor if present
-      const motorRpm = conveyorMotorRpm.get(prim.id);
-      const effectiveSpeed = motorRpm !== undefined
-        ? Math.max(cfg.speed, motorRpm * 0.45)
-        : cfg.speed;
+      const drive = getConveyorDrive(prim.id);
+      const effectiveSpeed = drive.powered ? Math.max(cfg.speed, drive.rpm * 0.45) : cfg.speed;
+      anyPowered ||= drive.powered;
 
       const dirMult = cfg.direction === 'reverse' ? -1 : 1;
 
@@ -381,11 +527,11 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
 
         for (const cargo of cargoBlocks) {
           const body = bodyMap.get(cargo.id);
-          if (!body) continue;
+          if (!body || collectedCargoIds.has(cargo.id)) continue;
 
           // Perpendicular distance from cargo center to this segment
           const perp = distToSegment(body.position.x, body.position.y, ax, ay, bx, by);
-          if (perp > 22) continue; // not on this belt
+          if (perp > 28) continue;
 
           // Also check it's within the segment extents (not before/after endpoints)
           const along =
@@ -393,71 +539,132 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
             (body.position.y - ay) * (ny * dirMult);
           if (along < -10 || along > segLen + 10) continue;
 
-          // Blend velocity toward belt direction (15% per tick at 60fps)
-          const blendX = body.velocity.x + (targetVx - body.velocity.x) * 0.15;
-          const blendY = body.velocity.y + (targetVy - body.velocity.y) * 0.08;
-          Matter.Body.setVelocity(body, { x: blendX, y: blendY });
+          supportedCargoIds.add(cargo.id);
+          cargoSpawnMap.set(cargo.id, { x: body.position.x, y: Math.max(60, body.position.y) });
+          cargoStates.set(cargo.id, 'supported');
 
-          // Anti-gravity surface force: counteract ~85% of gravity while cargo is
-          // on the belt so it doesn't fall through the conveyor path.
-          const gravityCompensation = engine.gravity.y * body.mass * 0.85;
-          Matter.Body.applyForce(body, body.position, { x: 0, y: -gravityCompensation });
+          // Stronger tangential drive with a light vertical correction toward the belt.
+          const blendX = body.velocity.x + (targetVx - body.velocity.x) * 0.22;
+          const blendY = body.velocity.y + (targetVy - body.velocity.y) * 0.04;
+          Matter.Body.setVelocity(body, { x: blendX, y: blendY });
+          Matter.Body.applyForce(body, body.position, {
+            x: nx * body.mass * effectiveSpeed * 0.00018,
+            y: 0,
+          });
         }
       }
     }
+
+    return { supportedCargoIds, beltPowered: anyPowered };
   }
 
   // ── tickHopper ────────────────────────────────────────────────────────────
-  // Apply a gentle inward + downward force on cargo blocks near the hopper.
-  // Once a block enters the collection zone it is marked collected and frozen
-  // so it cannot bounce out and drop the fill counter.
+  // Hopper walls do most of the physical work. A light guide force helps cargo
+  // commit to the mouth, then a collection zone freezes the block.
   function tickHopper() {
-    const hopperPrim = manifest.primitives.find((p) => p.kind === 'hopper');
-    if (!hopperPrim) return;
-    const hCfg = hopperPrim.config as { x: number; y: number };
-    const mouthX = hCfg.x;
-    const mouthTop = hCfg.y - 10;
-    const mouthBot = hCfg.y + 70;
-    // Collection zone (inside the funnel body)
-    const collectTop = hCfg.y + 10;
-    const collectBot = hCfg.y + 80;
-    const collectHalfW = 36;
+    let collectedThisTick = 0;
+    if (hopperStructures.length === 0) {
+      return collectedThisTick;
+    }
 
     for (const prim of manifest.primitives) {
       if (prim.kind !== 'cargo-block') continue;
       const body = bodyMap.get(prim.id);
       if (!body) continue;
 
-      // Already collected — keep frozen below hopper so it doesn't interfere
       if (collectedCargoIds.has(prim.id)) {
         const slotIndex = [...collectedCargoIds].indexOf(prim.id);
-        const targetX = mouthX + (slotIndex % 3 - 1) * 18;
-        const targetY = collectBot + Math.floor(slotIndex / 3) * 20;
+        const hopper = hopperStructures[0];
+        const targetX = hopper.x + (slotIndex % 3 - 1) * 18;
+        const targetY = hopper.y + 80 + Math.floor(slotIndex / 3) * 20;
         Matter.Body.setPosition(body, { x: targetX, y: targetY });
         Matter.Body.setVelocity(body, { x: 0, y: 0 });
+        cargoStates.set(prim.id, 'collected');
         continue;
       }
 
-      // Check if cargo just entered the collection zone
-      if (
-        body.position.x > mouthX - collectHalfW &&
-        body.position.x < mouthX + collectHalfW &&
-        body.position.y > collectTop &&
-        body.position.y < collectBot
-      ) {
-        collectedCargoIds.add(prim.id);
-        Matter.Body.setStatic(body, true);
+      for (const hopper of hopperStructures) {
+        const mouthX = hopper.x;
+        const mouthTop = hopper.y - 10;
+        const mouthBot = hopper.y + 70;
+        const collectTop = hopper.y - 40;
+        const collectBot = hopper.y + 52;
+        const collectHalfW = 40;
+
+        if (
+          body.position.x > mouthX - collectHalfW &&
+          body.position.x < mouthX + collectHalfW &&
+          body.position.y > collectTop &&
+          body.position.y < collectBot
+        ) {
+          collectedCargoIds.add(prim.id);
+          Matter.Body.setStatic(body, true);
+          cargoStates.set(prim.id, 'collected');
+          collectedThisTick += 1;
+          break;
+        }
+
+        const dx = mouthX - body.position.x;
+        if (Math.abs(dx) > 96 || body.position.y > mouthBot || body.position.y < mouthTop - 130) continue;
+        Matter.Body.applyForce(body, body.position, { x: dx * 0.00022, y: 0.00095 });
+      }
+    }
+
+    return collectedThisTick;
+  }
+
+  function recoverLostCargo(dt: number, supportedCargoIds: Set<string>) {
+    const conveyors = manifest.primitives.filter((primitive) => primitive.kind === 'conveyor');
+    const hoppers = manifest.primitives.filter((primitive) => primitive.kind === 'hopper');
+
+    for (const cargo of manifest.primitives.filter((primitive) => primitive.kind === 'cargo-block')) {
+      const body = bodyMap.get(cargo.id);
+      if (!body || collectedCargoIds.has(cargo.id)) {
         continue;
       }
 
-      const dx = mouthX - body.position.x;
-      // Only apply funnel force to blocks within 90px horizontally and above mouth bottom
-      if (Math.abs(dx) > 90 || body.position.y > mouthBot || body.position.y < mouthTop - 120) continue;
+      const nearConveyor = conveyors.some((conveyor) =>
+        distToPolyline(
+          (conveyor.config as { path: Array<{ x: number; y: number }> }).path,
+          body.position.x,
+          body.position.y,
+        ) <= 72,
+      );
+      const nearHopper = hoppers.some((hopper) => {
+        const cfg = hopper.config as { x: number; y: number };
+        return Math.hypot(cfg.x - body.position.x, cfg.y - body.position.y) <= 120;
+      });
 
-      // Inward pull + downward nudge toward funnel center
-      const inward = dx * 0.00018;
-      const downward = 0.0008;
-      Matter.Body.applyForce(body, body.position, { x: inward, y: downward });
+      if (supportedCargoIds.has(cargo.id)) {
+        cargoIdleTimers.set(cargo.id, 0);
+        cargoStates.set(cargo.id, 'supported');
+        continue;
+      }
+
+      const groundedAwayFromFlow = body.position.y > CANVAS_H - 24 && !nearConveyor && !nearHopper;
+      const idle = groundedAwayFromFlow && body.speed < 0.18
+        ? (cargoIdleTimers.get(cargo.id) ?? 0) + dt
+        : 0;
+      cargoIdleTimers.set(cargo.id, idle);
+
+      const outOfBounds = body.position.y > CANVAS_H + 90 || body.position.x < -80 || body.position.x > CANVAS_W + 80;
+      const irrecoverable = groundedAwayFromFlow && idle > 1.25;
+
+      if (outOfBounds || irrecoverable) {
+        const respawn = cargoSpawnMap.get(cargo.id) ?? (cargo.config as { x: number; y: number });
+        Matter.Body.setStatic(body, false);
+        Matter.Body.setPosition(body, { x: respawn.x, y: respawn.y });
+        Matter.Body.setVelocity(body, { x: 0, y: 0 });
+        Matter.Body.setAngle(body, 0);
+        Matter.Body.setAngularVelocity(body, 0);
+        cargoIdleTimers.set(cargo.id, 0);
+        cargoRespawnCounts.set(cargo.id, (cargoRespawnCounts.get(cargo.id) ?? 0) + 1);
+        cargoStates.set(cargo.id, 'respawned');
+        lostCargoCount += 1;
+        continue;
+      }
+
+      cargoStates.set(cargo.id, body.speed > 0.25 ? 'airborne' : 'spawned');
     }
   }
 
@@ -485,8 +692,10 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
     prevTrainProgress: number,
   ): PhysicsFrame {
     const drivenVels = driveMotors();
-    tickConveyors();
-    tickHopper();
+    const conveyorFrame = tickConveyors();
+    const collectedThisTick = tickHopper();
+    recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
+    throughput = throughput * 0.84 + (collectedThisTick > 0 ? (collectedThisTick / Math.max(_dt, 0.016)) : 0) * 0.16;
 
     // Advance loco
     locoProgress = tickLocomotive(_dt, prevTrainProgress);
@@ -578,6 +787,11 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       trainProgress: locoProgress,
       wagonDelivered,
       gearTelemetry,
+      cargoStates: Object.fromEntries(cargoStates.entries()),
+      throughput: Number(throughput.toFixed(1)),
+      beltPowered: conveyorFrame.beltPowered,
+      lostCargoCount,
+      stableCargoSpawns: Object.fromEntries(cargoSpawnMap.entries()),
     };
   }
 

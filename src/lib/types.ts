@@ -295,10 +295,20 @@ export interface HudWidgetSpec {
     | 'hopper-fill'
     | 'throughput'
     | 'train-speed'
-    | 'hook-height';
+    | 'hook-height'
+    | 'belt-powered'
+    | 'lost-cargo';
   units?: string;
   position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 }
+
+export type CargoLifecycleState =
+  | 'spawned'
+  | 'supported'
+  | 'airborne'
+  | 'collected'
+  | 'lost'
+  | 'respawned';
 
 export interface GoalSpec {
   id: string;
@@ -448,11 +458,20 @@ export interface JobProgressRecord {
   lastPlayedAt?: string;
 }
 
+export interface DraftPlayState {
+  jobId?: string;
+  latchedStepIds: string[];
+  stepCheckpointManifest: Record<string, ExperimentManifest>;
+  lastStableCargoSpawns: Record<string, { x: number; y: number }>;
+  diagnosticsEnabled?: boolean;
+}
+
 export interface DraftRecord {
   draftId: string;
   sourceMachineId?: string;
   sourceBlueprintId?: string;
   manifest: ExperimentManifest;
+  playState?: DraftPlayState;
   updatedAt: string;
 }
 
@@ -492,6 +511,9 @@ export interface BuildTelemetry {
   hookHeight?: number;
   loadPlaced?: boolean;
   wagonDelivered?: boolean;
+  beltPowered?: boolean;
+  lostCargoCount?: number;
+  cargoStates?: Record<string, CargoLifecycleState>;
 }
 
 export const SLICE_PARTS: PrimitiveKind[] = [

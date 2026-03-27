@@ -14,6 +14,8 @@ function metricValue(metric: string | undefined, telemetry: BuildTelemetry): str
     case 'throughput':  return `${Math.round(telemetry.throughput ?? 0)}/s`;
     case 'train-speed': return `${telemetry.trainSpeed ?? 0}`;
     case 'hook-height': return `${Math.round(telemetry.hookHeight ?? 0)}px`;
+    case 'belt-powered': return telemetry.beltPowered ? 'Powered' : 'Coasting';
+    case 'lost-cargo': return `${Math.round(telemetry.lostCargoCount ?? 0)}`;
     default: return '—';
   }
 }
@@ -27,6 +29,8 @@ function metricUnit(metric: string | undefined): string {
     case 'throughput':  return '';
     case 'train-speed': return '';
     case 'hook-height': return '';
+    case 'belt-powered': return '';
+    case 'lost-cargo': return 'lost';
     default: return '';
   }
 }

@@ -14,6 +14,7 @@ interface MachineCanvasProps {
   runtime: RuntimeSnapshot;
   selectedPrimitiveId?: string;
   placingKind?: PrimitiveKind | null;
+  diagnosticsEnabled?: boolean;
   activeJobHint?: string;
   projectGuide?: {
     title: string;
@@ -36,6 +37,7 @@ export function MachineCanvas({
   runtime,
   selectedPrimitiveId,
   placingKind,
+  diagnosticsEnabled,
   activeJobHint,
   projectGuide,
   onPlacePrimitive,
@@ -59,6 +61,7 @@ export function MachineCanvas({
   const onTelemetryRef = useRef(onTelemetry);
   const onConnectionFlashRef = useRef(onConnectionFlash);
   const onTogglePowerRef = useRef(onTogglePower);
+  const diagnosticsRef = useRef(diagnosticsEnabled ?? false);
   const draggingIdRef = useRef<string | undefined>(undefined);
   const hoveredIdRef = useRef<string | undefined>(undefined);
   const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -85,7 +88,9 @@ export function MachineCanvas({
     onTelemetryRef.current = onTelemetry;
     onConnectionFlashRef.current = onConnectionFlash;
     onTogglePowerRef.current = onTogglePower;
+    diagnosticsRef.current = diagnosticsEnabled ?? false;
   }, [
+    diagnosticsEnabled,
     manifest,
     onConnectionFlash,
     onMovePrimitive,
@@ -142,6 +147,7 @@ export function MachineCanvas({
           placingRef.current,
           projectGuideRef.current,
           flashTimesRef.current,
+          diagnosticsRef.current,
         );
         onTelemetryRef.current(runtimeRef.current.telemetry);
 
@@ -255,13 +261,13 @@ export function MachineCanvas({
     }
   })();
 
-  const status = 'Live Sandbox — Every placed part should matter';
+  const sunnyStatus = 'Sunny Workyard';
 
   return (
     <div className="machine-canvas-shell">
       <div className="machine-canvas-toolbar">
         <div className="canvas-toolbar-main">
-          <span>{status}</span>
+          <span>{sunnyStatus}</span>
           <span className={`canvas-mode-pill ${placingKind ? 'placing' : selectedPrimitiveId ? 'selected' : 'idle'}`}>
             {placingKind ? `Place ${labelFor(placingKind)}` : selectedPrimitiveId ? 'Selected part' : 'Select and drag'}
           </span>
@@ -291,8 +297,9 @@ function drawScene(
   placingKind: PrimitiveKind | null | undefined,
   projectGuide: MachineCanvasProps['projectGuide'],
   flashTimes: Record<string, number>,
+  diagnosticsEnabled: boolean,
 ) {
-  instance.background(7, 14, 22);
+  drawBackdrop(instance);
   drawGrid(instance);
   drawProjectGuide(instance, projectGuide);
   drawConnectionOverlay(instance, manifest, runtime, selectedPrimitiveId, placingKind);
@@ -324,6 +331,10 @@ function drawScene(
     instance.mouseX,
     instance.mouseY,
   );
+
+  if (diagnosticsEnabled) {
+    drawDiagnostics(instance, manifest, runtime);
+  }
 }
 
 // ─── Connection overlay ───────────────────────────────────────────────────────
@@ -808,11 +819,51 @@ function toneColor(tone: 'good' | 'info' | 'warn') {
 
 // ─── Grid ─────────────────────────────────────────────────────────────────────
 
+function drawBackdrop(instance: p5) {
+  const ctx = instance.drawingContext as CanvasRenderingContext2D;
+  const sky = ctx.createLinearGradient(0, 0, 0, instance.height);
+  sky.addColorStop(0, '#dff6ff');
+  sky.addColorStop(0.58, '#f9fbef');
+  sky.addColorStop(1, '#f3e7c8');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, instance.width, instance.height);
+
+  instance.noStroke();
+  instance.fill(255, 245, 196, 170);
+  instance.circle(instance.width - 110, 92, 128);
+  instance.fill(197, 229, 208, 255);
+  instance.rect(-20, instance.height - 130, instance.width + 40, 170);
+}
+
 function drawGrid(instance: p5) {
-  instance.stroke(24, 42, 58, 80);
+  instance.stroke(58, 118, 134, 42);
   instance.strokeWeight(1);
   for (let x = 0; x < instance.width; x += 32) instance.line(x, 0, x, instance.height);
   for (let y = 0; y < instance.height; y += 32) instance.line(0, y, instance.width, y);
+  instance.stroke(255, 255, 255, 70);
+  instance.strokeWeight(2);
+  instance.line(0, instance.height - 128, instance.width, instance.height - 128);
+}
+
+function drawDiagnostics(
+  instance: p5,
+  manifest: ExperimentManifest,
+  runtime: RuntimeSnapshot,
+) {
+  instance.push();
+  instance.textAlign(instance.LEFT, instance.CENTER);
+  instance.textSize(10);
+  for (const primitive of manifest.primitives) {
+    if (primitive.kind !== 'cargo-block') continue;
+    const pos = getLivePos(primitive, runtime);
+    const state = runtime.cargoStates[primitive.id] ?? 'spawned';
+    instance.noStroke();
+    instance.fill(15, 23, 42, 180);
+    instance.rect(pos.x + 14, pos.y - 22, 74, 18, 8);
+    instance.fill(248, 250, 252, 255);
+    instance.text(state, pos.x + 22, pos.y - 13);
+  }
+  instance.pop();
 }
 
 // ─── Primitive drawing ────────────────────────────────────────────────────────
@@ -1032,6 +1083,7 @@ function drawPrimitive(
     }
     case 'cargo-block': {
       const progress = runtime.cargoProgress[primitive.id];
+      const cargoState = runtime.cargoStates[primitive.id] ?? 'spawned';
       let cx: number;
       let cy: number;
       if (progress !== undefined) {
@@ -1042,7 +1094,14 @@ function drawPrimitive(
         cx = pos.x;
         cy = pos.y;
       }
-      instance.fill(selected ? '#fbbf24' : '#cbd5e1');
+      const cargoFill = cargoState === 'collected'
+        ? '#f59e0b'
+        : cargoState === 'respawned'
+          ? '#93c5fd'
+          : cargoState === 'supported'
+            ? '#f8fafc'
+            : '#cbd5e1';
+      instance.fill(selected ? '#fbbf24' : cargoFill);
       instance.stroke(selected ? '#fbbf24' : highlight);
       instance.rect(cx - 12, cy - 12, 24, 24, 4);
       break;
@@ -1218,11 +1277,11 @@ function hitTest(
         return false;
       case 'rail-segment': {
         const points = (primitive.config as { points: Array<{ x: number; y: number }> }).points;
-        return distanceToPolyline(points, x, y) < 18;
+        return distanceToPolyline(points, x, y) < 26;
       }
       case 'conveyor': {
         const path = (primitive.config as { path: Array<{ x: number; y: number }> }).path;
-        return distanceToPolyline(path, x, y) < 18;
+        return distanceToPolyline(path, x, y) < 26;
       }
       case 'locomotive': {
         const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
@@ -1240,7 +1299,7 @@ function hitTest(
         const px = phys ? phys.x : ('x' in primitive.config ? (primitive.config as { x: number }).x : null);
         const py = phys ? phys.y : ('y' in primitive.config ? (primitive.config as { y: number }).y : null);
         if (px === null || py === null) return false;
-        return Math.hypot(px - x, py - y) < 28;
+        return Math.hypot(px - x, py - y) < 36;
       }
     }
   });

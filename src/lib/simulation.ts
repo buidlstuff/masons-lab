@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { buildMatterWorld, type PhysicsWorld } from './physics-engine';
-import type { BuildTelemetry, ExperimentManifest, PrimitiveInstance } from './types';
+import type { BuildTelemetry, CargoLifecycleState, ExperimentManifest, PrimitiveInstance } from './types';
 import Matter from 'matter-js';
 
 export interface RuntimeSnapshot {
@@ -20,6 +20,10 @@ export interface RuntimeSnapshot {
   motorDrives?: Record<string, string[]>;
   /** gear id → meshed gear ids (for canvas connection overlay) */
   gearMeshes?: Record<string, string[]>;
+  cargoStates: Record<string, CargoLifecycleState>;
+  beltPowered: boolean;
+  lostCargoCount: number;
+  stableCargoSpawns: Record<string, { x: number; y: number }>;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -27,6 +31,9 @@ export interface RuntimeSnapshot {
 export function useMachineSimulation(
   manifest: ExperimentManifest,
   controlValues: Record<string, string | number | boolean>,
+  options?: {
+    stableCargoSpawns?: Record<string, { x: number; y: number }>;
+  },
 ): RuntimeSnapshot {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(() => createInitialSnapshot(manifest));
 
@@ -58,7 +65,9 @@ export function useMachineSimulation(
 
     const recipeId = manifest.metadata.recipeId;
     if (!recipeId) {
-      physicsRef.current = buildMatterWorld(manifest);
+      physicsRef.current = buildMatterWorld(manifest, {
+        stableCargoSpawns: options?.stableCargoSpawns,
+      });
     }
 
     const initial = createInitialSnapshot(manifest);
@@ -74,7 +83,7 @@ export function useMachineSimulation(
       physicsRef.current?.cleanup();
       physicsRef.current = null;
     };
-  }, [manifest]);
+  }, [manifest, options?.stableCargoSpawns]);
 
   // Single rAF loop — never restarts, reads everything through refs.
   useEffect(() => {
@@ -107,11 +116,20 @@ export function useMachineSimulation(
           bodyPositions: frame.bodyPositions,
           motorDrives: frame.motorDrives,
           gearMeshes: frame.gearMeshes,
+          cargoStates: frame.cargoStates,
+          throughput: frame.throughput,
+          beltPowered: frame.beltPowered,
+          lostCargoCount: frame.lostCargoCount,
+          stableCargoSpawns: frame.stableCargoSpawns,
           telemetry: {
             ...prev.telemetry,
             hookHeight: frame.hookY !== null ? Math.round(frame.hookY) : prev.telemetry.hookHeight,
             hopperFill: frame.hopperFill !== null ? frame.hopperFill : prev.telemetry.hopperFill,
             wagonDelivered: frame.wagonDelivered,
+            throughput: frame.throughput,
+            beltPowered: frame.beltPowered,
+            lostCargoCount: frame.lostCargoCount,
+            cargoStates: frame.cargoStates,
             trainSpeed: frame.trainProgress !== prev.trainProgress
               ? Number(((frame.trainProgress - prev.trainProgress) / dt * 10).toFixed(1))
               : prev.telemetry.trainSpeed,
@@ -162,6 +180,10 @@ function createInitialSnapshot(manifest: ExperimentManifest): RuntimeSnapshot {
     trainDelivered: false,
     hopperFill: getInitialHopperFill(manifest),
     throughput: 0,
+    cargoStates: {},
+    beltPowered: false,
+    lostCargoCount: 0,
+    stableCargoSpawns: {},
     telemetry: {},
   };
 }
@@ -258,9 +280,11 @@ function stepConveyor(
     cargoProgress,
     hopperFill: fill,
     throughput,
+    beltPowered: true,
     telemetry: {
       hopperFill: fill,
       throughput,
+      beltPowered: true,
     },
   };
 }
