@@ -74,6 +74,7 @@ export interface PhysicsFrame {
   beltPowered: boolean;
   lostCargoCount: number;
   stableCargoSpawns: Record<string, { x: number; y: number }>;
+  wagonLoads: Record<string, number>;
   pistonExtensions: Record<string, number>;
   bucketContents: Record<string, number>;
   bucketStates: Record<string, 'collecting' | 'dumping'>;
@@ -107,12 +108,19 @@ export function buildMatterWorld(
   const MATERIAL_KINDS: PrimitiveKind[] = ['cargo-block', 'ball', 'rock'];
   const engine = Matter.Engine.create({ gravity: { x: 0, y: 1.2 } });
   const bodyMap = new Map<string, Matter.Body>();
-  const ropeConstraints: Matter.Constraint[] = [];
+  const ropeConstraints: Array<{
+    primitiveId: string;
+    fromId: string;
+    viaIds: string[];
+    totalLength: number;
+    constraint: Matter.Constraint;
+  }> = [];
   const cargoSpawnMap = new Map<string, { x: number; y: number }>();
   const cargoIdleTimers = new Map<string, number>();
   const cargoRespawnCounts = new Map<string, number>();
   const cargoStates = new Map<string, CargoLifecycleState>();
   const collectedCargoIds = new Set<string>();
+  const wagonCargoAssignments = new Map<string, { wagonId: string; slot: number }>();
   let lostCargoCount = 0;
   let throughput = 0;
   const motorPistonMap = new Map<string, string[]>();
@@ -142,6 +150,53 @@ export function buildMatterWorld(
     y: number;
     walls: Matter.Body[];
   }> = [];
+
+  function primitiveCurrentPoint(primitiveId: string) {
+    const primitive = manifest.primitives.find((item) => item.id === primitiveId);
+    if (!primitive) return { x: 0, y: 0 };
+    const body = bodyMap.get(primitive.id);
+    if (body) return { x: body.position.x, y: body.position.y };
+    if ('x' in primitive.config && 'y' in primitive.config) {
+      return { x: primitive.config.x, y: primitive.config.y };
+    }
+    return { x: 0, y: 0 };
+  }
+
+  function anchorForPrimitive(primitiveId: string) {
+    const primitive = manifest.primitives.find((item) => item.id === primitiveId);
+    if (!primitive) {
+      return { pointA: { x: 0, y: 0 } };
+    }
+    const body = bodyMap.get(primitive.id);
+    if (body) {
+      return { bodyA: body, pointA: { x: 0, y: 0 } };
+    }
+    return { pointA: primitiveCurrentPoint(primitive.id) };
+  }
+
+  function ropePrefixLength(fromId: string, viaIds: string[]) {
+    if (viaIds.length === 0) return 0;
+    const points = [fromId, ...viaIds].map(primitiveCurrentPoint);
+    let total = 0;
+    for (let index = 0; index < points.length - 1; index += 1) {
+      total += Math.hypot(
+        points[index + 1].x - points[index].x,
+        points[index + 1].y - points[index].y,
+      );
+    }
+    return total;
+  }
+
+  function syncRopeConstraint(entry: {
+    primitiveId: string;
+    fromId: string;
+    viaIds: string[];
+    totalLength: number;
+    constraint: Matter.Constraint;
+  }) {
+    const prefix = ropePrefixLength(entry.fromId, entry.viaIds);
+    entry.constraint.length = Math.max(24, entry.totalLength - prefix);
+  }
 
   // Ground + boundary walls
   Matter.World.add(engine.world, [
@@ -329,7 +384,7 @@ export function buildMatterWorld(
     }
 
     if (prim.kind === 'rope' || isTransmissionConnectorKind(prim.kind)) {
-      const cfg = prim.config as { fromId: string; toId: string; length: number };
+      const cfg = prim.config as { fromId: string; toId: string; length: number; viaIds?: string[] };
       const fromPrim = manifest.primitives.find((item) => item.id === cfg.fromId);
       const toPrim = manifest.primitives.find((item) => item.id === cfg.toId);
       const actsAsTransmission = prim.kind !== 'rope'
@@ -346,18 +401,27 @@ export function buildMatterWorld(
           beltLinkMap.get(toPrim.id)!.push({ id: fromPrim.id, ratio: ratioBtoA });
         }
       } else if (prim.kind === 'rope') {
-        const winchBody = bodyMap.get(cfg.fromId);
         const hookBody = bodyMap.get(cfg.toId);
-        if (!winchBody || !hookBody) continue;
+        if (!fromPrim || !hookBody) continue;
+        const viaIds = (cfg.viaIds ?? []).filter((viaId) => manifest.primitives.some((item) => item.id === viaId));
+        const anchorId = viaIds.at(-1) ?? cfg.fromId;
+        const anchor = anchorForPrimitive(anchorId);
         const constraint = Matter.Constraint.create({
-          bodyA: winchBody,
+          ...(anchor.bodyA ? { bodyA: anchor.bodyA } : {}),
+          pointA: anchor.pointA,
           bodyB: hookBody,
-          length: cfg.length,
+          length: Math.max(24, cfg.length - ropePrefixLength(cfg.fromId, viaIds)),
           stiffness: 0.05,
           damping: 0.2,
           label: `rope-${prim.id}`,
         });
-        ropeConstraints.push(constraint);
+        ropeConstraints.push({
+          primitiveId: prim.id,
+          fromId: cfg.fromId,
+          viaIds,
+          totalLength: cfg.length,
+          constraint,
+        });
         Matter.World.add(engine.world, constraint);
       }
     }
@@ -667,12 +731,10 @@ export function buildMatterWorld(
         const newLength = Number(
           controlValues[ropeControl.id] ?? (prim.config as { ropeLength: number }).ropeLength,
         );
-        const winchBody = bodyMap.get(prim.id);
-        if (!winchBody) continue;
-        for (const c of ropeConstraints) {
-          if (c.bodyA === winchBody) {
-            c.length = newLength;
-          }
+        for (const rope of ropeConstraints) {
+          if (rope.fromId !== prim.id) continue;
+          rope.totalLength = newLength;
+          syncRopeConstraint(rope);
         }
       }
 
@@ -864,7 +926,7 @@ export function buildMatterWorld(
 
         for (const cargo of cargoBlocks) {
           const body = bodyMap.get(cargo.id);
-          if (!body || collectedCargoIds.has(cargo.id)) continue;
+          if (!body || collectedCargoIds.has(cargo.id) || wagonCargoAssignments.has(cargo.id)) continue;
 
           // Perpendicular distance from cargo center to this segment
           const perp = distToSegment(body.position.x, body.position.y, ax, ay, bx, by);
@@ -910,6 +972,7 @@ export function buildMatterWorld(
       if (!body) continue;
 
       if (collectedCargoIds.has(prim.id)) {
+        wagonCargoAssignments.delete(prim.id);
         const slotIndex = [...collectedCargoIds].indexOf(prim.id);
         const hopper = hopperStructures[0];
         const targetX = hopper.x + (slotIndex % 3 - 1) * 18;
@@ -935,6 +998,7 @@ export function buildMatterWorld(
           body.position.y < collectBot
         ) {
           collectedCargoIds.add(prim.id);
+          wagonCargoAssignments.delete(prim.id);
           Matter.Body.setStatic(body, true);
           cargoStates.set(prim.id, 'collected');
           collectedThisTick += 1;
@@ -956,7 +1020,7 @@ export function buildMatterWorld(
 
     for (const cargo of manifest.primitives.filter((primitive) => MATERIAL_KINDS.includes(primitive.kind))) {
       const body = bodyMap.get(cargo.id);
-      if (!body || collectedCargoIds.has(cargo.id)) {
+      if (!body || collectedCargoIds.has(cargo.id) || wagonCargoAssignments.has(cargo.id)) {
         continue;
       }
 
@@ -1062,12 +1126,11 @@ export function buildMatterWorld(
       const powered = [...activeMotorIds].some((motorId) => (motorWinchMap.get(motorId) ?? []).includes(prim.id));
       if (!powered) continue;
       const cfg = prim.config as { speed?: number };
-      const winchBody = bodyMap.get(prim.id);
-      if (!winchBody) continue;
-      for (const constraint of ropeConstraints) {
-        if (constraint.bodyA !== winchBody) continue;
+      for (const rope of ropeConstraints) {
+        if (rope.fromId !== prim.id) continue;
         const delta = Math.min((cfg.speed ?? 10) * dt, 2);
-        constraint.length = Math.max(50, constraint.length - delta);
+        rope.totalLength = Math.max(40, rope.totalLength - delta);
+        syncRopeConstraint(rope);
       }
     }
   }
@@ -1091,7 +1154,7 @@ export function buildMatterWorld(
         const by = bucketBody.position.y;
         for (const matPrim of manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind))) {
           const matBody = bodyMap.get(matPrim.id);
-          if (!matBody || collectedCargoIds.has(matPrim.id)) continue;
+          if (!matBody || collectedCargoIds.has(matPrim.id) || wagonCargoAssignments.has(matPrim.id)) continue;
           if (Math.hypot(matBody.position.x - bx, matBody.position.y - by) < 30) {
             count += 1;
           }
@@ -1099,6 +1162,64 @@ export function buildMatterWorld(
         bucketContentsState[prim.id] = count;
       }
     }
+  }
+
+  function tickWagons() {
+    const wagonLoads: Record<string, number> = {};
+    const wagons = manifest.primitives.filter((p) => p.kind === 'wagon');
+    if (wagons.length === 0) return wagonLoads;
+
+    for (const [cargoId] of [...wagonCargoAssignments.entries()]) {
+      const body = bodyMap.get(cargoId);
+      if (!body || collectedCargoIds.has(cargoId)) {
+        wagonCargoAssignments.delete(cargoId);
+      }
+    }
+
+    for (const wagon of wagons) {
+      const cfg = wagon.config as { trackId: string; offset: number; capacity?: number };
+      const trackPrim = manifest.primitives.find((p) => p.id === cfg.trackId);
+      const wagonProgress = Math.max(0, (locoProgress + cfg.offset) % 1);
+      const wagonPos = trackPoint(trackPrim, wagonProgress);
+      const capacity = cfg.capacity ?? 6;
+
+      let loadedCount = [...wagonCargoAssignments.values()].filter((entry) => entry.wagonId === wagon.id).length;
+      if (loadedCount < capacity) {
+        for (const material of manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind))) {
+          const body = bodyMap.get(material.id);
+          if (!body || collectedCargoIds.has(material.id) || wagonCargoAssignments.has(material.id)) continue;
+          if ((material.config as { attachedToId?: string }).attachedToId) continue;
+          if (Math.abs(body.position.x - wagonPos.x) > 24 || Math.abs(body.position.y - wagonPos.y) > 20) continue;
+          wagonCargoAssignments.set(material.id, { wagonId: wagon.id, slot: loadedCount });
+          Matter.Body.setStatic(body, true);
+          cargoStates.set(material.id, 'supported');
+          loadedCount += 1;
+          if (loadedCount >= capacity) break;
+        }
+      }
+
+      const assignedCargo = [...wagonCargoAssignments.entries()]
+        .filter(([, entry]) => entry.wagonId === wagon.id)
+        .sort((a, b) => a[1].slot - b[1].slot);
+      wagonLoads[wagon.id] = assignedCargo.length;
+
+      for (const [cargoId, entry] of assignedCargo) {
+        const body = bodyMap.get(cargoId);
+        if (!body) continue;
+        const column = (entry.slot % 3) - 1;
+        const row = Math.floor(entry.slot / 3);
+        Matter.Body.setPosition(body, {
+          x: wagonPos.x + column * 16,
+          y: wagonPos.y - 8 - row * 18,
+        });
+        Matter.Body.setVelocity(body, { x: 0, y: 0 });
+        Matter.Body.setAngle(body, 0);
+        Matter.Body.setAngularVelocity(body, 0);
+        cargoStates.set(cargoId, 'supported');
+      }
+    }
+
+    return wagonLoads;
   }
 
   // ── tickLocomotive ────────────────────────────────────────────────────────
@@ -1145,6 +1266,9 @@ export function buildMatterWorld(
         });
       }
     }
+    for (const rope of ropeConstraints) {
+      syncRopeConstraint(rope);
+    }
 
     const drivenVels = driveMotors();
     const inertiaDriven = new Map<string, number>();
@@ -1185,12 +1309,17 @@ export function buildMatterWorld(
         flywheelHops += 1;
       }
     }
+    // Advance loco early so wagon-carried cargo can interact with hoppers and other
+    // systems during the current frame rather than one frame late.
+    locoProgress = tickLocomotive(_dt, prevTrainProgress);
+
     tickWinches(_dt);
     tickPistons(_dt);
     tickRacks();
     tickSprings();
     const conveyorFrame = tickConveyors();
     tickWaterZones(conveyorFrame.supportedCargoIds);
+    const wagonLoads = tickWagons();
     const collectedThisTick = tickHopper();
     tickBuckets();
     recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
@@ -1209,9 +1338,6 @@ export function buildMatterWorld(
       }
     }
     throughput = throughput * 0.84 + (collectedThisTick > 0 ? (collectedThisTick / Math.max(_dt, 0.016)) : 0) * 0.16;
-
-    // Advance loco
-    locoProgress = tickLocomotive(_dt, prevTrainProgress);
 
     const rotations: Record<string, number> = { ...prevRotations };
     const bodyPositions: Record<string, { x: number; y: number; angle: number }> = {};
@@ -1309,6 +1435,7 @@ export function buildMatterWorld(
       beltPowered: conveyorFrame.beltPowered,
       lostCargoCount,
       stableCargoSpawns: Object.fromEntries(cargoSpawnMap.entries()),
+      wagonLoads,
       pistonExtensions: { ...pistonExtensionsState },
       bucketContents: { ...bucketContentsState },
       bucketStates: { ...bucketStateMap },

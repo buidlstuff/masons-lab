@@ -420,8 +420,9 @@ function connectionHintForKind(kind: PrimitiveKind) {
     case 'gear':
       return 'Gears want motor reach, contact with another rotating part, or a chassis mount for a real drivetrain.';
     case 'pulley':
+      return 'Pulleys can carry a drive link, or act as rope redirectors once a winch rope exists.';
     case 'chain-sprocket':
-      return 'These can mesh by contact, use Quick Connect for a visible belt/chain link, or mount onto a chassis.';
+      return 'These can mesh by contact, use Quick Connect for a visible chain link, or mount onto a chassis.';
     case 'flywheel':
       return 'Flywheels store spin, so feed them from a motor or belt train and mount them onto a frame if needed.';
     case 'gearbox':
@@ -436,7 +437,7 @@ function connectionHintForKind(kind: PrimitiveKind) {
       return 'Conveyors are easiest to read when cargo moves into a hopper.';
     case 'winch':
     case 'hook':
-      return 'Hoists only make sense once the winch and hook are linked, and the winch can also be mounted to a chassis.';
+      return 'Hoists only make sense once the winch and hook are linked, and pulleys can now redirect that rope path.';
     case 'rail-segment':
       return 'Rails define the path, and locomotives can now be linked to a real rotating drive part.';
     case 'locomotive':

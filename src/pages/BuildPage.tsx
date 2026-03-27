@@ -793,6 +793,40 @@ export function BuildPage() {
     showStatus(`Linked the locomotive to the ${driver.label ?? driver.kind}.`, 'success');
   }, [manifest, persistDraft, selectedPrimitive, showStatus]);
 
+  const handleRouteRopeThroughPulley = useCallback(() => {
+    if (!manifest || !selectedPrimitive) return;
+    const pulley = selectedPrimitive.kind === 'pulley'
+      ? selectedPrimitive
+      : findNearestPrimitive(manifest, selectedPrimitive, (primitive) => primitive.kind === 'pulley');
+    const rope = selectedPrimitive.kind === 'winch'
+      ? manifest.primitives.find(
+          (primitive) => primitive.kind === 'rope' && (primitive.config as { fromId?: string }).fromId === selectedPrimitive.id,
+        )
+      : selectedPrimitive.kind === 'hook'
+        ? manifest.primitives.find(
+            (primitive) => primitive.kind === 'rope' && (primitive.config as { toId?: string }).toId === selectedPrimitive.id,
+          )
+        : manifest.primitives.find(
+            (primitive) => primitive.kind === 'rope' && !(primitive.config as { viaIds?: string[] }).viaIds?.includes(pulley?.id ?? ''),
+          );
+
+    if (!pulley || !rope) {
+      showStatus('Place a pulley and a winch rope first, then Quick Connect can route the rope through it.', 'warning');
+      return;
+    }
+
+    const nextViaIds = [...new Set([...(rope.config as { viaIds?: string[] }).viaIds ?? [], pulley.id])];
+    void persistDraft(
+      updatePrimitive(manifest, rope.id, {
+        ...rope.config,
+        viaIds: nextViaIds,
+      }),
+      undefined,
+      { recordHistory: true },
+    );
+    showStatus('Routed the rope through the pulley.', 'success');
+  }, [manifest, persistDraft, selectedPrimitive, showStatus]);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       // Don't intercept when typing in inputs/textareas
@@ -1343,6 +1377,8 @@ export function BuildPage() {
                   ? 'Use this when a winch and hook are already on the canvas.'
                   : selectedPrimitive.kind === 'winch'
                     ? 'Use this to either hang the winch from a hook path or mount it onto a chassis.'
+                    : selectedPrimitive.kind === 'pulley'
+                      ? 'Use this to route an existing rope or add a drive link between rotating parts.'
                   : 'Use this to mount or attach the selected part to the nearest compatible partner.'}
             </p>
             <div className="button-row vertical">
@@ -1373,6 +1409,13 @@ export function BuildPage() {
                 onClick={handleConnectLocomotiveDrive}
               >
                 Drive Locomotive from Rotating Part
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPrimitiveId || !['pulley', 'winch', 'hook'].includes(selectedPrimitive.kind)}
+                onClick={handleRouteRopeThroughPulley}
+              >
+                Route Rope Through Pulley
               </button>
               <button
                 type="button"

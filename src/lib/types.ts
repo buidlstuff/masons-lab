@@ -742,6 +742,7 @@ export interface BuildTelemetry {
   hopperFill?: number;
   throughput?: number;
   trainSpeed?: number;
+  wagonLoad?: number;
   hookHeight?: number;
   loadPlaced?: boolean;
   wagonDelivered?: boolean;

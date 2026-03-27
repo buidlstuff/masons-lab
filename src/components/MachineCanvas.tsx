@@ -319,7 +319,9 @@ export function MachineCanvas({
         return 'Chassis — mount wheels and a motor onto it to build a simple rolling machine';
       case 'pulley':
       case 'chain-sprocket':
-        return 'Rotating part — place it in a motor ring, touch another rotating part, or Quick Connect a belt link';
+        return sel.kind === 'pulley'
+          ? 'Pulley — use it as a rotating part, or Quick Connect to route a rope through it'
+          : 'Rotating part — place it in a motor ring, touch another rotating part, or Quick Connect a belt link';
       case 'flywheel':
         return 'Flywheel — feed it from a motor, gear train, or belt link to store motion';
       case 'gearbox':
@@ -1628,13 +1630,13 @@ function drawPrimitive(
       const ropePrim = primitives.find(
         (item) => item.kind === 'rope' && (item.config as { toId?: string }).toId === primitive.id,
       );
-      const winchPrim = ropePrim
-        ? findPrimitiveById(primitives, (ropePrim.config as { fromId: string }).fromId)
-        : primitives.find((p) => p.kind === 'winch');
-      const winchPos = winchPrim ? getLivePos(winchPrim, runtime) : { x: config.x, y: config.y };
-      instance.stroke('#f59e0b');
-      instance.strokeWeight(2);
-      instance.line(winchPos.x, winchPos.y, hx, hy);
+      if (!ropePrim) {
+        const winchPrim = primitives.find((p) => p.kind === 'winch');
+        const winchPos = winchPrim ? getLivePos(winchPrim, runtime) : { x: config.x, y: config.y };
+        instance.stroke('#f59e0b');
+        instance.strokeWeight(2);
+        instance.line(winchPos.x, winchPos.y, hx, hy);
+      }
       instance.noFill();
       instance.stroke(selected ? '#fbbf24' : '#94a3b8');
       instance.strokeWeight(selected ? 3 : 2);
@@ -1642,17 +1644,14 @@ function drawPrimitive(
       break;
     }
     case 'rope': {
-      const config = primitive.config as { fromId: string; toId: string };
-      const from = findPrimitiveById(primitives, config.fromId);
-      const to = findPrimitiveById(primitives, config.toId);
-      if (from && to) {
-        const posA = getLivePos(from, runtime);
-        const phys = runtime.bodyPositions?.[to.id];
-        const toY = to.kind === 'hook' ? (phys?.y ?? runtime.hookY) : getLivePos(to, runtime).y;
-        const toX = to.kind === 'hook' ? (phys?.x ?? getLivePos(to, runtime).x) : getLivePos(to, runtime).x;
+      const config = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
+      const points = connectorPathPoints(config, primitives, runtime);
+      if (points.length >= 2) {
         instance.stroke(selected ? '#fbbf24' : '#f8fafc');
         instance.strokeWeight(selected ? 3 : 1.5);
-        instance.line(posA.x, posA.y, toX, toY);
+        for (let i = 0; i < points.length - 1; i += 1) {
+          instance.line(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y);
+        }
       }
       break;
     }
@@ -1730,6 +1729,14 @@ function drawPrimitive(
       instance.fill(selected ? '#fbbf24' : '#94a3b8');
       instance.stroke(selected ? '#fbbf24' : highlight);
       instance.rect(point.x - 18, point.y - 16, 36, 20, 6);
+      const wagonLoad = runtime.wagonLoads?.[primitive.id] ?? 0;
+      if (wagonLoad > 0) {
+        instance.noStroke();
+        instance.fill('#f8fafc');
+        instance.textSize(10);
+        instance.textAlign(instance.CENTER, instance.BOTTOM);
+        instance.text(`${wagonLoad}`, point.x, point.y - 18);
+      }
       break;
     }
     case 'material-pile': {
