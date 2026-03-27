@@ -1,878 +1,1242 @@
-# Mason's Lab — Parts Expansion Plan
-*Pass this to Claude when ready to implement. Do NOT start implementing until all 3 starter projects are reliably working.*
+# Mason's Lab — Parts Expansion Plan (v2)
+*Reviewed against actual source code March 2026. Pass this to Claude when ready to implement.*
+*Do NOT start implementing until 3 starter projects are validated through multiple real play sessions.*
 
 ---
 
-## Ground Rules for Implementation
+## Pre-Flight: Read These Files First
 
-1. **Never break existing parts.** Motor, gear, conveyor, hopper, cargo-block must continue to work exactly as they do. New code is additive.
-2. **Strangler fig pattern.** New parts plug into the existing engine via new code paths. Existing code paths are not refactored until new parts are proven.
-3. **Physics mode only.** All new parts live in `physics-engine.ts` (the real Matter.js path). Nothing goes in `simulation.ts` (that's the legacy scripted path).
-4. **Port system is additive.** The port routing lives alongside existing `motorGearMap`, `gearMeshMap`, etc. — it doesn't replace them.
-5. **Run `npx tsc --noEmit` after every file change.** Zero tolerance for TypeScript errors.
+Before touching a single line, implementing Claude must read:
+1. `src/lib/physics-engine.ts` — full file
+2. `src/lib/types.ts` — full file
+3. `src/lib/simulation.ts` — full file
+4. `current_state.md` — project state doc
+5. `reliability_fixes.md` (in memory/) — the 10 fixes that must not be undone
 
 ---
 
-## Current Architecture (what you are building on)
+## The 10 Fixes That Must Never Break
 
-### Two simulation paths
-- **Scripted** (`simulation.ts`): manifests with `recipeId` — legacy showcase machines only
-- **Physics** (`physics-engine.ts`): manifests without `recipeId` — all 3 starter projects, all new parts
+These were hard-won. Every phase of implementation must verify all 10 still work.
 
-### Existing primitive kinds (types.ts)
-```
-'node' | 'beam' | 'wheel' | 'axle' | 'motor' | 'gear' | 'winch' | 'rope' | 'hook' |
-'rail-segment' | 'rail-switch' | 'locomotive' | 'wagon' |
-'conveyor' | 'hopper' | 'cargo-block' | 'material-pile'
-```
+| # | Fix | Where | What to protect |
+|---|-----|--------|-----------------|
+| 1 | Drag = one world rebuild | `MachineCanvas.tsx` | `dragBufferRef` pattern — `mouseDragged` never calls `onMovePrimitive`, only `mouseReleased` does |
+| 2 | Belt at y=300, hopper below belt end | `BuildPage.tsx` | `placeStarterConveyor` y=300, `placeHopperAtConveyorOutput` at output.y+90 |
+| 3 | Conveyor support body | `physics-engine.ts` | `conveyorSupports` array — physical static bodies created per belt segment that cargo rides on |
+| 4 | Hopper fill never drops | `physics-engine.ts` | `collectedCargoIds: Set<string>` closure — once in, never removed |
+| 5 | Gear spin via rotations | `jobs.ts` | `runtime.rotations[gear.id] > 0.01` check, NOT `telemetry.outputRpm` |
+| 6 | Delete key | `BuildPage.tsx` | Delete/Backspace handler with input field guard |
+| 7 | Step celebration | `BuildPage.tsx` + CSS | `stepCelebrating` state + `step-complete-toast` animation |
+| 8 | Home → build direct | `HomePage.tsx`, `JobCard.tsx` | Links go to `/build?job=...` not `/jobs/...` |
+| 9 | Motor toggle | `MachineCanvas.tsx` + `InspectorPanel.tsx` | Click < 5px = toggle, not drag |
+| 10 | Belt animation | `MachineCanvas.tsx` | Animated chevrons using `Date.now()` offset |
 
-Several of these (`beam`, `axle`, `winch`, `rope`, `hook`) are typed but NOT fully implemented in physics-engine.ts. The plan below completes them properly.
+---
 
-### Key internal maps in `buildMatterWorld()`
+## Bugs Found in the v1 Plan (Corrected Here)
+
+### Bug A: Conveyor is NOT purely force-based (plan was wrong)
+The v1 plan said "Belt is NOT a physical surface — it's a force field." That was true before Fix #3. After Fix #3, the conveyor DOES have physical static support bodies:
 ```typescript
-const bodyMap = new Map<string, Matter.Body>();          // primitive id → body
-const motorGearMap = new Map<string, string[]>();        // motor → gear ids in range
-const motorWheelMap = new Map<string, string[]>();       // motor → wheel ids in range
-const gearMeshMap = new Map<string, Array<{id, ratio}>>(); // gear/wheel → meshed neighbors
-const conveyorMotorMap = new Map<string, string[]>();    // conveyor → nearby motors
+// physics-engine.ts lines ~146-174
+const support = Matter.Bodies.rectangle(centerX, centerY, segLen + 8, 14, {
+  isStatic: true, friction: 0.9, restitution: 0.02, ...
+});
+conveyorSupports.push({ ... });
+Matter.World.add(engine.world, support);
 ```
+**Impact on new parts:** Balls and rocks placed on the conveyor will automatically sit on the support surface. They WON'T automatically get belt drive force though — that requires updating the filter in `tickConveyors`.
 
-New maps follow the same pattern. All proximity checks happen at world construction time (not every tick) — this is critical for performance.
-
-### RuntimeSnapshot (simulation.ts) — fields that need adding
+### Bug B: `tickConveyors`, `tickHopper`, `recoverLostCargo` all filter by `cargo-block` only
 ```typescript
-interface RuntimeSnapshot {
-  // EXISTING (do not change)
-  time: number;
-  rotations: Record<string, number>;
-  cargoProgress: Record<string, number>;
-  hookY: number;
-  trainProgress: number;
-  trainDelivered: boolean;
-  hopperFill: number;
-  throughput: number;
-  telemetry: BuildTelemetry;
-  bodyPositions?: Record<string, { x: number; y: number; angle: number }>;
-  motorDrives?: Record<string, string[]>;
-  gearMeshes?: Record<string, string[]>;
-  cargoStates: Record<string, CargoLifecycleState>;
-  beltPowered: boolean;
-  lostCargoCount: number;
-  stableCargoSpawns: Record<string, { x: number; y: number }>;
-  // NEW (add these)
-  pistonExtensions: Record<string, number>;          // 0..1 extension ratio
-  winchRopeLengths: Record<string, number>;          // current rope length in px
-  bucketContents: Record<string, number>;            // bucket id → count of material inside
-  vehiclePositions: Record<string, { x: number; y: number; angle: number }>;
-  springCompressions: Record<string, number>;        // 0..1 compression ratio
+// Current code — these lines will need updating when new materials are added:
+const cargoBlocks = manifest.primitives.filter((p) => p.kind === 'cargo-block');  // line ~492
+for (const prim of manifest.primitives) {  // tickHopper only processes cargo-block inside
+for (const cargo of manifest.primitives.filter((p) => p.kind === 'cargo-block'))  // recoverLostCargo
+```
+**Impact:** Adding `ball`, `rock`, `sand` without updating these filters = those parts are invisible to the belt, hopper, and recovery system. They'd fall and never respawn. **Fix:** Create a type alias `MATERIAL_KINDS = ['cargo-block', 'ball', 'rock']` and use it in all three filters.
+
+### Bug C: Piston constraint stiffness should NOT be 1.0
+The v1 plan said `stiffness: 1.0` for the piston rod constraint. This is wrong. In Matter.js:
+- `stiffness: 1.0` on a body-to-body constraint with external loads → oscillation and instability
+- The gear pin uses `stiffness: 1.0` only because it's a world-anchor (static point → dynamic body), which is stable
+- For body-to-body constraints: use `stiffness: 0.9`, `damping: 0.1`
+**Fix:** All body-to-body constraints in new parts use `stiffness: 0.9, damping: 0.1`.
+
+### Bug D: Rope constraint stiffness in the plan was wrong
+The v1 plan said ropes use `stiffness: 0.8`. The actual code uses `stiffness: 0.05, damping: 0.2`:
+```typescript
+// physics-engine.ts ~line 237
+const constraint = Matter.Constraint.create({
+  stiffness: 0.05, damping: 0.2, ...
+});
+```
+Low stiffness (0.05) is correct — it gives the rope a spring-like feel. High stiffness would make it rigid and bouncy. Do not change this.
+
+### Bug E: BFS circular reference guard works via `driven.has()` + hop cap
+The v1 plan said "use a `visited: Set<string>`." The actual implementation is:
+```typescript
+if (!driven.has(meshId)) {  // this IS the visited-set check
+  driven.set(meshId, meshVel);
+  queue.push([meshId, meshVel]);
+}
+hop += 1;  // AND a hop cap of 12
+```
+When extending the BFS to include pulleys and flywheels, use the same pattern — the `driven` map already serves as visited set.
+
+### Bug F: Multiple motors use last-writer-wins for gears
+The v1 plan proposed distance-weighted RPM summing. In practice, the current code does:
+```typescript
+for (const gearId of motorGearMap.get(motor.id) ?? []) {
+  driven.set(gearId, angVel);  // overwrites any previous motor's value
 }
 ```
+This is last-writer-wins. For new parts, preserve this behavior — don't introduce complexity. If two motors drive the same gear, the second motor wins. Document this in UX as "motors don't stack."
 
----
+### Bug G: Sand particles must be a NEW kind, not `cargo-block`
+Sand particles added as `cargo-block` would be treated by the hopper, respawn system, etc. as regular cargo. They'd be collected one-by-one and counted toward hopper fill. Sand should flow and fill as a group. **Fix:** Use a new kind `sand-particle` for physics bodies, OR use `material-pile` (already in types.ts) as the placement primitive and spawn particle bodies as anonymous unnamed bodies not tracked in `bodyMap` by ID. See T4-2 spec below.
 
-## The Port System
-
-### Core concept
-Every part declares typed ports. The engine resolves connections at world-build time by proximity. No hard-coded per-pair logic.
-
-### Port types
+### Bug H: `applyControls` only handles `winch.ropeLength`
 ```typescript
-type PortKind = 'rotary' | 'linear' | 'material' | 'structural';
-type PortRole = 'input' | 'output' | 'bidirectional';
-
-interface Port {
-  kind: PortKind;
-  role: PortRole;
-  localOffset: { x: number; y: number };  // relative to part origin
-  range: number;                           // connection radius in px
-  id: string;                             // e.g. 'drive-out', 'load-in'
-}
-```
-
-### Where the port registry lives
-**New file: `src/lib/part-registry.ts`**
-
-```typescript
-// Maps every PrimitiveKind to its port declarations
-// Used by physics-engine.ts to route connections at world-build time
-// Used by MachineCanvas.tsx to draw port indicators during placement
-export const PART_PORTS: Record<PrimitiveKind, Port[]> = { ... };
-```
-
-### How the engine uses it
-In `buildMatterWorld()`, after creating all bodies:
-```typescript
-// For each pair of primitives, check if any ports connect
-for (const a of manifest.primitives) {
-  for (const b of manifest.primitives) {
-    if (a.id === b.id) continue;
-    const connections = resolvePortConnections(a, b);
-    for (const conn of connections) {
-      applyConnection(conn, a, b, bodyMap, engine);
-    }
+// physics-engine.ts lines ~376-396
+function applyControls(controlValues) {
+  for (const prim of manifest.primitives) {
+    if (prim.kind !== 'winch') continue;  // ONLY winch handled
+    ...
   }
 }
 ```
-
-This is O(n²) in part count — acceptable for 50-100 parts. For > 100 parts, add spatial bucketing.
-
----
-
-## Complete Parts List (45 parts)
-
-### Tier 1 — Implement First (unblock the most)
+New parts with runtime controls (piston direction, silo gate) need cases added here. Implementing Claude must add a case per new controllable part.
 
 ---
 
-#### T1-1: `wheel` (complete the existing stub)
-**Config:** `{ x, y, radius: number, traction: number }`
-**Physics:** Dynamic circular body, `frictionAir: 0.01`, `restitution: 0.1`
-**Ports:**
-- `rotary-in`: accepts RPM from motor/gear within 220px
-**Behavior:**
-- When connected to motor: `Matter.Body.setAngularVelocity(body, rpm * Math.PI / 30)`
-- Rolls on static surfaces via normal Matter.js contact
-- Connected to same axle as another wheel: both wheels share RPM (vehicle moves)
-**Tick logic:** Apply angular velocity every tick if powered. If on ground, friction drives the body forward (vehicle locomotion).
-**Known bug risk:** Without axle connecting two wheels, each wheel is independent and the "vehicle" won't translate. Axle is required for vehicle motion. Validate in guided placement.
+## Architecture: How New Parts Plug In
+
+### DO NOT build a generic port routing system yet
+The v1 plan described a `part-registry.ts` with automatic port connection resolution. This is architecturally correct for long-term, but it's a large refactor of a working system. **Risk is too high.**
+
+Instead, use **Option A: Specific maps per interaction type.** This exactly mirrors what already exists:
+
+```typescript
+// Existing maps (DO NOT MODIFY):
+motorGearMap    // motor → gear ids in range
+motorWheelMap   // motor → wheel ids in range
+gearMeshMap     // gear/wheel → meshed neighbors
+conveyorMotorMap // conveyor → nearby motors
+
+// NEW maps to add (same pattern):
+motorPistonMap   // motor → piston ids in range (pistons driven by motors)
+motorWinchMap    // motor → winch ids in range (winches driven by motors)
+rackGearMap      // rack id → driving gear id (rack converted from rotating gear)
+```
+
+Each new map is built in the same loop at world construction time. Each has a corresponding tick function. Zero changes to existing maps.
+
+### The material kind list (critical pattern)
+Create this constant at the top of `physics-engine.ts`:
+```typescript
+const MATERIAL_KINDS: PrimitiveKind[] = ['cargo-block', 'ball', 'rock'];
+// sand uses anonymous particle bodies, not named primitives
+```
+Replace all three `filter((p) => p.kind === 'cargo-block')` calls with `filter((p) => MATERIAL_KINDS.includes(p.kind))`. This is the single most important change for making new materials work with existing systems.
 
 ---
 
-#### T1-2: `axle` (complete the existing stub)
-**Config:** `{ x, y, length: number }`
-**Physics:** NOT a dynamic body. It's a **constraint pair** connecting two wheels.
-- Create a `Matter.Constraint` (distance=0, stiffness=1.0) from wheel A center to wheel B center through axle body
-- Axle body itself: thin rectangle, `isStatic: false`, `collisionFilter: { mask: 0 }` (no collisions)
-**Ports:**
-- `structural-in` (both ends): connects to wheel
-**Behavior:**
-- Constrains wheel separation to axle length
-- Transmits rotary input from one wheel to the other (if motor drives left wheel, right wheel gets same RPM)
-**Known bug risk:** If `length` in config doesn't match the actual distance between the two wheels at placement, the constraint solver will yank them together or apart violently. Guided placement must snap second wheel to exactly `axle.length` from first wheel.
+## Interaction Simulation (Dry Run)
+
+Before any code is written, walk through these 10 scenarios mentally. Each one describes what SHOULD happen in the physics engine and where it could go wrong.
 
 ---
 
-#### T1-3: `ramp`
-**Config:** `{ x, y, width: number, angle: number }` (angle in degrees, 0 = flat, 45 = diagonal)
-**Physics:** Static rectangle body, rotated to `angle * Math.PI / 180`
-**Ports:** None (passive)
-**Behavior:** Pure collision surface. No tick logic needed.
-**Visual:** Filled rectangle with hatch marks indicating the surface.
-**Known bug risk:** Small cargo blocks can "clip through" ramp if they hit at high velocity (Matter.js tunneling). Mitigate: set `slop: 0` on ramp body, cap cargo velocity at 15px/frame.
+### Scenario 1: Ball on a Ramp → rolls into Hopper
+**Setup:** Ramp at 30° angle, ball placed at top, hopper at bottom.
+
+**What should happen:**
+1. Ball spawns → gravity pulls it down → contacts ramp surface
+2. Ball rolls down ramp (rotates + translates along incline)
+3. Ball exits ramp bottom → airborne briefly → enters hopper funnel
+4. Hopper guide force pulls ball toward mouth
+5. Ball enters collection zone → `collectedCargoIds.add(ball.id)` → frozen in slot
+
+**Where it can go wrong:**
+- Ball may not be included in `tickHopper` (only `cargo-block` filter). **Fix:** use `MATERIAL_KINDS`.
+- Ball at high speed may tunnel through ramp (thin static body). **Fix:** velocity cap 15px/tick.
+- Hopper slot calculation uses `hopperStructures[0].x/y` — fine for single hopper scenarios.
+- Ball `restitution: 0.6` may make it bounce OUT of the collection zone before being caught. **Fix:** in the hopper collection zone, immediately call `Matter.Body.setStatic(body, true)` and use lower restitution for ball: 0.3.
+
+**Risk level:** Medium. Hopper filter fix is required. Velocity cap is a safety net.
+
+---
+
+### Scenario 2: Motor → Wheel → Vehicle moves across canvas
+**Setup:** Motor, two wheels, axle connecting them, chassis resting on wheels.
+
+**What should happen:**
+1. Motor within 220px of left wheel → `motorWheelMap` includes left wheel
+2. Motor drives left wheel → `Matter.Body.setAngularVelocity(leftWheel, angVel)`
+3. Left wheel rolls → friction with ground → chassis translates right
+4. Axle constraint keeps right wheel at fixed distance from left wheel
+5. Right wheel rotates in same direction (being dragged by chassis)
+
+**Where it can go wrong:**
+- Current `motorWheelMap` builds at world-construction time. After chassis is placed, wheel positions don't change (wheels are pinned to chassis via axle constraints). So proximity check at world build time is correct.
+- Axle constraint: `Matter.Constraint` between two wheel bodies with `length = dist(w1, w2)`, `stiffness: 0.9`. If chassis isn't connected, wheels will drift apart. Chassis must be connected via separate constraints to both wheel bodies.
+- The chassis must have `isStatic: false`. If it's accidentally set static, wheels spin but chassis doesn't move.
+- Angular velocity is set directly, overriding physics-derived rotation. This means the wheel can spin even when in the air (no contact). That's fine — expected behavior.
+- **Critical:** if the motor is ON and the vehicle reaches the canvas wall, the wheel continues to spin against the wall. Energy builds up → jitter. **Fix:** in `recoverLostCargo` equivalent for vehicles, check if chassis is stuck against boundary and reduce motor torque.
+
+**Risk level:** High. Vehicle physics is the most complex new system. Recommend implementing in isolation on a test branch first.
+
+---
+
+### Scenario 3: Motor → Gear → Gear → Rack → Arm moves
+**Setup:** Motor drives gear A, gear A meshes with gear B, gear B drives rack, rack moves arm.
+
+**What should happen:**
+1. Motor within 220px of gear A → `motorGearMap` includes gear A
+2. BFS: gear A meshes with gear B → gear B gets opposite angular velocity / ratio
+3. Gear B within 30px of rack end → `rackGearMap.set(rack.id, gearB.id)`
+4. Each tick: `tickRacks()` reads gear B's angular velocity → `v = angVel * radius` → sets rack velocity
+5. Rack translates → arm attached to rack via constraint → arm translates too
+
+**Where it can go wrong:**
+- Rack position must be initialized at `gear.x + gear.radius` distance from gear center. If not, the rack-gear proximity check fails at world build time and they're never connected.
+- Rack body needs to be constrained to move only along one axis. Use two static guide bodies (rails) that the rack slides between, not a Matter.js constraint axis (which doesn't exist).
+- Angular velocity is set by `driveMotors()` every tick. But after `driveMotors()`, Matter.js physics runs, which may change the body's velocity slightly. Then `tickRacks()` reads `body.angularVelocity` (the post-physics value, not the set value). These should be close enough. If drift occurs, read from `driven` map instead of body velocity.
+
+**Risk level:** Medium. Guide rails for rack are the tricky part.
+
+---
+
+### Scenario 4: Motor → Winch → Rope → Hook → Cargo lifted
+**Setup:** Motor drives winch, winch has rope, rope attaches to hook, hook grabs cargo.
+
+**What should happen:**
+1. Motor within 220px of winch → `motorWinchMap.set(winch.id, [motor.id])`
+2. Each tick: if motor is powered, `constraint.length -= reelSpeed` (up to minimum length)
+3. Rope constraint shortens → hook rises → cargo attached to hook rises
+4. When cargo reaches height target → step complete
+
+**Where it can go wrong:**
+- Current code handles rope via `applyControls` (slider changes rope length). Motor-driven winch needs a NEW tick function. `applyControls` path is for UI slider control.
+- `constraint.length` changes → Matter.js solver applies impulse proportional to `(currentLength - targetLength) * stiffness`. At `stiffness: 0.05`, impulse is gentle. **Good.**
+- If motor RPM is very high → `reelSpeed` is high → length changes by many px per tick → rope becomes "teleporting" rather than smooth. **Fix:** cap delta per tick at 2px regardless of motor RPM.
+- Hook grab: currently `cargo-block` with `attachedToId` gets a constraint at world-build time. For dynamic in-game hook grabbing (hook moves down, touches cargo, then grabs), we'd need runtime constraint creation. This is complex. **Recommendation:** For v1, keep the static attachment approach (cargo pre-attached in manifest). Dynamic grab is a Phase 4 feature.
+
+**Risk level:** Low for static attachment. High for dynamic grab. Do static first.
+
+---
+
+### Scenario 5: Conveyor → Ball (not cargo-block)
+**Setup:** Ball placed on belt, belt running.
+
+**What should happen:**
+1. Ball sits on conveyor support body (the physical surface).
+2. `tickConveyors` should apply drive force to the ball.
+3. Ball moves along belt, falls off end, into hopper.
+
+**Where it WILL go wrong without the fix:**
+- `tickConveyors` filters: `manifest.primitives.filter((p) => p.kind === 'cargo-block')` — ball is NOT included.
+- Ball sits on belt surface but receives NO drive force. It just sits there.
+- `tickHopper` also filters `cargo-block` — ball never gets collected even if it falls in.
+
+**Fix (exact code):**
+```typescript
+// In tickConveyors, change:
+const cargoBlocks = manifest.primitives.filter((p) => p.kind === 'cargo-block');
+// To:
+const cargoBlocks = manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind));
+
+// Same change in tickHopper:
+for (const prim of manifest.primitives) {
+  if (!MATERIAL_KINDS.includes(prim.kind)) continue;  // was: prim.kind !== 'cargo-block'
+
+// Same in recoverLostCargo:
+for (const cargo of manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind)))
+```
+**Risk level:** Low. This is a one-line change in three places. MUST be done before any new material is added.
+
+---
+
+### Scenario 6: Sand particles flowing through Funnel into Bin
+**Setup:** Sand pile placed above funnel, funnel above silo-bin.
+
+**What should happen:**
+1. Sand pile spawns N anonymous particle bodies at the pile position
+2. Particles fall due to gravity → hit funnel walls → redirect downward → enter bin
+3. Bin body count increases as particles land inside
+
+**Where it can go wrong:**
+- Anonymous particle bodies are NOT in `bodyMap` by primitive ID. They CAN'T be in bodyMap — they'd flood it. This means `bodyPositions` won't contain them. The renderer must use a SEPARATE particles array returned in PhysicsFrame.
+- `recoverLostCargo` won't know about these particles. Out-of-bounds particles are lost forever. **Fix:** Track particles in a `particleBodyMap: Map<'sand', Matter.Body[]>` and recover them in a separate `recoverParticles()` function.
+- 30 particles × 30 particles = 900 collision pairs just between sand particles. Add sand-to-sand collision group: `collisionFilter: { category: 0x0004, mask: 0x0001 }` (only collide with statics, not with each other). This reduces collision pairs to 30 × (static body count). Much cheaper.
+- Funnel walls must be angled static bodies. Same as hopper walls. Verify the angle creates a true chute shape (test with a wider angle than the hopper's 0.28 radians — 0.45 radians works better for funnel).
+
+**Risk level:** High. Sand is the most complex material. Implement last.
+
+---
+
+### Scenario 7: Piston extends → pushes arm → arm scoops material
+**Setup:** Motor drives piston, piston rod pushes arm, arm has bucket, bucket scoops cargo.
+
+**What should happen:**
+1. Motor powered → `motorPistonMap` includes piston → `tickPistons()` runs
+2. Each tick: piston extends by `speed * dt` (capped at stroke)
+3. Arm pivot constraint stays fixed → arm tip moves as rod pushes it
+4. Arm angle changes → bucket at arm tip rotates into material
+5. Material inside bucket collection zone gets added to `bucketContents[bucket.id]`
+6. Arm retracts → bucket tilts past 100° → material released → falls into hopper
+
+**Where it can go wrong:**
+- Arm is connected to piston rod via constraint. As rod extends, it pushes arm. But if the arm has too much inertia, the constraint solver can't push it fast enough → rod extends through arm → instability. **Fix:** Make arm lightweight (`density: 0.001`) and use `stiffness: 0.7` on the rod-arm constraint (softer = more forgiving).
+- Bucket dump trigger: the arm's angle in `bodyPositions` must be checked each tick. BUT `bodyPositions` angle is the raw Matter.js body angle, which accumulates. Need to normalize: `angle % (2 * Math.PI)`. At 100° = 1.745 radians.
+- Bucket collecting material while swinging: collection zone check runs every tick. During fast swing, a cargo block may only be in the zone for 1-2 ticks. Add a brief "gathering" state: if cargo was in zone last tick AND this tick, add to contents.
+
+**Risk level:** High. Multi-body assembly with timing-sensitive interactions. Implement in Phase 3, not 2.
+
+---
+
+### Scenario 8: Flywheel smooths motor-off transition
+**Setup:** Motor drives gear → gear drives flywheel. Motor is toggled off.
+
+**What should happen:**
+1. Motor drives gear at 120 RPM → gear meshes flywheel → flywheel spins at 120 RPM
+2. Motor is toggled off → `driveMotors()` no longer sets gear angular velocity
+3. Matter.js friction slows gear to 0 quickly (high `frictionAir: 0.05` on gears)
+4. Flywheel has `frictionAir: 0.001` → continues spinning for ~2-3 seconds
+
+**Where it can go wrong:**
+- `driveMotors()` calls `Matter.Body.setAngularVelocity(body, angVel)` every tick for driven bodies. When motor is off, this is not called. Matter.js then applies `frictionAir` naturally. The flywheel will slow down based on `frictionAir`. This should work with no special code.
+- The flywheel should also drive meshed gears while it's spinning. This currently works: the BFS in `driveMotors()` would need to include flywheel as a "source" when it's spinning but motor is off. **Problem:** `driveMotors()` only starts BFS from motors. A spinning flywheel with no connected motor won't propagate to downstream gears after motor off.
+- **Fix:** After `driveMotors()`, add a secondary BFS pass that starts from any body with `angularVelocity > 0.1` that wasn't driven this tick. This is the "inertia propagation" pass. Cap it at 3 hops to prevent runaway.
+
+**Risk level:** Medium. The inertia propagation pass is new logic but follows the same BFS pattern.
+
+---
+
+### Scenario 9: Water zone + conveyor belt
+**Setup:** Conveyor belt partially submerged in a water zone.
+
+**What should happen:**
+- Cargo on the belt section above water: driven by belt normally
+- Cargo on the belt section IN water: belt drive force + water drag (drag reduces effective speed)
+- Cargo that falls off belt into water: buoyancy force + drag (floats or sinks depending on density)
+
+**Where it can go wrong:**
+- Water drag (`velocity * 0.95` per tick) and belt drive force can conflict. Each tick, belt sets velocity to a target, then water reduces it. Net effect: cargo moves slower on underwater belt. **This is correct behavior.** No special handling needed.
+- Buoyancy applied to cargo-block: `mass: 0.002 * 20 * 20` ≈ 0.8 kg-equivalent. Water buoyancy = `0.8 * 9.8 ≈ 7.8N` upward. Gravity on cargo = `0.8 * 1.2 * 9.8 ≈ 9.4N` downward. Net: cargo sinks slowly. Correct for a metal block.
+- Ball `restitution: 0.3`, lighter density → buoyancy exceeds gravity → ball floats. Correct.
+- **Risk:** If the buoyancy force is applied AND the conveyor support body prevents downward movement, the upward force builds up and "launches" the cargo off the belt. **Fix:** In water zone tick, skip buoyancy for bodies that are on a conveyor support (i.e., in `supportedCargoIds`).
+
+**Risk level:** Medium. The suppression logic for supported cargo is required.
+
+---
+
+### Scenario 10: Gear → Pulley → Rope → changes direction
+**Setup:** Motor drives gear, gear meshes pulley, rope runs over pulley to redirect lift force.
+
+**What should happen:**
+- Pulley receives rotary input same as gear
+- Rope endpoint on one side of pulley moves up as pulley turns one direction
+- Load on other rope end rises
+
+**Where it can go wrong:**
+- Pulley is treated the same as a gear in `gearMeshMap` (both are `rotating prims`). This is correct.
+- The "rope over pulley" direction change: in 2D, a pulley redirecting a rope requires two separate rope segments (before and after the pulley). The current rope system is a single constraint between two bodies. **For simplicity:** Don't try to model rope direction change physically. Instead, pulley + rope = winch-like behavior. Pulley turning CW raises the rope end on the right side. This is a visual simplification that's correct enough for kids.
+- The motor → gear → pulley BFS works automatically because `gearMeshMap` includes any two `rotating prims` within `rA + rB + 16px`.
+
+**Risk level:** Low if simplified as described. High if attempting real rope-over-pulley physics.
+
+---
+
+## Complete Parts List (45 parts, corrected)
+
+### Tier 1 — Implement First
+
+#### T1-1: `ramp`
+**Config:** `{ x, y, width: number, angle: number }` (angle 0-60°)
+**Physics:** Static rectangle rotated to angle. `friction: 0.6, restitution: 0.1`
+**Body creation:**
+```typescript
+case 'ramp': {
+  const cfg = prim.config as { x: number; y: number; width: number; angle: number };
+  return Matter.Bodies.rectangle(cfg.x, cfg.y, cfg.width, 12, {
+    isStatic: true, label: prim.id,
+    angle: cfg.angle * Math.PI / 180,
+    friction: 0.6, restitution: 0.1,
+  });
+}
+```
+**Tick:** None. Pure collision surface.
+**Visual:** Filled angled rectangle with chevron hatch marks indicating slope direction.
+**Guided placement:** Snap angle to 15° increments. Show ghost preview at cursor.
+
+---
+
+#### T1-2: `platform`
+**Config:** `{ x, y, width: number }`
+**Physics:** Same as ramp at angle=0. Height is always 12px.
+**Note:** Can share the same `case 'ramp':` code path if `angle` defaults to 0 for platforms. Keep as separate kind for UX clarity only.
+
+---
+
+#### T1-3: `wall`
+**Config:** `{ x, y, height: number }`
+**Physics:** Static rectangle, width=12, height=config.height. `friction: 0.8`
+**Note:** Same as ramp but rotated 90°, or just a tall rectangle.
 
 ---
 
 #### T1-4: `ball`
-**Config:** `{ x, y, radius: 12 }` (fixed radius, user picks position)
-**Physics:** Dynamic circle, `restitution: 0.6`, `friction: 0.3`, `frictionAir: 0.005`
-**Ports:**
-- `material-out`: counts as 1 unit of material entering hopper
-**Behavior:** Pure physics — falls, rolls, bounces. No tick logic beyond what Matter.js provides.
-**Visual:** Circle with highlight spot to indicate it's round/shiny.
-**Known bug risk:** Balls rolling off screen edge are lost. Same recovery needed as cargo-block. Track in `lostCargoCount`, optionally respawn at spawn point.
+**Config:** `{ x, y, radius: 12 }`
+**Physics:**
+```typescript
+case 'ball': {
+  const cfg = prim.config as { x: number; y: number; radius: number };
+  return Matter.Bodies.circle(cfg.x, cfg.y, cfg.radius ?? 12, {
+    label: prim.id,
+    restitution: 0.3,   // NOT 0.6 — lower to prevent bouncing out of hopper
+    friction: 0.3,
+    frictionAir: 0.005,
+    density: 0.002,
+  });
+}
+```
+**Critical:** Add `'ball'` to `MATERIAL_KINDS` constant so it's picked up by `tickConveyors`, `tickHopper`, and `recoverLostCargo`.
 
 ---
 
-#### T1-5: `spring-linear`
+#### T1-5: `rock`
+**Config:** `{ x, y }`
+**Physics:** Irregular polygon (5 vertices approximating a boulder shape), `isStatic: false`
+```typescript
+case 'rock': {
+  const cfg = prim.config as { x: number; y: number };
+  // Slightly irregular circle — use fromVertices for rough shape
+  const r = 16;
+  const verts = [
+    { x: r * 1.1, y: 0 }, { x: r * 0.5, y: -r * 0.9 },
+    { x: -r * 0.8, y: -r * 0.7 }, { x: -r, y: r * 0.3 },
+    { x: -r * 0.3, y: r * 0.9 },
+  ].map(v => ({ x: v.x + cfg.x, y: v.y + cfg.y }));
+  return Matter.Bodies.fromVertices(cfg.x, cfg.y, verts, {
+    label: prim.id, isStatic: false,
+    mass: 3, restitution: 0.05, friction: 0.9, frictionAir: 0.008,
+  });
+}
+```
+**Critical:** Add `'rock'` to `MATERIAL_KINDS`.
+**Note:** `Matter.Bodies.fromVertices` requires the `poly-decomp` library. Verify it's in package.json. If not, use `Matter.Bodies.circle` with higher mass as fallback.
+
+---
+
+#### T1-6: `spring-linear`
 **Config:** `{ x, y, orientation: 'horizontal' | 'vertical', restLength: number, stiffness: number }`
-**Physics:** Two static anchor points + `Matter.Constraint` with `stiffness: 0.05`, `damping: 0.1`
-- One end is anchored static point
-- Other end has a small dynamic plate body (the "piston face")
-**Ports:**
-- `material-in` at plate: material landing on plate compresses spring
-- `linear-out` at plate: plate position drives connected rack/arm
-**Behavior tick:**
-- Compression ratio = `(restLength - currentLength) / restLength`, clamped 0..1
-- Store in `springCompressions[id]`
-**Visual:** Zigzag spring drawing between anchor and plate. Compress visually with real position.
-
----
-
-#### T1-6: `platform`
-**Config:** `{ x, y, width: number, height: 10 }`
-**Physics:** Static rectangle. Identical to ramp at angle=0.
-**Ports:** None (structural surface)
-**Note:** This is literally just a horizontal ramp. Could be the same code path. Keep as separate kind for UX clarity.
-
----
-
-#### T1-7: `wall`
-**Config:** `{ x, y, width: 20, height: number, angle: 0 }`
-**Physics:** Static rectangle, vertical.
-**Ports:** None
-**Note:** Same as platform but vertical. Again — same code, different kind for UX.
+**Physics:** Static anchor point + small dynamic "plate" body + `Matter.Constraint` between them.
+```typescript
+case 'spring-linear': {
+  // The plate body — this is what gets returned as the main body
+  // The constraint is added in the constraints section below (not createBodyForPrimitive)
+  const cfg = prim.config as { x: number; y: number; orientation: string; restLength: number };
+  const offsetX = cfg.orientation === 'horizontal' ? cfg.restLength : 0;
+  const offsetY = cfg.orientation === 'vertical' ? cfg.restLength : 0;
+  return Matter.Bodies.rectangle(cfg.x + offsetX, cfg.y + offsetY, 24, 8, {
+    label: prim.id, density: 0.002, frictionAir: 0.2,
+  });
+}
+```
+Then in the constraints section:
+```typescript
+if (prim.kind === 'spring-linear') {
+  const cfg = prim.config as { x: number; y: number; orientation: string; restLength: number; stiffness: number };
+  const plateBody = bodyMap.get(prim.id);
+  if (plateBody) {
+    Matter.World.add(engine.world, Matter.Constraint.create({
+      pointA: { x: cfg.x, y: cfg.y },  // static anchor
+      bodyB: plateBody,
+      pointB: { x: 0, y: 0 },
+      length: cfg.restLength,
+      stiffness: cfg.stiffness ?? 0.05,
+      damping: 0.2,
+      label: `spring-${prim.id}`,
+    }));
+  }
+}
+```
+**PhysicsFrame:** Add `springCompressions: Record<string, number>` — update each tick:
+```typescript
+const restLen = cfg.restLength;
+const currentLen = Math.hypot(plateBody.position.x - cfg.x, plateBody.position.y - cfg.y);
+springCompressions[prim.id] = Math.max(0, 1 - currentLen / restLen);
+```
 
 ---
 
 ### Tier 2 — Machine Parts
 
----
-
 #### T2-1: `pulley`
 **Config:** `{ x, y, radius: number }`
-**Physics:** Same as gear (pinned circle), but connects to rope/belt rather than meshing with adjacent gears
-**Ports:**
-- `rotary-in`: motor within 220px drives it
-- `rotary-out`: transmits to rope endpoint (changes linear direction of rope)
-- `structural-in`: can be anchored to beam/platform
-**Behavior:** Identical to gear rotation. A rope running over pulley changes direction — model this as two separate rope segments with shared angular velocity at pulley body.
-**Visual:** Circle with a groove/channel drawn around circumference.
-**Known bug risk:** Two pulleys + rope = a loop constraint. Matter.js doesn't model rope loops natively. Simplify: one pulley redirects a "virtual" rope — track rope endpoint positions manually, not as Matter.js constraints.
+**Physics:** Same as gear — dynamic circle, pinned in place via world-anchor constraint.
+```typescript
+case 'pulley': {
+  const cfg = prim.config as { x: number; y: number; radius: number };
+  return Matter.Bodies.circle(cfg.x, cfg.y, cfg.radius ?? 28, {
+    label: prim.id, frictionAir: 0.02, density: 0.002,
+  });
+}
+```
+**Mesh map:** In `gearMeshMap` construction, include `'pulley'` in the `rotatingPrims` filter:
+```typescript
+// Change from:
+const rotatingPrims = manifest.primitives.filter((p) => p.kind === 'gear' || p.kind === 'wheel');
+// To:
+const rotatingPrims = manifest.primitives.filter((p) => ['gear', 'wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(p.kind));
+```
+**Pin:** Add pulley to the gear-pinning loop (the one that creates world-anchor constraints). Pulleys spin in place like gears.
+**Rope attachment:** When a `rope` primitive's `fromId` or `toId` is a pulley, the existing rope constraint code handles it automatically (it just looks up `bodyMap.get(cfg.fromId)`).
 
 ---
 
 #### T2-2: `chain-sprocket`
-**Config:** `{ x, y, radius: number, teeth: 8 }`
-**Physics:** Identical to pulley, but:
-- Non-slip (chain can't slip off — pulley can)
-- Higher load capacity (no slip under heavy loads)
-- Visual: gear-style teeth around rim
-**Behavior tick:** Same BFS as gears for RPM propagation. Chain maintains 1:1 speed ratio (no slip), gear maintains ratio by tooth count.
+**Config:** `{ x, y, radius: number, teeth: number }`
+**Physics:** Identical to pulley.
+**Difference from pulley:** Visual only (teeth drawn around rim). Functionally identical in 2D.
 
 ---
 
-#### T2-3: `rack` (half of rack & pinion)
-**Config:** `{ x, y, width: number, angle: 0 }` (horizontal or vertical)
-**Physics:**
-- Dynamic rectangle body (can move linearly)
-- Constrained to move only along one axis via two `Matter.Constraint` guides (prevent lateral movement)
-**Ports:**
-- `rotary-in` at one end: a gear within 30px of rack end drives it
-**Behavior tick:**
-- Find connected gear's angular velocity → convert to linear velocity: `v = gear.angularVelocity * gear.radius`
-- `Matter.Body.setVelocity(rackBody, { x: v, y: 0 })`
-- Track position in `bodyPositions`
-**Known bug risk:** Rack must be guided to exactly touch gear's perimeter. Guided placement must snap rack to `gear.x + gear.radius` distance.
+#### T2-3: `flywheel`
+**Config:** `{ x, y, radius: number, mass: number }`
+**Physics:** High-inertia dynamic circle, NOT pinned (can rotate freely).
+```typescript
+case 'flywheel': {
+  const cfg = prim.config as { x: number; y: number; radius: number; mass: number };
+  return Matter.Bodies.circle(cfg.x, cfg.y, cfg.radius ?? 36, {
+    label: prim.id,
+    frictionAir: 0.001,   // almost no air drag — keeps spinning
+    density: (cfg.mass ?? 5) / (Math.PI * Math.pow(cfg.radius ?? 36, 2)),
+    restitution: 0.0,
+  });
+}
+```
+**Pin it:** Flywheel spins in place — add to gear-pinning loop.
+**Inertia propagation:** After `driveMotors()`, add secondary pass:
+```typescript
+// Flywheel inertia propagation (in tick(), after driveMotors())
+for (const prim of manifest.primitives.filter(p => p.kind === 'flywheel')) {
+  const body = bodyMap.get(prim.id);
+  if (!body) continue;
+  if (Math.abs(body.angularVelocity) < 0.05) continue; // not spinning
+  if (drivenVels.has(prim.id)) continue; // already driven this tick
+  // Propagate flywheel velocity to meshed parts (max 3 hops)
+  const queue: Array<[string, number]> = [[prim.id, body.angularVelocity]];
+  const visited = new Set([prim.id]);
+  let hops = 0;
+  while (queue.length && hops < 3) {
+    const [driverId, vel] = queue.shift()!;
+    for (const { id: meshId, ratio } of gearMeshMap.get(driverId) ?? []) {
+      if (visited.has(meshId) || drivenVels.has(meshId)) continue;
+      const meshVel = -vel / ratio;
+      const meshBody = bodyMap.get(meshId);
+      if (meshBody) Matter.Body.setAngularVelocity(meshBody, meshVel);
+      visited.add(meshId);
+      queue.push([meshId, meshVel]);
+    }
+    hops++;
+  }
+}
+```
 
 ---
 
-#### T2-4: `piston`
+#### T2-4: `gearbox`
+**Config:** `{ x, y, inputTeeth: number, outputTeeth: number }`
+**Physics:** Static rectangle body (no movement). Two virtual connection points (left=input, right=output).
+**Behavior:** In `gearMeshMap` construction, add a special case: if any rotating prim is within 220px of the left side of gearbox, AND any rotating prim is within 220px of the right side, connect them as if they mesh with ratio = `outputTeeth / inputTeeth`.
+**Visual:** Rectangle labeled "1:N" where N = ratio. Input/output arrows on sides.
+
+---
+
+#### T2-5: `winch` (complete existing stub)
+**Config:** `{ x, y, speed: number, ropeLength: number }`
+**Physics:** Static rectangle body (the drum).
+```typescript
+case 'winch': {
+  const cfg = prim.config as { x: number; y: number };
+  return Matter.Bodies.rectangle(cfg.x, cfg.y, 40, 28, {
+    label: prim.id, isStatic: true,
+  });
+}
+```
+**Motor connection:** Build `motorWinchMap` same pattern as `motorGearMap`. Motor within 220px → drives winch.
+**Tick function (new):**
+```typescript
+function tickWinches() {
+  for (const prim of manifest.primitives.filter(p => p.kind === 'winch')) {
+    const motors = motorWinchMap.get(prim.id) ?? [];
+    const powered = motors.some(mId => activeMotorIds.has(mId));
+    if (!powered) continue;
+    const cfg = prim.config as { speed: number; ropeLength: number };
+    // Find any rope constraint whose bodyA is this winch
+    for (const c of ropeConstraints) {
+      const winchBody = bodyMap.get(prim.id);
+      if (c.bodyA !== winchBody) continue;
+      const delta = Math.min(cfg.speed * 0.016, 2); // cap 2px/tick
+      c.length = Math.max(50, c.length - delta);
+    }
+  }
+}
+```
+**applyControls:** Keep existing slider-based rope length control. Motor-driven winch is additive (motor shortens rope; slider sets max length).
+
+---
+
+#### T2-6: `piston`
 **Config:** `{ x, y, orientation: 'horizontal' | 'vertical', stroke: number, speed: number }`
 **Physics:**
-- Two bodies: cylinder (static) + piston rod (dynamic)
-- Rod constrained to slide in cylinder axis only
-- Motor within 220px drives extend/retract cycle
-**Behavior tick:**
-- If powered: `extension += speed * dt`, reverse at ends (0..stroke)
-- Set rod position = cylinder.end + extension * axis
-- Store `pistonExtensions[id]` = extension / stroke (0..1)
-**Ports:**
-- `rotary-in`: motor drives it
-- `linear-out` at rod tip: pushes connected arm/bucket
-**Known bug risk:** Piston rod can escape its cylinder if physics solver applies external force. Fix: use `Matter.Constraint` with `stiffness: 1.0` (rigid) on rod body, not just position setting.
+- Cylinder body: static rectangle at `(x, y)`, size = `(20, stroke + 20)` or `(stroke + 20, 20)`
+- Rod body: dynamic thin rectangle starting at extended end
 
----
-
-#### T2-5: `hydraulic-arm`
-**Config:** `{ x, y, length: number, angle: number }` — the whole arm
-**Physics:** Dynamic rectangle body, pinned at base via `Matter.Constraint` to static anchor
-**Ports:**
-- `linear-in` at tip: piston drives it
-- `material-in` at tip: (if bucket attached, see T2-6)
-**Behavior:** Piston linear output → arm rotates around pivot. Map linear extension to angle change: `angle = baseAngle + (extension / pistonStroke) * maxRotation`
-**Known bug risk:** Arm physics can oscillate if constraint damping is too low. Use `damping: 0.8` on the pivot constraint. Also: arm-bucket attachment needs a second constraint, creating a compound body — test for constraint solver instability.
-
----
-
-#### T2-6: `bucket`
-**Config:** `{ attachedToId: string }` — must be attached to arm tip or crane hook
-**Physics:** U-shaped composite body (3 rectangles forming a scoop)
-**Ports:**
-- `material-in` at open top: collects cargo/ball/rock within collection zone
-- `material-out` when tilted > 90°: dumps material
-**Behavior tick:**
-- When angle > 90°: release all collected material (set them dynamic, remove from `bucketContents`)
-- Collection zone: material within 30px of bucket centroid and inside the U shape
-- Track fill in `bucketContents[id]`
-**Known bug risk:** The "tilt to dump" trigger is fragile if the arm oscillates. Add hysteresis: must be > 100° to dump, won't re-collect until back to < 60°.
+```typescript
+case 'piston': {
+  const cfg = prim.config as { x: number; y: number; orientation: string; stroke: number };
+  // Return the rod body; cylinder will be added as a separate static body in post-body-creation loop
+  const isVert = cfg.orientation === 'vertical';
+  const rodX = cfg.x + (isVert ? 0 : cfg.stroke / 2);
+  const rodY = cfg.y + (isVert ? cfg.stroke / 2 : 0);
+  return Matter.Bodies.rectangle(rodX, rodY, isVert ? 10 : cfg.stroke, isVert ? cfg.stroke : 10, {
+    label: prim.id, density: 0.001, frictionAir: 0.3,
+  });
+}
+```
+Add cylinder body in a separate pass (similar to how conveyorSupports works). Add constraint from rod to cylinder:
+```typescript
+// After body creation, for pistons:
+if (prim.kind === 'piston') {
+  const cfg = prim.config as { x: number; y: number; orientation: string; stroke: number };
+  const rodBody = bodyMap.get(prim.id)!;
+  // Cylinder body (static guide)
+  const isVert = cfg.orientation === 'vertical';
+  const cylinder = Matter.Bodies.rectangle(cfg.x, cfg.y, isVert ? 20 : cfg.stroke + 20, isVert ? cfg.stroke + 20 : 20, {
+    isStatic: true, label: `cyl-${prim.id}`,
+    collisionFilter: { mask: 0 }, // no collisions — it's just a guide
+  });
+  Matter.World.add(engine.world, cylinder);
+  // Constrain rod to slide along one axis only (two guide constraints)
+  // Use a constraint that keeps rod at distance from a fixed point along the axis
+  // This is approximated by constraining to the cylinder body's top/bottom points
+  // stiffness: 0.9 NOT 1.0 (see Bug C fix)
+  Matter.World.add(engine.world, Matter.Constraint.create({
+    bodyA: cylinder,
+    pointA: { x: 0, y: isVert ? -(cfg.stroke + 20) / 2 : 0 },
+    bodyB: rodBody,
+    pointB: { x: 0, y: isVert ? -cfg.stroke / 2 : 0 },
+    length: 0,
+    stiffness: 0.9,
+    damping: 0.1,
+    label: `guide-${prim.id}`,
+  }));
+}
+```
+**motorPistonMap:** Build same pattern as `motorGearMap`. Motor within 220px drives piston.
+**Tick function:**
+```typescript
+function tickPistons(pistonExtensions: Record<string, number>) {
+  for (const prim of manifest.primitives.filter(p => p.kind === 'piston')) {
+    const motors = motorPistonMap.get(prim.id) ?? [];
+    const powered = motors.some(mId => activeMotorIds.has(mId));
+    const cfg = prim.config as { stroke: number; speed: number; orientation: string };
+    const rodBody = bodyMap.get(prim.id);
+    if (!rodBody) continue;
+    const ext = pistonExtensions[prim.id] ?? 0;
+    const newExt = powered
+      ? Math.min(1, ext + cfg.speed * 0.016 / cfg.stroke)
+      : Math.max(0, ext - cfg.speed * 0.016 / cfg.stroke);
+    pistonExtensions[prim.id] = newExt;
+    // Set rod position directly (override physics position)
+    const isVert = cfg.orientation === 'vertical';
+    const cfg2 = prim.config as { x: number; y: number };
+    const newX = cfg2.x + (isVert ? 0 : newExt * cfg.stroke);
+    const newY = cfg2.y + (isVert ? newExt * cfg.stroke : 0);
+    Matter.Body.setPosition(rodBody, { x: newX, y: newY });
+    Matter.Body.setVelocity(rodBody, { x: 0, y: 0 });
+  }
+}
+```
 
 ---
 
 #### T2-7: `crane-arm`
-**Config:** `{ x, y, length: number }` — the horizontal boom
-**Physics:**
-- Static horizontal beam (the arm doesn't move, only the rope/hook moves)
-- OR: Dynamic arm pinned at base (rotating crane) — implement static first
-**Ports:**
-- `structural-out` at tip: rope/winch attaches here
-**Behavior:** The winch (T2-8) handles the lift — crane-arm just provides the attachment point.
+**Config:** `{ x, y, length: number }` (horizontal boom, pivots at x/y)
+**Physics:** Dynamic rectangle, pivoted at left end via world-anchor constraint.
+```typescript
+case 'crane-arm': {
+  const cfg = prim.config as { x: number; y: number; length: number };
+  return Matter.Bodies.rectangle(cfg.x + cfg.length / 2, cfg.y, cfg.length, 10, {
+    label: prim.id, density: 0.001,
+  });
+}
+```
+Pin at left end: `Matter.Constraint.create({ pointA: { x: cfg.x, y: cfg.y }, bodyB: body, pointB: { x: -cfg.length/2, y: 0 }, length: 0, stiffness: 0.9, damping: 0.5 })`
+**Counterweight attachment:** Counterweight body attached at left end via `Matter.Constraint`.
+**Winch attachment:** Winch/rope attaches at right end tip.
 
 ---
 
-#### T2-8: `winch` (complete the existing stub)
-**Config:** `{ x, y, speed: number, ropeLength: number }`
-**Physics:**
-- Winch drum: static body (it doesn't move)
-- Rope: `Matter.Constraint` from drum to hook, `stiffness: 0.9`, `damping: 0.1`
-- Hook: small dynamic body at rope end
-**Ports:**
-- `rotary-in`: motor within 220px drives reel speed
-**Behavior tick:**
-- If motor is powering + reel up: `constraint.length -= speed * dt`, min = 50px
-- If reel down: `constraint.length += speed * dt`, max = config.ropeLength
-- Store `winchRopeLengths[id]` = current length
-- `hookY` in snapshot = hook body y position
-**Known bug risk (critical):** Matter.js constraints get unstable when length changes too fast. Cap delta per tick: `Math.min(speedPerTick, 2)` px/tick. Also: if hook swings and rope goes slack (body moves faster than constraint shortens), the constraint snaps taut violently. Fix: add damping `0.15` and cap angular velocity of hook body.
-
----
-
-#### T2-9: `rope` (complete the existing stub)
-**Config:** `{ fromId: string, toId: string, length: number }`
-**Physics:** `Matter.Constraint` between two bodies, `stiffness: 0.8`, `damping: 0.05`
-**Ports:** None (it's a connection, not a part per se)
-**Behavior:** Length is fixed. If `fromId` or `toId` is deleted, rope must be deleted too.
-**Deletion handling:** In `buildMatterWorld`, after adding all bodies, validate that both `fromId` and `toId` exist in `bodyMap`. If either is missing, skip this rope (log warning). This prevents crashes when one end is deleted.
-**Visual:** Draw a line between the two constraint body positions (NOT between config positions, which are outdated after physics runs).
-**Known bug risk:** If rope length < actual distance between bodies, it snaps taut with large impulse → instability. Validate at world-build: if `length < dist(a, b) * 0.9`, auto-extend length to `dist(a, b) * 1.1` and log a warning.
-
----
-
-#### T2-10: `hook` (complete the existing stub)
-**Config:** `{ x, y }`
-**Physics:** Small dynamic capsule body. Attaches to rope's lower end via constraint.
-**Ports:**
-- `material-in`: cargo within 20px snaps on (becomes `hookAttached`)
-**Behavior tick:**
-- When cargo is within 20px of hook and user has not released: create a rigid `Matter.Constraint` (stiffness: 1, length: 5) between hook and cargo body
-- When user triggers release (separate control): remove that constraint
-**Known bug risk:** Auto-grab can grab cargo the player wasn't intending to grab. Add: only grab if cargo is stationary (speed < 1px/frame) AND hook is moving downward.
-
----
-
-#### T2-11: `counterweight`
+#### T2-8: `counterweight`
 **Config:** `{ x, y, mass: number }`
-**Physics:** Heavy static-until-connected rectangle. Once connected to a beam via constraint, it becomes dynamic.
-**Ports:**
-- `structural-in` at top: connects to beam/arm
-**Behavior:** Pure physics mass. No tick logic. Weight is `mass * 10` (kg-equivalent).
-**Visual:** Dark heavy-looking block with hatching.
+**Physics:** Heavy static-feeling but dynamic rectangle.
+```typescript
+case 'counterweight': {
+  const cfg = prim.config as { x: number; y: number; mass: number };
+  return Matter.Bodies.rectangle(cfg.x, cfg.y, 24, 32, {
+    label: prim.id, mass: cfg.mass ?? 5, frictionAir: 0.05,
+  });
+}
+```
+**Connection:** Use existing `beam` constraint system — counterweight is attached to crane-arm via a `beam` primitive.
+
+---
+
+#### T2-9: `bucket`
+**Config:** `{ x, y, width: 40, depth: 30, attachedToArmId?: string }`
+**Physics:** Composite U-shape (3 rectangles: left wall, right wall, base).
+Only the base needs to be the main returned body (the "bucket body"). The walls are added in the post-body loop.
+**Collection zone tick:**
+```typescript
+function tickBuckets(bucketContents: Record<string, number>, bucketStates: Record<string, 'collecting' | 'dumping'>) {
+  for (const prim of manifest.primitives.filter(p => p.kind === 'bucket')) {
+    const bucketBody = bodyMap.get(prim.id);
+    if (!bucketBody) continue;
+    const angle = ((bucketBody.angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const isDumping = bucketStates[prim.id] === 'dumping';
+
+    // State transitions with hysteresis
+    if (!isDumping && angle > 1.745) bucketStates[prim.id] = 'dumping'; // > 100°
+    if (isDumping && angle < 1.047) bucketStates[prim.id] = 'collecting'; // < 60°
+
+    if (isDumping) {
+      // Release all collected materials
+      bucketContents[prim.id] = 0;
+      // (dynamic materials near bucket are released by removing any constraints)
+      continue;
+    }
+
+    // Collection: count materials inside bucket zone
+    let count = 0;
+    const bx = bucketBody.position.x, by = bucketBody.position.y;
+    for (const matPrim of manifest.primitives.filter(p => MATERIAL_KINDS.includes(p.kind))) {
+      const matBody = bodyMap.get(matPrim.id);
+      if (!matBody || collectedCargoIds.has(matPrim.id)) continue;
+      if (Math.hypot(matBody.position.x - bx, matBody.position.y - by) < 30) count++;
+    }
+    bucketContents[prim.id] = count;
+  }
+}
+```
 
 ---
 
 ### Tier 3 — Additional Machine Parts
 
----
-
-#### T3-1: `cam`
-**Config:** `{ x, y, teeth: 0, lobeOffset: number }` (uses gear config)
-**Physics:** Same as gear (pinned dynamic circle) but with an asymmetric collision shape (lobe)
-**Ports:**
-- `rotary-in`: motor/gear drives it
-- `linear-out` at lobe tip: pushes follower during lobe pass
-**Behavior tick:**
-- At every tick, check if lobe tip is within 20px of any `cam-follower` part
-- If yes: apply linear impulse in lobe direction
-- This creates intermittent push (not continuous)
-**Known bug risk:** Lobe detection is position-dependent. Cam must be adjacent to its follower. Guided placement must enforce proximity.
-
----
-
-#### T3-2: `cam-follower`
-**Config:** `{ x, y, orientation: 'vertical' | 'horizontal' }`
-**Physics:** Small dynamic rectangle constrained to one axis (like a rack)
-**Ports:**
-- `linear-in` from cam lobe
-- `linear-out` at opposite end (pushes next part)
-
----
-
-#### T3-3: `bevel-gear`
-**Config:** `{ x, y, teeth: 20, axis: 'horizontal' | 'vertical' }`
-**Physics:** Visual-only rotation change. Two bevel gears on perpendicular axes.
-**Behavior:** When horizontal bevel gear meshes with vertical bevel gear: transmit RPM across the axis change. In 2D this is a visual abstraction — one gear drives the other's angular velocity regardless of orientation, but the "axis change" is communicated visually.
-**Note:** This is mostly cosmetic in 2D physics. The value is teaching kids what a bevel gear does. Implementation is: treat like a normal gear mesh but draw it differently.
+#### T3-1: `rack`
+**Config:** `{ x, y, width: number, orientation: 'horizontal' | 'vertical' }`
+**Physics:** Dynamic rectangle. Two invisible static "rail" bodies constrain it to one axis.
+**motorRackMap:** Actually a `gearRackMap: Map<string, string>` — rack → driving gear id.
+Built at construction: find gear within 30px of rack end. If found, `gearRackMap.set(rack.id, gear.id)`.
+**Tick:**
+```typescript
+function tickRacks() {
+  for (const prim of manifest.primitives.filter(p => p.kind === 'rack')) {
+    const rackBody = bodyMap.get(prim.id);
+    const gearId = gearRackMap.get(prim.id);
+    if (!rackBody || !gearId) continue;
+    const gearBody = bodyMap.get(gearId);
+    if (!gearBody) continue;
+    const gearPrim = manifest.primitives.find(p => p.id === gearId)!;
+    const radius = rotatingRadius(gearPrim);
+    const linearVel = gearBody.angularVelocity * radius;
+    const cfg = prim.config as { orientation: string };
+    Matter.Body.setVelocity(rackBody, {
+      x: cfg.orientation === 'horizontal' ? linearVel : 0,
+      y: cfg.orientation === 'vertical' ? linearVel : 0,
+    });
+  }
+}
+```
 
 ---
 
-#### T3-4: `flywheel`
-**Config:** `{ x, y, radius: 30, mass: 5 }` (heavier = more inertia)
-**Physics:** High-inertia dynamic circle. `frictionAir: 0.001` (almost no air drag — keeps spinning).
-**Ports:**
-- `rotary-in`: receives RPM from motor/gear
-- `rotary-out`: transmits RPM to next gear (smoothed)
-**Behavior tick:**
-- Store rolling average of received RPM over last 10 ticks
-- Output smoothed RPM rather than instantaneous
-- If motor is turned OFF: flywheel continues spinning, decelerating slowly
-**Teaching value:** Kids see the machine keep going after motor turns off. Good "aha" moment.
-
----
-
-#### T3-5: `gearbox`
-**Config:** `{ x, y, inputTeeth: 10, outputTeeth: 40 }` (sets ratio)
-**Physics:** Black box — no visible internal gears. One input port, one output port.
-**Ports:**
-- `rotary-in` left side
-- `rotary-out` right side at ratio = `outputTeeth / inputTeeth`
-**Behavior tick:** `outputRpm = inputRpm * (inputTeeth / outputTeeth)`
-**Teaching value:** "Change the number to go faster or slower." Visible ratio on the box.
-
----
-
-#### T3-6: `drive-wheel` (vehicle)
-**Config:** `{ x, y, radius: 20 }`
-**Physics:** Same as `wheel` but with higher traction (`friction: 0.8`) — designed for vehicle locomotion rather than belt/gear work.
-**Behavior:** When motor drives → wheel rolls → if chassis body is connected via axle → vehicle translates.
-
----
-
-#### T3-7: `chassis`
-**Config:** `{ x, y, width: number, height: number }`
-**Physics:** Dynamic rectangle. Two axle-port attachment points (front, rear).
-**Ports:**
-- `structural-in` ×2 at bottom corners: accepts axle connections
-- `structural-in` at top: accepts arm/piston attachment
-**Behavior:** Serves as the body of a vehicle. When both axles are driven, chassis moves.
-
----
-
-#### T3-8: `chute`
-**Config:** `{ x, y, length: number, angle: number }`
-**Physics:** Static angled rectangle (same as ramp) with side walls to contain material.
-- The "walls" are thin static rectangles at 90° to the chute surface
-**Ports:**
-- `material-in` at top: receives material from conveyor/bucket
-- `material-out` at bottom: material exits (feeds hopper, bin, etc.)
-**Behavior:** Pure passive physics — gravity does the work.
-
----
-
-#### T3-9: `funnel` (already partially exists as hopper entrance)
-Make this a standalone part that feeds into a hopper or bin.
-**Config:** `{ x, y, width: 80, outputX: number, outputY: number }`
-**Physics:** Two angled static walls forming a V shape.
-**Ports:**
-- `material-in` at wide top
-- `material-out` at narrow bottom: gravity carries material out
-**Behavior:** No tick logic. Matter.js contact with the funnel walls redirects material downward.
-
----
-
-#### T3-10: `silo-bin`
-**Config:** `{ x, y, capacity: number, gateOpen: false }`
-**Physics:** Three static walls (left, right, bottom). Top is open.
-**Ports:**
-- `material-in` at top: receives material
-- `material-out` at bottom gate: when gate opens, material falls out
-**Behavior tick:**
-- Count material bodies inside bin boundaries → store as `hopperFill` variant
-- If `gateOpen`: remove bottom wall body from world → material falls
-**Control:** Add a toggle control for `gateOpen` in the ControlPanel.
+#### T3-2: `cam` and `cam-follower`
+Implement together. Cam is a gear with an asymmetric lobe (visual). Cam-follower is a small dynamic body constrained to one axis.
+**Tick:**
+```typescript
+// After driveMotors, for each cam:
+for (const cam of manifest.primitives.filter(p => p.kind === 'cam')) {
+  const camBody = bodyMap.get(cam.id);
+  if (!camBody) continue;
+  const lobeAngle = camBody.angle + (cam.config as { lobeOffset: number }).lobeOffset;
+  const lobeTipX = camBody.position.x + Math.cos(lobeAngle) * (rotatingRadius(cam) * 1.3);
+  const lobeTipY = camBody.position.y + Math.sin(lobeAngle) * (rotatingRadius(cam) * 1.3);
+  // Find nearby follower
+  for (const follower of manifest.primitives.filter(p => p.kind === 'cam-follower')) {
+    const fBody = bodyMap.get(follower.id);
+    if (!fBody) continue;
+    if (Math.hypot(lobeTipX - fBody.position.x, lobeTipY - fBody.position.y) < 15) {
+      // Lobe touching follower — apply impulse in lobe direction
+      Matter.Body.applyForce(fBody, fBody.position, {
+        x: Math.cos(lobeAngle) * 0.05,
+        y: Math.sin(lobeAngle) * 0.05,
+      });
+    }
+  }
+}
+```
 
 ---
 
 ### Tier 4 — Materials
 
+#### T4-1: `sand` (`material-pile` primitive)
+**Placement primitive kind:** `material-pile` (already in types.ts)
+**Physics:** Anonymous particle bodies — NOT added to `bodyMap` by primitive ID.
+
+**New data structures in closure:**
+```typescript
+const sandParticleBodies: Matter.Body[] = [];  // all sand particles
+let totalParticleCount = 0;
+const MAX_PARTICLES = 30;  // hard cap
+```
+
+**In body creation loop:**
+```typescript
+case 'material-pile': {
+  const cfg = prim.config as { x: number; y: number; quantity: number };
+  const qty = Math.min(cfg.quantity ?? 10, MAX_PARTICLES - totalParticleCount);
+  totalParticleCount += qty;
+  for (let i = 0; i < qty; i++) {
+    const offsetX = (Math.random() - 0.5) * 20;
+    const offsetY = (Math.random() - 0.5) * 10;
+    const particle = Matter.Bodies.circle(cfg.x + offsetX, cfg.y + offsetY, 4, {
+      label: `sand-particle-${prim.id}-${i}`,
+      mass: 0.1, restitution: 0.0, friction: 0.5,
+      collisionFilter: { category: 0x0004, mask: 0x0001 }, // only vs static bodies
+    });
+    sandParticleBodies.push(particle);
+    Matter.World.add(engine.world, particle);
+  }
+  return null; // no bodyMap entry for the pile primitive itself
+}
+```
+
+**In PhysicsFrame:** Add `sandParticlePositions: Array<{ x: number; y: number }>` — populate from `sandParticleBodies.map(b => b.position)`. Renderer uses this array to draw particles.
+
+**Recovery:** In tick, check each particle: if `position.y > CANVAS_H + 50`, reset to a random position above the pile.
+
 ---
 
-#### T4-1: `rock`
-**Config:** `{ x, y }`
-**Physics:** Same as cargo-block but:
-- `mass: 3` (heavy)
-- `restitution: 0.05` (almost no bounce)
-- `friction: 0.9` (high friction on surfaces)
-- Shape: irregular polygon (5-6 vertices around a circle) for visual variety
-**Ports:**
-- `material-out`: counts as 1 unit for hopper/bin
+#### T4-2: `water`
+**Config:** `{ x, y, width: number, height: number, density: number }`
+**Physics:** No physics body. Force zone only.
+**Tick:**
+```typescript
+function tickWaterZones(supportedCargoIds: Set<string>) {
+  const waterZones = manifest.primitives.filter(p => p.kind === 'water');
+  if (waterZones.length === 0) return;
 
----
+  for (const body of Matter.Composite.allBodies(engine.world)) {
+    if (body.isStatic) continue;
+    for (const zone of waterZones) {
+      const cfg = zone.config as { x: number; y: number; width: number; height: number; density: number };
+      if (body.position.x < cfg.x || body.position.x > cfg.x + cfg.width) continue;
+      if (body.position.y < cfg.y || body.position.y > cfg.y + cfg.height) continue;
 
-#### T4-2: `sand` (granular material)
-**Config:** `{ x, y, quantity: 20 }` (max 30 — enforce hard cap for performance)
-**Physics:** `quantity` small circle bodies, radius 4px, `mass: 0.1`, `restitution: 0.0`, `friction: 0.5`
-**PERFORMANCE WARNING:** Each sand particle is a separate Matter.js body. 30 × 60fps = expensive. Hard cap at 30 particles. If user places another sand pile, refuse and show "sand limit reached" toast.
-**Behavior:** Pure physics — piles, flows through funnels, fills bins.
-**Known bug risk:** Sand particles can clip through walls if they stack too high and get compressed. Fix: reduce particle size or add `slop: 0` on walls. Also: sand on a conveyor — the anti-gravity force must be applied per-particle, and with 30 particles this still runs at 60fps.
+      // Skip bodies on conveyor belt (Bug I fix — prevents conveyor/water conflict)
+      const primId = manifest.primitives.find(p => bodyMap.get(p.id) === body)?.id;
+      if (primId && supportedCargoIds.has(primId)) continue;
 
----
+      // Drag
+      Matter.Body.setVelocity(body, { x: body.velocity.x * 0.94, y: body.velocity.y * 0.94 });
 
-#### T4-3: `water` (fluid zone)
-**Config:** `{ x, y, width: number, height: number }` — defines a rectangular water zone
-**Physics:** No physical bodies for water itself. It's a force zone.
-**Behavior tick:**
-- For every dynamic body whose center is inside the water rectangle:
-  - Apply buoyancy force: `upward = density * volume * gravity` (simplified: fixed upward force based on body mass)
-  - Apply drag: `Matter.Body.setVelocity(body, { x: body.velocity.x * 0.95, y: body.velocity.y * 0.95 })`
-- `density` config slider: 0.5 (less than water, floats) to 2.0 (sinks)
-**Visual:** Semi-transparent blue rectangle with animated wave lines.
-**Known bug risk:** Bodies that are partially submerged should get partial force. The simplification (either fully in or not) causes jitter as body crosses the surface. Fix: interpolate force based on what fraction of body is submerged (approximate by y-overlap).
+      // Buoyancy
+      const buoyancy = body.mass * engine.gravity.y * (cfg.density ?? 0.8);
+      Matter.Body.applyForce(body, body.position, { x: 0, y: -buoyancy });
+    }
+  }
+}
+```
+Call `tickWaterZones(conveyorFrame.supportedCargoIds)` AFTER `tickConveyors()`.
 
 ---
 
 ### Tier 5 — Structural
 
----
-
-#### T5-1: `beam` (complete the existing stub)
-**Config:** `{ fromNodeId: string, toNodeId: string, stiffness: 1.0 }`
-**Physics:** Dynamic rectangle connecting two node positions. Length = `dist(fromNode, toNode)`.
-- `Matter.Constraint` at each end to the respective node bodies
-**Ports:**
-- `structural-in` at each end: connects to node/axle/pivot
-**Behavior:** When one end is pinned (static node), beam can swing. When both ends are dynamic, it's a linkage.
+#### T5-1: `hinge`
+**Config:** `{ x, y }` (the pivot point position)
+**Physics:** Not a body — just a position that two beams connect to via constraints.
+**Implementation:** In the constraint creation loop, when a `beam` has `fromNodeId` pointing to a `hinge` primitive, create the constraint to `pointA: { x: hinge.x, y: hinge.y }` rather than to a body. This allows rotation around a fixed world point.
 
 ---
 
-#### T5-2: `node` (complete the existing stub)
-**Config:** `{ x, y }`
-**Physics:** Small dynamic body. Can be static (locked) or dynamic.
-- If `locked: true` in manifest: set `isStatic: true`
-**Ports:**
-- `structural-in/out` ×4: accepts beam, axle, arm connections
-**Behavior:** Pure connection point. No tick logic.
+#### T5-2: `chute`
+**Config:** `{ x, y, length: number, angle: number, wallHeight: 20 }`
+**Physics:** Two parallel static rectangles (bottom surface + optional top wall).
+Same body creation pattern as ramp, with an additional wall body.
 
 ---
 
-#### T5-3: `hinge`
-**Config:** `{ x, y }` — the pivot point
-**Physics:** `Matter.Constraint` with `length: 0, stiffness: 1.0` pinning two bodies together at a shared point, with rotation allowed.
-**Implementation:** A hinge is actually implemented by creating a constraint between two body's attachment points at the same location with zero length and stiffness 1. The bodies can still rotate relative to each other (since constraints only restrict position, not angle).
-**Visual:** Small circle at pivot point.
+#### T5-3: `silo-bin`
+**Config:** `{ x, y, width: number, height: number }`
+**Physics:** Three static bodies: left wall, right wall, floor.
+**Gate control:** Add to `applyControls`:
+```typescript
+if (prim.kind === 'silo-bin') {
+  const gateControl = manifest.controls.find(c => c.bind?.targetId === prim.id && c.bind?.path === 'gateOpen');
+  if (gateControl && controlValues[gateControl.id]) {
+    // Remove floor body from world
+    const floorBody = siloFloorMap.get(prim.id);
+    if (floorBody) {
+      Matter.World.remove(engine.world, floorBody);
+      siloFloorMap.delete(prim.id);
+    }
+  }
+}
+```
+**Fill count:** Same as hopper — count material bodies inside boundaries each tick.
 
 ---
 
 #### T5-4: `tunnel`
 **Config:** `{ x, y, width: number, angle: number }`
-**Physics:** Two parallel static rectangles (top and bottom of tunnel) with a gap between them.
-**Ports:** None (passive)
-**Behavior:** Material passes through the gap. Top and bottom walls constrain material to the tunnel path.
-**Visual:** Two parallel lines with a rounded entrance/exit.
+**Physics:** Two parallel static rectangles (top and bottom of tunnel). Identical to two ramps facing each other with a gap. Material passes through the gap.
 
 ---
 
-## File-by-File Change Plan
+## File-by-File Change Plan (Corrected)
 
 ### 1. `src/lib/types.ts`
-**Changes:**
-- Extend `PrimitiveKind` union with new kinds:
-  ```typescript
-  | 'ramp' | 'platform' | 'wall' | 'ball' | 'spring-linear'
-  | 'pulley' | 'chain-sprocket' | 'rack' | 'piston' | 'hydraulic-arm'
-  | 'bucket' | 'crane-arm' | 'counterweight' | 'cam' | 'cam-follower'
-  | 'bevel-gear' | 'flywheel' | 'gearbox' | 'drive-wheel' | 'chassis'
-  | 'chute' | 'funnel' | 'silo-bin' | 'rock' | 'sand' | 'water'
-  | 'beam-simple' | 'hinge' | 'tunnel'
-  ```
-  Note: `beam`, `node`, `axle`, `winch`, `rope`, `hook` already exist — complete their implementations.
+Add to `PrimitiveKind` union:
+```typescript
+| 'ramp' | 'platform' | 'wall' | 'ball' | 'rock' | 'spring-linear'
+| 'pulley' | 'chain-sprocket' | 'rack' | 'piston' | 'crane-arm'
+| 'bucket' | 'counterweight' | 'cam' | 'cam-follower'
+| 'bevel-gear' | 'flywheel' | 'gearbox' | 'chassis'
+| 'chute' | 'silo-bin' | 'water' | 'hinge' | 'tunnel'
+```
+Note: `sand` uses the existing `material-pile` kind.
+Note: `drive-wheel` is just `wheel` with a higher traction config value — no new kind needed.
 
-- Add config interfaces for each new kind:
-  ```typescript
-  interface RampConfig { x: number; y: number; width: number; angle: number }
-  interface BallConfig { x: number; y: number; radius: number }
-  // ... etc for all new parts
-  ```
+Add config interfaces for each new kind.
 
-- Extend `RuntimeSnapshot` with new fields (see above)
+Extend `PhysicsFrame` in `physics-engine.ts`:
+```typescript
+pistonExtensions: Record<string, number>;     // 0..1 ratio
+bucketContents: Record<string, number>;       // count of items
+bucketStates: Record<string, 'collecting' | 'dumping'>;
+springCompressions: Record<string, number>;   // 0..1 ratio
+sandParticlePositions: Array<{ x: number; y: number }>;
+```
 
-- Add new `ProjectSuccessCheck` values as needed for future projects:
-  ```typescript
-  | 'vehicle-moving' | 'load-lifted' | 'bucket-filled' | 'bucket-dumped' | 'silo-full'
-  ```
-
-**Bug risk:** The `PrimitiveKind` union is used in many type guards throughout the codebase. Adding kinds without updating those guards will cause TypeScript errors. Use `tsc --noEmit` to catch all gaps.
+Extend `RuntimeSnapshot` in `simulation.ts` with same fields (empty defaults).
 
 ---
 
-### 2. `src/lib/part-registry.ts` (NEW FILE)
-**Purpose:** Single source of truth for port declarations and part metadata.
+### 2. `src/lib/physics-engine.ts`
+**At top of `buildMatterWorld()`:**
 ```typescript
-export interface PartMeta {
-  label: string;
-  category: 'power' | 'transmission' | 'converter' | 'actuator' | 'transport' | 'structural' | 'material';
-  tier: 1 | 2 | 3 | 4 | 5;
-  ports: Port[];
-  defaultConfig: Record<string, unknown>;
-  connectionRange: number;  // default 220, override per part
-  maxCount?: number;        // for sand: 1 pile per canvas, etc.
-}
+const MATERIAL_KINDS: PrimitiveKind[] = ['cargo-block', 'ball', 'rock'];
+```
 
-export const PART_REGISTRY: Record<PrimitiveKind, PartMeta> = {
-  motor: { label: 'Motor', category: 'power', tier: 1, ... },
-  gear:  { label: 'Gear',  category: 'transmission', tier: 1, ... },
-  // ... all 45+ parts
+**In `tickConveyors()`:**
+```typescript
+// Change line ~492:
+const cargoBlocks = manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind));
+```
+
+**In `tickHopper()`:**
+```typescript
+// Change the filter inside:
+for (const prim of manifest.primitives) {
+  if (!MATERIAL_KINDS.includes(prim.kind)) continue;  // was: prim.kind !== 'cargo-block'
+```
+
+**In `recoverLostCargo()`:**
+```typescript
+// Change the outer filter:
+for (const cargo of manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind)))
+```
+
+**In `rotatingPrims` filter (gearMeshMap construction):**
+```typescript
+const rotatingPrims = manifest.primitives.filter((p) =>
+  ['gear', 'wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(p.kind)
+);
+```
+
+**In gear-pinning loop:**
+```typescript
+// Change:
+if (prim.kind !== 'gear') continue;
+// To:
+if (!['gear', 'pulley', 'chain-sprocket'].includes(prim.kind)) continue;
+// Flywheel is NOT pinned — it can translate if mounted on a moving vehicle
+```
+
+**In `tick()` return:**
+Add new fields with defaults:
+```typescript
+return {
+  ...existingFields,
+  pistonExtensions: pistonExtensionsRef,
+  bucketContents: bucketContentsRef,
+  bucketStates: bucketStatesRef,
+  springCompressions: springCompressionsRef,
+  sandParticlePositions: sandParticleBodies.map(b => ({ x: b.position.x, y: b.position.y })),
 };
 ```
 
-**Also export:**
-- `getPortsForPrimitive(primitive: PrimitiveInstance): Port[]` — returns world-space port positions (adds config x/y to localOffset)
-- `resolvePortConnections(a, b): PortConnection[]` — returns all valid connections between two primitives
+**In `createBodyForPrimitive()`:**
+Add cases for all new parts. Return `null` for any part that doesn't need a physics body at the primitive level (like `water`, `hinge`, `material-pile`).
 
----
-
-### 3. `src/lib/physics-engine.ts`
-**Additions (do NOT delete existing code):**
-
-**A. New body creation in `buildMatterWorld()`:**
-Add a case for each new `PrimitiveKind` in the body-creation section. Follow the existing pattern — create body, add to bodyMap, add to world.
-
-**B. New proximity maps:**
+Add explicit `default` case to catch unknown kinds:
 ```typescript
-const pistonMotorMap = new Map<string, string[]>();    // piston → motors driving it
-const winchMotorMap = new Map<string, string[]>();     // winch → motors driving it
-const rackGearMap = new Map<string, string>();         // rack → driving gear
-const bucketArmMap = new Map<string, string>();        // bucket → arm it's attached to
-```
-Build these maps in the same loop that builds `motorGearMap`.
-
-**C. New tick functions:**
-Add these to the `tick()` function, called after existing tick logic:
-- `tickPistons(pistonMotorMap, bodyMap, world, dt)` → updates `pistonExtensions`
-- `tickWinches(winchMotorMap, bodyMap, dt)` → updates `winchRopeLengths`, `hookY`
-- `tickRacks(rackGearMap, bodyMap)` → converts angular to linear velocity
-- `tickBuckets(bucketArmMap, bodyMap)` → checks tilt → dumps material
-- `tickFlywheel(bodyMap, dt)` → maintains inertia after motor off
-- `tickWaterZones(waterPrimitives, bodyMap, engine)` → buoyancy forces
-
-**D. Update `PhysicsFrame` return:**
-Add new fields to match extended `RuntimeSnapshot`.
-
-**Critical rule:** All new tick functions must check that the body exists in `bodyMap` before operating on it. Missing bodies should log a warning and skip — never throw. Pattern:
-```typescript
-const body = bodyMap.get(primitiveId);
-if (!body) { console.warn(`tickPistons: body ${primitiveId} not found`); return; }
+default: {
+  console.warn(`createBodyForPrimitive: unknown kind "${prim.kind}", skipping body creation`);
+  return null;
+}
 ```
 
+**New tick functions** (called from `tick()` after existing tick calls):
+- `tickPistons()`
+- `tickWinches()`
+- `tickRacks()`
+- `tickBuckets()`
+- `tickWaterZones(supportedCargoIds)`
+- Flywheel inertia propagation (inline in `tick()`)
+
+**`applyControls()`:**
+Add cases for piston direction toggle, silo-bin gate.
+
 ---
 
-### 4. `src/lib/simulation.ts`
-**Changes:** Minimal. Only `createInitialSnapshot` needs to return the new fields with empty defaults:
+### 3. `src/components/MachineCanvas.tsx`
+Add draw functions at the bottom of the draw loop for each new part. Use the `bodyPositions[prim.id]` from snapshot for dynamic parts, and `prim.config.x/y` for static parts.
+
+**Critical:** Rope/spring drawing must use `bodyPositions`, not config positions:
 ```typescript
-pistonExtensions: {},
-winchRopeLengths: {},
-bucketContents: {},
-vehiclePositions: {},
-springCompressions: {},
+// For rope: draw line between actual body positions
+const fromPos = snapshot.bodyPositions[rope.config.fromId];
+const toPos = snapshot.bodyPositions[rope.config.toId];
+if (fromPos && toPos) instance.line(fromPos.x, fromPos.y, toPos.x, toPos.y);
 ```
-The scripted simulation path never populates these — that's fine.
+
+**Sand particles:** Draw from `snapshot.sandParticlePositions`:
+```typescript
+for (const pos of snapshot.sandParticlePositions) {
+  instance.fill(194, 178, 128);
+  instance.circle(pos.x, pos.y, 8);
+}
+```
 
 ---
 
-### 5. `src/components/MachineCanvas.tsx`
-**Additions:**
+### 4. `src/components/InspectorPanel.tsx`
+Add motor ON/OFF-style toggle for:
+- Piston: direction toggle (extend/retract)
+- Silo-bin: gate toggle (open/close)
 
-**A. New draw functions:**
-Add a `draw<PartKind>()` function for each new visual. Follow the existing pattern (check if selected, draw body, draw selection ring).
-
-**B. Port indicators during placement:**
-During placing mode (`placingKind !== null`), query `PART_REGISTRY[placingKind].ports` and draw circles at each port's local offset position (offset from where cursor is hovering). This helps kids see where connections will form.
-
-**C. Visual states:**
-- Pistons: draw rod at `pistonExtensions[id] * stroke` extension
-- Springs: draw compressed zigzag at `springCompressions[id]` ratio
-- Winch ropes: draw line to `bodyPositions[hookId]` (not config position)
-- Water zones: draw animated semi-transparent rectangle
-- Sand: draw individual small circles at `bodyPositions[particleId]`
-
-**Pitfall:** MachineCanvas is already 1300+ lines. When adding new draw functions, add them to a new section clearly marked `// ---- NEW PARTS ----` at the bottom of the draw loop. Do not intermix with existing draw code.
+For all other new parts: derive editable fields from the config object (existing pattern for sliders/number fields).
 
 ---
 
-### 6. `src/components/InspectorPanel.tsx`
-**Additions:**
-- Schema-driven property editor: instead of hard-coding motor/gear fields, derive editable fields from `PART_REGISTRY[kind].defaultConfig`
-- Special cases still needed: motor power toggle, piston direction toggle, silo gate toggle
-- For sand: show particle count with warning if near limit
+### 5. `src/components/PartPalette.tsx`
+Group new parts by category. In guided project mode, show only parts relevant to current step (existing `allowedPartKinds` already handles this). In free-build mode, add category tabs or disclosure sections. Do NOT show all 45 parts flat — this is a UX failure.
 
 ---
 
-### 7. `src/components/PartPalette.tsx`
-**Additions:**
-- Group parts by `PART_REGISTRY[kind].category`
-- Hide Tier 3+ parts behind a "More Parts" disclosure (keep the palette from overwhelming kids)
-- Show `maxCount` warning when a limited part is already at max
+### 6. `src/lib/jobs.ts`
+New `ProjectSuccessCheck` values:
+```typescript
+| 'vehicle-moving'    // chassis body has speed > 1
+| 'load-lifted'       // hookY < some threshold
+| 'bucket-filled'     // bucketContents[id] >= N
+| 'bucket-dumped'     // bucket was in dumping state
+| 'silo-full'         // silo-bin fill >= N
+```
 
 ---
 
-### 8. `src/lib/jobs.ts`
-**Additions:**
-- New `ProjectSuccessCheck` evaluators for vehicle-moving, load-lifted, bucket-filled, etc.
-- These follow the exact same pattern as existing checks (read `runtime.xxx`, return bool)
+## The "Works First Time" Requirements
+
+These are non-negotiable for a child user. Each new part must satisfy all of them.
+
+1. **Immediate feedback.** Within 1 second of placement, the part should do something visible — spin, move, glow, fall, whatever. A part that sits there doing nothing looks broken.
+
+2. **Generous snap zones.** For motor→gear connection: 220px range. For gear→gear mesh: `rA + rB + 16px`. Never require pixel-perfect placement. New parts follow the same generous tolerance.
+
+3. **No silent failures.** If a motor is placed 300px from a gear and therefore doesn't drive it, there must be a visual indicator. The existing "range ring" pattern on the motor should extend to all new power connections.
+
+4. **One-click undo-equivalent.** If a kid places a part that breaks something, they can delete it. Delete key must work for every new part.
+
+5. **Parts can't collide with gears in weird ways.** New static parts (ramps, walls) must have `collisionFilter` set to prevent them from interacting with gears/motors. Gears are pinned in place but can still receive collision forces that fight the pin constraint. Use:
+   ```typescript
+   // In ramp/wall/platform creation:
+   collisionFilter: { category: 0x0001, mask: 0x0001 }
+   // In gear creation (add this):
+   collisionFilter: { category: 0x0002, mask: 0x0003 }
+   // Gears collide with static world + dynamic material, not with each other's physical bodies
+   ```
+
+6. **Parts that fall off screen respawn.** Every new dynamic part must be handled in a recovery function. At minimum: if `y > CANVAS_H + 90`, reset to spawn position.
+
+7. **Throughput metric.** The `throughput` counter displayed in HUD currently only counts cargo-block entering hoppers. When new materials enter hoppers/bins, `throughput` should increment. This is a one-line change in `tickHopper`.
 
 ---
 
-### 9. `src/lib/seed-data.ts`
-**Additions:**
-- New starter job definitions for Tier 2+ projects (crane, vehicle, excavator)
-- These should NOT be added until the parts are proven working
+## Refined Bug Catalog
 
-**Critical:** Bump `CONTENT_EPOCH` to `relaunch-3-projects-v3` when adding new jobs (not when adding new parts — only when job definitions change).
+### Bug 1: Constraint Instability
+Use `stiffness: 0.9, damping: 0.1` for all body-to-body constraints. Never use `stiffness: 1.0` for body-to-body. (World-anchor constraints are fine at 1.0.)
 
----
+### Bug 2: Tunneling
+Velocity cap in `tick()` after Matter.Engine.update:
+```typescript
+Matter.Engine.update(engine, dt * 1000);
+// Velocity cap to prevent tunneling
+for (const body of Matter.Composite.allBodies(engine.world)) {
+  if (body.isStatic) continue;
+  const MAX_V = 18;
+  if (Math.abs(body.velocity.x) > MAX_V || Math.abs(body.velocity.y) > MAX_V) {
+    Matter.Body.setVelocity(body, {
+      x: Math.sign(body.velocity.x) * Math.min(Math.abs(body.velocity.x), MAX_V),
+      y: Math.sign(body.velocity.y) * Math.min(Math.abs(body.velocity.y), MAX_V),
+    });
+  }
+}
+```
 
-## Bug Catalog and Mitigations
+### Bug 3: Sand Performance
+30-particle hard cap. Collision category mask filters sand-to-sand collisions. FPS monitor: if fps drops below 30 for 3 consecutive seconds, begin removing particles (oldest first).
 
-### Bug 1: Constraint Instability (HIGH RISK)
-**Where:** Winch, rope, beam, piston, arm joints
-**Root cause:** Matter.js constraint solver can oscillate when multiple constraints compete, or when constraint length changes too fast.
-**Mitigation:**
-- Always set `damping: 0.1` or higher on any constraint that will change length
-- Cap length change per tick: `Math.min(deltaLength, 2)` px/tick
-- If a body has more than 3 constraints, it will likely be unstable. Keep compound assemblies simple.
-- If oscillation is detected (`speed > 20`), apply 50% velocity damping that tick as a safety valve
+### Bug 4: World Rebuild on Drag (ALREADY FIXED — preserve it)
+The `dragBufferRef` fix must not be accidentally broken when adding new part types to MachineCanvas. Any new drag handling for new parts must follow the same pattern: buffer position in `mouseDragged`, commit in `mouseReleased`.
 
-### Bug 2: Matter.js Body Tunneling (MEDIUM RISK)
-**Where:** Fast-moving balls, rocks, cannon balls hitting thin walls/ramps
-**Root cause:** At 60fps, a fast body can move more than its own diameter in one tick, skipping collision detection entirely.
-**Mitigation:**
-- Cap all dynamic body velocities: after each tick, `Matter.Body.setVelocity(body, { x: Math.max(-15, Math.min(15, v.x)), y: Math.max(-15, Math.min(15, v.y)) })`
-- Set `slop: 0` (zero tolerance) on thin static bodies
-- Set `timeScale` to 0.8 (slightly slow physics) to reduce tunneling probability
+### Bug 5: Circular Gear BFS (ALREADY HANDLED — preserve it)
+`driven.has(meshId)` in `driveMotors()` prevents re-visiting. Preserve this when extending the BFS to include pulleys and flywheels.
 
-### Bug 3: Sand Performance (HIGH RISK)
-**Where:** Sand material with many particles
-**Root cause:** 30 particles × collision detection with all other bodies = O(n²) in particle count
-**Mitigation:**
-- Hard cap: 30 particles total across all sand primitives. Enforce at placement time.
-- Assign sand particles to a dedicated `collisionFilter.category` so they only collide with static bodies and each other — not with gears, motors, etc. (reduces collision checks dramatically)
-- If FPS drops below 30: log warning, begin removing oldest particles one per second until FPS recovers
+### Bug 6: Multiple Hoppers
+Current `tickHopper` uses `hopperStructures[0]` for slot calculation — only works with one hopper. For now: limit designs to one hopper per canvas (enforce in PartPalette: if `hopperCount >= 1`, grey out hopper in palette). Multi-hopper support is a future feature.
 
-### Bug 4: World Rebuild on Every Placement (CRITICAL — already fixed, preserve fix)
-**Where:** `buildMatterWorld()` is called on every `persistDraft()`
-**Root cause (already fixed):** Drag events were calling `persistDraft` 60×/sec. This is now fixed with `dragBufferRef`.
-**Mitigation for new parts:** Any new interaction that triggers manifest updates (bucket dumps, piston position saved) must NOT save to the manifest on every tick. Only save to `RuntimeSnapshot`. Manifest persistence happens only on explicit user actions.
+### Bug 7: Deletion of Parts with Constraints
+When a part that has constraints (rope endpoints, beam endpoints) is deleted, the constraint references a dead body ID. Current behavior: `buildMatterWorld()` is called on every manifest change — the world is rebuilt from scratch, so deleted parts just don't appear. This is safe. DO NOT change to an incremental update approach (it would break this guarantee).
 
-### Bug 5: Circular Dependency in Power Propagation (HIGH RISK)
-**Where:** BFS through gear/pulley meshes
-**Root cause:** If gear A drives B drives C drives A, the BFS infinite loops.
-**Mitigation (already exists for gears):** Use a `visited: Set<string>` in the BFS. Verify this set is used in any new rotary chain propagation too.
+### Bug 8: Piston Position Override vs Physics
+`tickPistons` calls `Matter.Body.setPosition` every tick (overrides physics). This means no external force can push the piston back. This is correct for a motor-driven piston. But if the piston drives something, that something also can't push back. This is an acceptable simplification.
 
-### Bug 6: Multiple Motors Competing (MEDIUM RISK)
-**Where:** Two motors both in range of the same gear
-**Root cause:** Current code builds `motorGearMap` — last motor wins. With more parts, this is more likely.
-**Mitigation:** When resolving rotary power: sum all connected motor RPMs (weighted by distance — closer motor contributes more). `effectiveRpm = motors.reduce((sum, m) => sum + m.rpm * (1 - dist/range), 0)`.
+### Bug 9: Rope Visual Uses Stale Config Position (not yet fixed)
+Currently the rope is drawn at `config.fromId`/`toId` positions (where the bodies started), not where they are now. This is a pre-existing visual bug. Fix in MachineCanvas: use `bodyPositions` for any constraint visualization.
 
-### Bug 7: Deletion of Connected Parts (MEDIUM RISK)
-**Where:** Delete a motor that drives a piston; delete a node that a beam attaches to
-**Root cause:** The world is rebuilt from manifest on every change, so deleted parts are automatically removed. HOWEVER: if a part that holds a constraint reference (rope's `fromId`, beam's `fromNodeId`) is deleted, the rope/beam part still references a dead ID.
-**Mitigation:** In `buildMatterWorld()`, before creating each part's body, validate all `*Id` references exist in manifest. If any are missing, skip the part and add a `dangling-[id]` warning to the snapshot. The UI can then show a "broken connection" indicator.
+### Bug 10: Content Epoch / Old Drafts
+When new parts are added, old saved drafts won't contain them — that's fine. Old drafts with `kind: 'gear'` etc. continue to work. Never rename or remove a PrimitiveKind. Only add.
 
-### Bug 8: Bucket Tilt Ambiguity (MEDIUM RISK)
-**Where:** When does a tilted bucket "dump"?
-**Root cause:** If the arm swings and the bucket is at 85° → 95° → 85°, it dumps and immediately re-collects material. The tilt trigger fires too easily.
-**Mitigation:** Hysteresis: bucket transitions `collecting → dumping` at > 100°, `dumping → collecting` at < 60°. Store `bucketState: 'collecting' | 'dumping'` per bucket in the physics closure.
+### Bug 11: Hopper Only Collects `cargo-block` (MUST FIX BEFORE NEW MATERIALS)
+As documented above. Use `MATERIAL_KINDS.includes(p.kind)` in all three filter sites.
 
-### Bug 9: Rope Drawing Uses Stale Config Position (LOW RISK)
-**Where:** `MachineCanvas.tsx` draws rope between config `fromId`/`toId` positions
-**Root cause:** After physics runs, the bodies have moved — but config still has their original positions.
-**Mitigation:** Draw rope between `bodyPositions[rope.config.fromId]` and `bodyPositions[rope.config.toId]`, not config positions. Same for any dynamic-body connections.
+### Bug 12: `recoverLostCargo` Spawn Map Not Updated for Non-Belt Materials
+For materials not on a conveyor, `cargoSpawnMap` is never updated — they always respawn at original placement. This is correct behavior (no special fix needed).
 
-### Bug 10: Content Epoch / New Part Kinds in Old Saved Drafts (LOW RISK)
-**Where:** User has a saved draft, then we add new part kinds. Old manifest has unknown kind.
-**Root cause:** A draft saved with `kind: 'gear'` is fine forever. But if we RENAME a kind or REMOVE one, old drafts break.
-**Mitigation:** Never rename or remove a PrimitiveKind. Only add. If a part kind is deprecated, keep the type but return early in `buildMatterWorld()` with a warning.
+### Bug 13: `Matter.Bodies.fromVertices` requires `poly-decomp`
+Used for rock irregular shape. Verify `poly-decomp` is in `node_modules`. If not: `npm install poly-decomp` and `import 'poly-decomp'` at top of `physics-engine.ts`.
 
-### Bug 11: Spring Zigzag Rendering at Extreme Compression (LOW RISK)
-**Where:** Spring compressed to near-zero length
-**Root cause:** Zigzag renderer divides length by number of peaks — at zero length, division by zero.
-**Mitigation:** `const drawLength = Math.max(restLength * 0.1, actualLength)` — never draw a spring shorter than 10% of rest length.
+### Bug 14: Flywheel Inertia Propagation Creates Secondary Drive
+After motor off, flywheel continues spinning and drives meshed gears. This secondary drive is not in `drivenVels` map → gear rotations not accumulated in `rotations` dict → job step checks that read `rotations` see zero. Fix: add flywheel-driven gears to `rotations` accumulation loop.
 
-### Bug 12: Water Zone + Fast Body = No Buoyancy (MEDIUM RISK)
-**Where:** Ball dropped from height into water zone
-**Root cause:** If the ball passes completely through the water zone in one tick (tunneling + zone is thin), no buoyancy is ever applied.
-**Mitigation:** Make water zones at least 60px tall (the canvas velocity cap of 15px/tick × 4 ticks to cross). Enforce minimum height in `WaterConfig`.
-
-### Bug 13: PartPalette Overwhelm (UX BUG)
-**Where:** Showing 45 parts to a kid
-**Root cause:** More than ~8 options in a palette and kids freeze.
-**Mitigation:** Show only parts relevant to the current project step (guided mode). In free-build mode, paginate or categorize behind tabs. The `allowedPartKinds` per step already exists — extend it to cover new parts.
-
-### Bug 14: Inspector Panel Schema Drift (LOW RISK)
-**Where:** New part added to physics engine but not to InspectorPanel
-**Root cause:** InspectorPanel has hard-coded sections for motor, gear, conveyor, hopper. New parts get no inspector UI.
-**Mitigation:** Build schema-driven inspector that reads from `PART_REGISTRY[kind].defaultConfig` to generate fields automatically. Fall back to raw JSON display for unknown fields (useful during development).
+### Bug 15: Water Zone + Conveyor Conflict (see Scenario 9)
+`tickWaterZones` must receive `supportedCargoIds` from `tickConveyors` and skip any body in that set.
 
 ---
 
-## Implementation Phases
+## Implementation Phases (Revised)
 
-### Phase 1 — Foundation (do before ANY new parts)
-1. Add new `PrimitiveKind` values to `types.ts` (type-only changes, no logic)
-2. Create `part-registry.ts` with port declarations for ALL 45 parts (data only, no physics)
-3. Extend `RuntimeSnapshot` with new empty-default fields
-4. Add schema-driven fallback to `InspectorPanel.tsx`
-5. Run `tsc --noEmit` — must be zero errors
+### Phase 0 — Mandatory Prep (no new features, just enabling infrastructure)
+1. Add `MATERIAL_KINDS` constant at top of `buildMatterWorld()`
+2. Update the three filter sites to use `MATERIAL_KINDS.includes()`
+3. Add `default: return null` to `createBodyForPrimitive` switch
+4. Add new `PrimitiveKind` values to `types.ts` (TypeScript-only, no physics)
+5. Add new empty fields to `RuntimeSnapshot` with defaults
+6. Verify all 3 starter projects still work
+7. **`npx tsc --noEmit` must be zero errors before proceeding**
 
-### Phase 2 — Tier 1 Parts (unblock most gameplay)
-6. `ramp`, `wall`, `platform` — all are just static bodies, trivial to add
-7. `ball` — dynamic circle, same as cargo-block
-8. `wheel` + `axle` — these unlock vehicle motion
-9. Run all 3 existing starter projects — verify NOTHING broke
+### Phase 1 — Static surfaces (ramp, wall, platform)
+These are literally just static rectangle bodies. Zero risk.
+8. Add body creation cases for `ramp`, `wall`, `platform`
+9. Add draw functions in MachineCanvas
+10. Verify ball/cargo rolls on ramp naturally (no tick code needed)
 
-### Phase 3 — Tier 2 Machine Parts
-10. `winch` + `rope` + `hook` — these already exist in types, complete the physics
-11. `piston` — linear actuator
-12. `crane-arm` + `hydraulic-arm` — arm pivot bodies
-13. `bucket` + `counterweight` — bucket dump logic
-14. `pulley` — similar to gear, add to BFS
-15. Run all 3 existing starter projects again — verify NOTHING broke
+### Phase 2 — New materials (ball, rock)
+11. Add body creation cases for `ball`, `rock`
+12. Verify MATERIAL_KINDS filter means they work on conveyor + into hopper
+13. Verify they respawn when lost
 
-### Phase 4 — Tier 3 Transmission
-16. `rack`, `cam`, `cam-follower` — motion converters
-17. `flywheel`, `gearbox`, `bevel-gear` — transmission variants
-18. `chassis`, `drive-wheel` — vehicle body
+### Phase 3 — Power transmission (pulley, flywheel, gearbox)
+14. Extend `rotatingPrims` filter and gear-pinning loop
+15. Add flywheel inertia propagation
+16. Add gearbox special-case to gearMeshMap construction
 
-### Phase 5 — Materials
-19. `rock` — trivial (heavy cargo-block variant)
-20. `sand` — implement particle system with hard cap
-21. `water` — implement force zone
+### Phase 4 — Linear motion (piston, rack, spring)
+17. Add piston body creation, motorPistonMap, tickPistons
+18. Add rack body creation, gearRackMap, tickRacks
+19. Add spring body creation + constraint
 
-### Phase 6 — Structural
-22. `beam` + `node` (complete existing stubs)
-23. `hinge`, `chute`, `funnel`, `silo-bin`, `tunnel`
+### Phase 5 — Lifting and transport (winch, crane-arm, bucket)
+20. Complete winch tick (motor-driven)
+21. Add crane-arm body + constraint
+22. Add bucket body + tickBuckets
 
-### Phase 7 — New Projects
-24. Only after all parts pass 3+ sessions of play testing
-25. Add new `SiteJobDefinition` entries to `seed-data.ts`
-26. Bump `CONTENT_EPOCH` to `relaunch-3-projects-v3`
+### Phase 6 — Materials (sand, water)
+23. Sand particles (anonymous bodies, sandParticlePositions in frame)
+24. Water zones (force-only, use tickWaterZones)
+
+### Phase 7 — Structural (hinge, chute, silo-bin, tunnel)
+25. Each is a static body variant — straightforward
+
+### Phase 8 — New Projects
+26. Only after phases 0-7 are stable through real play testing
+27. Design new `SiteJobDefinition` entries
+28. Bump content epoch to `relaunch-3-projects-v3`
 
 ---
 
-## "Do Not Break" Checklist
+## "Do Not Break" Checklist (Run After Every Phase)
 
-Run these after every implementation phase:
-
-- [ ] Motor → Gear proximity drive still works (BFS, counter-rotate)
-- [ ] Gear → Gear meshing still works (ratio propagation)
-- [ ] Conveyor anti-gravity force still keeps cargo on belt
-- [ ] Hopper `collectedCargoIds` is still monotonically increasing
-- [ ] `dragBufferRef` pattern still prevents per-frame world rebuilds
-- [ ] All 3 starter projects complete normally (step checks fire, celebration toast appears)
-- [ ] Delete/Backspace still removes selected part
-- [ ] Motor toggle still works (click on canvas + InspectorPanel button)
+- [ ] Motor → Gear proximity drive works (BFS, counter-rotate)
+- [ ] Gear → Gear meshing works (ratio propagation)
+- [ ] Conveyor support bodies keep cargo on belt
+- [ ] `collectedCargoIds` is monotonically increasing
+- [ ] `dragBufferRef` pattern prevents per-frame world rebuilds
+- [ ] All 3 starter projects complete normally with step celebration
+- [ ] Delete/Backspace removes selected part
+- [ ] Motor toggle works (click on canvas + InspectorPanel button)
+- [ ] Belt animation draws chevrons
 - [ ] `npx tsc --noEmit` produces zero errors
 - [ ] `npm run build` produces no errors (chunk size warning OK)
 
 ---
 
-## Testing Checklist for New Parts
-
-For each new part, verify:
-- [ ] Part appears in PartPalette under correct category
-- [ ] Part can be placed on canvas
-- [ ] Part appears in InspectorPanel with editable properties
-- [ ] Part can be deleted (Delete/Backspace)
-- [ ] Part can be dragged (one world rebuild on release)
-- [ ] Part's physics interaction works with at least one other part
-- [ ] Part deletion doesn't crash the physics engine (missing body guard)
-- [ ] Adding the part doesn't break any of the 3 existing projects
-
----
-
 ## Key Files Reference
 
-| File | Purpose | Lines |
-|------|---------|-------|
-| `src/lib/types.ts` | All TypeScript types | ~450 |
-| `src/lib/physics-engine.ts` | Matter.js physics | ~723 |
-| `src/lib/simulation.ts` | RuntimeSnapshot, scripted path | ~600 |
-| `src/lib/jobs.ts` | Step evaluation | ~374 |
-| `src/lib/seed-data.ts` | DB seed / starter jobs | ~400 |
-| `src/pages/BuildPage.tsx` | Main builder UI | ~1584 |
-| `src/components/MachineCanvas.tsx` | p5.js rendering + interaction | ~1316 |
-| `src/components/InspectorPanel.tsx` | Part property editor | ~200 |
-| `src/components/PartPalette.tsx` | Part picker | ~150 |
-| `src/lib/part-registry.ts` | NEW — port declarations | 0 (create) |
+| File | Lines | Purpose |
+|------|-------|---------|
+| `src/lib/types.ts` | ~450 | All TypeScript types — PrimitiveKind, configs, RuntimeSnapshot |
+| `src/lib/physics-engine.ts` | ~861 | Matter.js engine — ALL new physics goes here |
+| `src/lib/simulation.ts` | ~600 | RuntimeSnapshot bridge, scripted legacy path |
+| `src/lib/jobs.ts` | ~374 | Step evaluation — success checks read runtime |
+| `src/lib/seed-data.ts` | ~400 | DB seed + starter jobs |
+| `src/pages/BuildPage.tsx` | ~1584 | Main builder UI, guided placement |
+| `src/components/MachineCanvas.tsx` | ~1316 | p5.js rendering + all interaction |
+| `src/components/InspectorPanel.tsx` | ~200 | Part property editor |
+| `src/components/PartPalette.tsx` | ~150 | Part picker |
 
 ---
 
-*Plan written March 2026. Begin implementation only after 3 starter projects have been validated through multiple real play sessions.*
+*Plan v2 — reviewed against actual source code. Key corrections from v1: conveyor support body is physical (not force-only); MATERIAL_KINDS filter fix is mandatory; piston stiffness is 0.9 not 1.0; rope stiffness is 0.05 not 0.8; sand uses anonymous bodies not named primitives; port system deferred in favor of specific maps.*
