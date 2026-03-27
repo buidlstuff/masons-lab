@@ -188,6 +188,14 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
       return { id: `pile-${nanoid(6)}`, kind, label: 'Material Pile', config: { x, y, quantity: 20 } };
     case 'water':
       return { id: `water-${nanoid(6)}`, kind, label: 'Water', config: { x, y, width: 120, height: 80, density: 0.8 } };
+    case 'hinge':
+      return { id: `hinge-${nanoid(6)}`, kind, label: 'Hinge', config: { x, y } };
+    case 'chute':
+      return { id: `chute-${nanoid(6)}`, kind, label: 'Chute', config: { x, y, length: 100, angle: 30 } };
+    case 'silo-bin':
+      return { id: `silo-${nanoid(6)}`, kind, label: 'Silo Bin', config: { x, y, width: 80, height: 100, gateOpen: false } };
+    case 'tunnel':
+      return { id: `tunnel-${nanoid(6)}`, kind, label: 'Tunnel', config: { x, y, width: 100, angle: 0 } };
     case 'ramp':
       return { id: `ramp-${nanoid(6)}`, kind, label: 'Ramp', config: { x, y, width: 120, angle: 20 } };
     case 'platform':

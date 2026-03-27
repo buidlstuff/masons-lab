@@ -7,8 +7,9 @@ interface InspectorPanelProps {
   onUpdateValue: (primitiveId: string, key: string, value: number | string | boolean) => void;
 }
 
-const SAFE_NUMBER_FIELDS = ['x', 'y', 'rpm', 'teeth', 'speed', 'ropeLength', 'capacity', 'releaseRate', 'fill', 'radius', 'traction', 'mass', 'inputTeeth', 'outputTeeth', 'width', 'height', 'length', 'depth', 'stroke', 'restLength', 'stiffness', 'quantity', 'density'];
+const SAFE_NUMBER_FIELDS = ['x', 'y', 'rpm', 'teeth', 'speed', 'ropeLength', 'capacity', 'releaseRate', 'fill', 'radius', 'traction', 'mass', 'inputTeeth', 'outputTeeth', 'width', 'height', 'length', 'depth', 'stroke', 'restLength', 'stiffness', 'quantity', 'density', 'angle'];
 const SAFE_TEXT_FIELDS = ['trackId', 'orientation'];
+const SAFE_BOOLEAN_FIELDS = ['gateOpen'];
 const POSITION_ONLY_KINDS: PrimitiveKind[] = ['ball', 'rock'];
 const CUSTOM_NUMBER_FIELDS: Partial<Record<PrimitiveKind, Array<{
   key: string;
@@ -70,6 +71,12 @@ export function InspectorPanel({ primitive, manifest, onDelete, onUpdateValue }:
     ? Object.entries(primitive.config)
       .filter(([, value]) => typeof value === 'string')
       .filter(([key]) => SAFE_TEXT_FIELDS.includes(key) && !hiddenKeys.has(key))
+    : [];
+
+  const genericBooleanFields = primitive
+    ? Object.entries(primitive.config)
+      .filter(([, value]) => typeof value === 'boolean')
+      .filter(([key]) => SAFE_BOOLEAN_FIELDS.includes(key) && !hiddenKeys.has(key))
     : [];
 
   return (
@@ -138,6 +145,18 @@ export function InspectorPanel({ primitive, manifest, onDelete, onUpdateValue }:
                   type="text"
                   value={value as string}
                   onChange={(event) => onUpdateValue(primitive.id, key, event.target.value)}
+                />
+              </label>
+            ))}
+
+          {genericBooleanFields
+            .map(([key, value]) => (
+              <label key={key} className="field checkbox-field">
+                <span>{key}</span>
+                <input
+                  type="checkbox"
+                  checked={value as boolean}
+                  onChange={(event) => onUpdateValue(primitive.id, key, event.target.checked)}
                 />
               </label>
             ))}

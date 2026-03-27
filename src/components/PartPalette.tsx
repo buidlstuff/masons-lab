@@ -464,6 +464,14 @@ function taglineForPart(kind: PrimitiveKind) {
       return 'Changes ratio across the box';
     case 'water':
       return 'Applies drag and buoyancy';
+    case 'hinge':
+      return 'Anchors a fixed pivot';
+    case 'chute':
+      return 'Guides loose material downhill';
+    case 'silo-bin':
+      return 'Stores material behind a gate';
+    case 'tunnel':
+      return 'Makes a covered passage';
     case 'wheel':
       return 'Shows spinning clearly';
     case 'ramp':
@@ -555,6 +563,14 @@ function iconForPart(kind: PrimitiveKind): string {
       return '^';
     case 'water':
       return '~';
+    case 'hinge':
+      return 'H';
+    case 'chute':
+      return '/';
+    case 'silo-bin':
+      return 'S';
+    case 'tunnel':
+      return 'T';
     case 'ball':
       return '0';
     case 'rock':

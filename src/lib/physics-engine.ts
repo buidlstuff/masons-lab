@@ -121,6 +121,7 @@ export function buildMatterWorld(
   const sandParticleBodies: Matter.Body[] = [];
   let totalParticleCount = 0;
   const MAX_PARTICLES = 30;
+  const siloFloorMap = new Map<string, Matter.Body>();
 
   const conveyorSupports: Array<{
     conveyorId: string;
@@ -261,6 +262,42 @@ export function buildMatterWorld(
       walls: [leftWall, rightWall, binFloor],
     });
     Matter.World.add(engine.world, [leftWall, rightWall, binFloor]);
+  }
+
+  for (const prim of manifest.primitives) {
+    if (prim.kind === 'silo-bin') {
+      const cfg = prim.config as { x: number; y: number; width?: number; height?: number; gateOpen?: boolean };
+      const width = cfg.width ?? 80;
+      const height = cfg.height ?? 100;
+      const rightWall = Matter.Bodies.rectangle(cfg.x + width / 2, cfg.y, 10, height, {
+        isStatic: true,
+        label: `silo-wall-right-${prim.id}`,
+        friction: 0.8,
+      });
+      const floor = Matter.Bodies.rectangle(cfg.x, cfg.y + height / 2, width, 10, {
+        isStatic: true,
+        label: `silo-floor-${prim.id}`,
+        friction: 0.8,
+      });
+      Matter.World.add(engine.world, rightWall);
+      if (!(cfg.gateOpen ?? false)) {
+        Matter.World.add(engine.world, floor);
+      }
+      siloFloorMap.set(prim.id, floor);
+    }
+
+    if (prim.kind === 'tunnel') {
+      const cfg = prim.config as { x: number; y: number; width?: number; angle?: number };
+      const width = cfg.width ?? 100;
+      const angle = ((cfg.angle ?? 0) * Math.PI) / 180;
+      const bottomWall = Matter.Bodies.rectangle(cfg.x, cfg.y + 20, width, 10, {
+        isStatic: true,
+        label: `tunnel-floor-${prim.id}`,
+        angle,
+        friction: 0.5,
+      });
+      Matter.World.add(engine.world, bottomWall);
+    }
   }
 
   // ── Create constraints ────────────────────────────────────────────────────
@@ -541,19 +578,35 @@ export function buildMatterWorld(
     currentControls = controlValues;
 
     for (const prim of manifest.primitives) {
-      if (prim.kind !== 'winch') continue;
-      const ropeControl = manifest.controls.find(
-        (c) => c.bind?.targetId === prim.id && c.bind?.path === 'ropeLength',
-      );
-      if (!ropeControl) continue;
-      const newLength = Number(
-        controlValues[ropeControl.id] ?? (prim.config as { ropeLength: number }).ropeLength,
-      );
-      const winchBody = bodyMap.get(prim.id);
-      if (!winchBody) continue;
-      for (const c of ropeConstraints) {
-        if (c.bodyA === winchBody) {
-          c.length = newLength;
+      if (prim.kind === 'winch') {
+        const ropeControl = manifest.controls.find(
+          (c) => c.bind?.targetId === prim.id && c.bind?.path === 'ropeLength',
+        );
+        if (!ropeControl) continue;
+        const newLength = Number(
+          controlValues[ropeControl.id] ?? (prim.config as { ropeLength: number }).ropeLength,
+        );
+        const winchBody = bodyMap.get(prim.id);
+        if (!winchBody) continue;
+        for (const c of ropeConstraints) {
+          if (c.bodyA === winchBody) {
+            c.length = newLength;
+          }
+        }
+      }
+
+      if (prim.kind === 'silo-bin') {
+        const gateControl = manifest.controls.find(
+          (c) => c.bind?.targetId === prim.id && c.bind?.path === 'gateOpen',
+        );
+        const floorBody = siloFloorMap.get(prim.id);
+        if (!gateControl || !floorBody) continue;
+        const shouldOpen = Boolean(controlValues[gateControl.id] ?? (prim.config as { gateOpen?: boolean }).gateOpen);
+        const floorPresent = Matter.Composite.allBodies(engine.world).some((body) => body === floorBody);
+        if (shouldOpen && floorPresent) {
+          Matter.World.remove(engine.world, floorBody);
+        } else if (!shouldOpen && !floorPresent) {
+          Matter.World.add(engine.world, floorBody);
         }
       }
     }
@@ -1451,12 +1504,45 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
       });
     }
 
+    case 'silo-bin': {
+      const cfg = prim.config as { x: number; y: number; width?: number; height?: number };
+      const width = cfg.width ?? 80;
+      const height = cfg.height ?? 100;
+      return Matter.Bodies.rectangle(cfg.x - width / 2, cfg.y, 10, height, {
+        isStatic: true,
+        label: prim.id,
+        friction: 0.8,
+      });
+    }
+
+    case 'chute': {
+      const cfg = prim.config as { x: number; y: number; length?: number; angle?: number };
+      return Matter.Bodies.rectangle(cfg.x, cfg.y, cfg.length ?? 100, 10, {
+        isStatic: true,
+        label: prim.id,
+        angle: ((cfg.angle ?? 30) * Math.PI) / 180,
+        friction: 0.3,
+        restitution: 0.1,
+      });
+    }
+
+    case 'tunnel': {
+      const cfg = prim.config as { x: number; y: number; width?: number; angle?: number };
+      return Matter.Bodies.rectangle(cfg.x, cfg.y - 20, cfg.width ?? 100, 10, {
+        isStatic: true,
+        label: prim.id,
+        angle: ((cfg.angle ?? 0) * Math.PI) / 180,
+        friction: 0.5,
+      });
+    }
+
     case 'beam':
     case 'rope':
     case 'conveyor':
     case 'hopper':
     case 'material-pile':
     case 'water':
+    case 'hinge':
     case 'rail-segment':
     case 'rail-switch':
     case 'locomotive':

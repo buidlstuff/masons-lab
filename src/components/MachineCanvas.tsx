@@ -322,6 +322,14 @@ export function MachineCanvas({
         return 'Bucket — it collects nearby material and dumps when it tips far enough';
       case 'water':
         return 'Water — bodies inside the pool slow down and get a buoyancy lift';
+      case 'hinge':
+        return 'Hinge — a fixed pivot point for future structural connections';
+      case 'chute':
+        return 'Chute — a static sloped guide for falling material';
+      case 'silo-bin':
+        return 'Silo bin — a storage pocket that can open its floor gate';
+      case 'tunnel':
+        return 'Tunnel — a covered channel that keeps flow between two openings';
       case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
       case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
       case 'winch':    return 'Winch — place a Hook below, then Quick Connect → Winch to Hook';
@@ -693,6 +701,28 @@ function drawPlacingPreview(
       instance.line(mx - 46, my - 12, mx + 46, my - 12);
       instance.line(mx - 40, my + 4, mx + 40, my + 4);
       break;
+    case 'hinge':
+      instance.circle(mx, my, 14);
+      instance.line(mx - 12, my, mx + 12, my);
+      instance.line(mx, my - 12, mx, my + 12);
+      break;
+    case 'chute':
+      instance.push();
+      instance.translate(mx, my);
+      instance.rotate(Math.PI / 6);
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, 100, 10, 3);
+      instance.pop();
+      break;
+    case 'silo-bin':
+      instance.line(mx - 40, my - 50, mx - 40, my + 50);
+      instance.line(mx + 40, my - 50, mx + 40, my + 50);
+      instance.line(mx - 40, my + 50, mx + 40, my + 50);
+      break;
+    case 'tunnel':
+      instance.line(mx - 50, my - 20, mx + 50, my - 20);
+      instance.line(mx - 50, my + 20, mx + 50, my + 20);
+      break;
     case 'motor':
       instance.rect(mx - 28, my - 18, 56, 36, 10);
       instance.noFill();
@@ -978,6 +1008,30 @@ function getPlacementAssessment(
         tone: 'info',
         title: 'Splash zone',
         detail: 'Water works best where falling bodies can drift through the pool for a moment.',
+      };
+    case 'hinge':
+      return {
+        tone: 'info',
+        title: 'Pivot anchor',
+        detail: 'Hinges are most useful when you want a visible pivot point to build around later.',
+      };
+    case 'chute':
+      return {
+        tone: 'info',
+        title: 'Guiding surface',
+        detail: 'Chutes work best below a drop so loose material can slide into the next stage.',
+      };
+    case 'silo-bin':
+      return {
+        tone: 'info',
+        title: 'Storage pocket',
+        detail: 'Silo bins feel best under a chute, hopper, or falling material source.',
+      };
+    case 'tunnel':
+      return {
+        tone: 'info',
+        title: 'Covered route',
+        detail: 'Tunnels help when you want material to keep moving between two openings.',
       };
     case 'conveyor':
       return hasNearbyMotor(manifest, x, y)
@@ -1632,6 +1686,64 @@ function drawPrimitive(
       instance.line(x - width / 2 + 16, y + height * 0.05, x + width / 2 - 16, y + height * 0.05);
       break;
     }
+    case 'hinge': {
+      const { x, y } = primitive.config as { x: number; y: number };
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.strokeWeight(2);
+      instance.noFill();
+      instance.circle(x, y, 14);
+      instance.line(x - 8, y, x + 8, y);
+      instance.line(x, y - 8, x, y + 8);
+      break;
+    }
+    case 'chute': {
+      const cfg = primitive.config as { x: number; y: number; length?: number; angle?: number };
+      instance.push();
+      instance.translate(cfg.x, cfg.y);
+      instance.rotate(((cfg.angle ?? 30) * Math.PI) / 180);
+      instance.fill(selected ? '#fbbf24' : '#64748b');
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, cfg.length ?? 100, 10, 3);
+      instance.pop();
+      break;
+    }
+    case 'silo-bin': {
+      const cfg = primitive.config as { x: number; y: number; width?: number; height?: number; gateOpen?: boolean };
+      const width = cfg.width ?? 80;
+      const height = cfg.height ?? 100;
+      const gateOpen = cfg.gateOpen ?? false;
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.strokeWeight(2);
+      instance.noFill();
+      instance.line(cfg.x - width / 2, cfg.y - height / 2, cfg.x - width / 2, cfg.y + height / 2);
+      instance.line(cfg.x + width / 2, cfg.y - height / 2, cfg.x + width / 2, cfg.y + height / 2);
+      if (!gateOpen) {
+        instance.line(cfg.x - width / 2, cfg.y + height / 2, cfg.x + width / 2, cfg.y + height / 2);
+      }
+      if (selected) {
+        instance.noStroke();
+        instance.fill('#f8fafc');
+        instance.textSize(10);
+        instance.textAlign(instance.CENTER, instance.BOTTOM);
+        instance.text(gateOpen ? 'gate open' : 'gate closed', cfg.x, cfg.y - height / 2 - 6);
+      }
+      break;
+    }
+    case 'tunnel': {
+      const cfg = primitive.config as { x: number; y: number; width?: number; angle?: number };
+      const width = cfg.width ?? 100;
+      const angle = ((cfg.angle ?? 0) * Math.PI) / 180;
+      instance.push();
+      instance.translate(cfg.x, cfg.y);
+      instance.rotate(angle);
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.strokeWeight(2);
+      instance.line(-width / 2, -20, width / 2, -20);
+      instance.line(-width / 2, 20, width / 2, 20);
+      instance.pop();
+      break;
+    }
     // ---- NEW PARTS (Phase 1) ----
     case 'ramp':
     case 'platform': {
@@ -1733,6 +1845,32 @@ function hitTest(
         const width = cfg.width ?? 120;
         const height = cfg.height ?? 80;
         return Math.abs(cfg.x - x) <= width / 2 && Math.abs(cfg.y - y) <= height / 2;
+      }
+      case 'hinge': {
+        const cfg = primitive.config as { x: number; y: number };
+        return Math.hypot(cfg.x - x, cfg.y - y) < 16;
+      }
+      case 'silo-bin': {
+        const cfg = primitive.config as { x: number; y: number; width?: number; height?: number };
+        return Math.abs(cfg.x - x) <= (cfg.width ?? 80) / 2 && Math.abs(cfg.y - y) <= (cfg.height ?? 100) / 2;
+      }
+      case 'chute': {
+        const cfg = primitive.config as { x: number; y: number; length?: number; angle?: number };
+        const angle = -(((cfg.angle ?? 30) * Math.PI) / 180);
+        const dx = x - cfg.x;
+        const dy = y - cfg.y;
+        const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
+        const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
+        return Math.abs(localX) <= (cfg.length ?? 100) / 2 && Math.abs(localY) <= 14;
+      }
+      case 'tunnel': {
+        const cfg = primitive.config as { x: number; y: number; width?: number; angle?: number };
+        const angle = -(((cfg.angle ?? 0) * Math.PI) / 180);
+        const dx = x - cfg.x;
+        const dy = y - cfg.y;
+        const localX = dx * Math.cos(angle) - dy * Math.sin(angle);
+        const localY = dx * Math.sin(angle) + dy * Math.cos(angle);
+        return Math.abs(localX) <= (cfg.width ?? 100) / 2 && Math.abs(localY) <= 28;
       }
       case 'locomotive': {
         const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);

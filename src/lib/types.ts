@@ -264,6 +264,33 @@ export interface WaterConfig {
   density: number;
 }
 
+export interface HingeConfig {
+  x: number;
+  y: number;
+}
+
+export interface ChuteConfig {
+  x: number;
+  y: number;
+  length: number;
+  angle: number;
+}
+
+export interface SiloBinConfig {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  gateOpen: boolean;
+}
+
+export interface TunnelConfig {
+  x: number;
+  y: number;
+  width: number;
+  angle: number;
+}
+
 export interface RampConfig {
   x: number;
   y: number;
@@ -381,6 +408,10 @@ export type PrimitiveConfig =
   | CargoBlockConfig
   | MaterialPileConfig
   | WaterConfig
+  | HingeConfig
+  | ChuteConfig
+  | SiloBinConfig
+  | TunnelConfig
   | RampConfig
   | WallConfig
   | PlatformConfig
@@ -698,11 +729,15 @@ export const SLICE_PARTS: PrimitiveKind[] = [
   'water',
   'ball',
   'rock',
+  'hinge',
+  'chute',
+  'silo-bin',
+  'tunnel',
 ];
 
 export const PART_CATEGORIES: Array<{ label: string; kinds: PrimitiveKind[] }> = [
-  { label: 'Structure', kinds: ['node', 'wheel', 'axle', 'ramp', 'platform', 'wall'] },
+  { label: 'Structure', kinds: ['node', 'wheel', 'axle', 'ramp', 'platform', 'wall', 'hinge', 'chute', 'tunnel'] },
   { label: 'Power', kinds: ['motor', 'gear', 'pulley', 'chain-sprocket', 'flywheel', 'gearbox', 'piston', 'rack', 'spring-linear', 'crane-arm', 'counterweight', 'bucket', 'winch', 'hook'] },
   { label: 'Rail', kinds: ['rail-segment', 'rail-switch', 'locomotive', 'wagon'] },
-  { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile', 'water', 'ball', 'rock'] },
+  { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile', 'water', 'ball', 'rock', 'silo-bin'] },
 ];
