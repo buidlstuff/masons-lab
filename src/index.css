@@ -971,6 +971,129 @@ button:disabled {
   margin-top: 4px;
 }
 
+/* ── Challenge UI ───────────────────────────────────────────── */
+.challenge-toast {
+  position: absolute;
+  top: 102px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 35;
+  min-width: 240px;
+  max-width: 340px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  background: rgba(9, 16, 24, 0.95);
+  box-shadow: 0 18px 40px rgba(9, 16, 24, 0.28);
+  animation: slide-up 0.28s ease, fade-in 0.28s ease;
+  pointer-events: none;
+}
+
+.challenge-toast strong {
+  display: block;
+  margin-top: 3px;
+}
+
+.challenge-toast p {
+  margin: 4px 0 0;
+  font-size: 0.84rem;
+}
+
+.challenge-toast-tier,
+.challenge-tier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.challenge-toast-tier {
+  margin-top: 10px;
+}
+
+.challenge-tier-bronze {
+  background: rgba(217, 119, 6, 0.14);
+  color: #f59e0b;
+}
+
+.challenge-tier-silver {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+}
+
+.challenge-tier-gold {
+  background: rgba(250, 204, 21, 0.14);
+  color: #facc15;
+}
+
+.challenge-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.challenge-panel-summary h3 {
+  margin: 0;
+}
+
+.challenge-panel-summary p {
+  margin: 6px 0 0;
+}
+
+.challenge-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.challenge-group h4 {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.challenge-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.challenge-card {
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.challenge-card.active {
+  border-color: rgba(71, 197, 165, 0.35);
+  box-shadow: 0 0 0 1px rgba(71, 197, 165, 0.14);
+}
+
+.challenge-card.complete {
+  background: rgba(71, 197, 165, 0.08);
+  border-color: rgba(71, 197, 165, 0.24);
+}
+
+.challenge-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.challenge-card p {
+  margin: 0;
+  font-size: 0.84rem;
+}
+
 /* ── XP bar on home page ────────────────────────────────────── */
 .xp-bar-block {
   margin-top: 14px;

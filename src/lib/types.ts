@@ -693,6 +693,12 @@ export interface JobProgressRecord {
   lastPlayedAt?: string;
 }
 
+export interface ChallengeProgressRecord {
+  challengeId: string;
+  completed: boolean;
+  completedAt?: number;
+}
+
 export interface DraftPlayState {
   jobId?: string;
   latchedStepIds: string[];

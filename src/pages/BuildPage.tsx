@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ControlPanel } from '../components/ControlPanel';
+import { ChallengeToast } from '../components/ChallengeToast';
 import { HudOverlay } from '../components/HudOverlay';
 import { StarterOverlay } from '../components/StarterOverlay';
 import { InspectorPanel } from '../components/InspectorPanel';
@@ -12,6 +13,13 @@ import { createBlueprintFromExperiment, mountBlueprintToManifest } from '../lib/
 import { useAppBoot } from '../lib/app-boot';
 import { db } from '../lib/db';
 import { addPrimitive, connectPrimitives, deletePrimitive, movePrimitive, updatePrimitive } from '../lib/editor';
+import {
+  ACTIVE_CHALLENGE_LIMIT,
+  CHALLENGES,
+  createChallengeScratchState,
+  evaluateChallengeCompletion,
+  type ChallengeDefinition,
+} from '../lib/challenges';
 import {
   countActiveCargo,
   countActiveGearPairs,
@@ -39,6 +47,7 @@ import { playUiTone } from '../lib/sfx';
 import { awardJobXp, TIER_NAMES } from '../lib/xp';
 import type {
   BuildTelemetry,
+  ChallengeProgressRecord,
   DraftPlayState,
   DraftRecord,
   EditExperimentResult,
@@ -53,6 +62,11 @@ import type {
 const LazyAssistantPanel = lazy(async () => {
   const module = await import('../components/AssistantPanel');
   return { default: module.AssistantPanel };
+});
+
+const LazyChallengePanel = lazy(async () => {
+  const module = await import('../components/ChallengePanel');
+  return { default: module.ChallengePanel };
 });
 
 async function loadAssistantApi() {
@@ -127,6 +141,31 @@ function findNearestPrimitive(
     })[0];
 }
 
+function createInitialRuntimeSnapshot(): RuntimeSnapshot {
+  return {
+    time: 0,
+    rotations: {},
+    cargoProgress: {},
+    hookY: 0,
+    trainProgress: 0,
+    trainDelivered: false,
+    hopperFill: 0,
+    throughput: 0,
+    telemetry: {},
+    cargoStates: {},
+    beltPowered: false,
+    lostCargoCount: 0,
+    stableCargoSpawns: {},
+    wagonLoads: {},
+    pistonExtensions: {},
+    bucketContents: {},
+    bucketStates: {},
+    springCompressions: {},
+    sandParticlePositions: [],
+    bodyPositions: {},
+  };
+}
+
 export function BuildPage() {
   const { draftId } = useParams();
   const [searchParams] = useSearchParams();
@@ -162,8 +201,10 @@ export function BuildPage() {
   const [assistantPromptSeed, setAssistantPromptSeed] = useState<string | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [adultToolsOpen, setAdultToolsOpen] = useState(false);
+  const [challengePanelOpen, setChallengePanelOpen] = useState(false);
   const [workshopShelfOpen, setWorkshopShelfOpen] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
+  const [challengeToast, setChallengeToast] = useState<ChallengeDefinition | null>(null);
   const flashCountRef = useRef(0);
   const undoStackRef = useRef<Array<{ manifest: ExperimentManifest; playState: DraftPlayState | null }>>([]);
   const jobCompletedRef = useRef(false);
@@ -171,6 +212,10 @@ export function BuildPage() {
   const statusTimeoutRef = useRef<number | undefined>(undefined);
   const currentManifestRef = useRef<ExperimentManifest | null>(null);
   const currentPlayStateRef = useRef<DraftPlayState | null>(null);
+  const runtimeSnapshotRef = useRef<RuntimeSnapshot>(createInitialRuntimeSnapshot());
+  const challengeScratchRef = useRef(createChallengeScratchState());
+  const completedChallengeIdsRef = useRef(new Set<string>());
+  const challengeLastEvalAtRef = useRef<number>(Date.now());
   const builderMeasureRef = useRef(false);
   const shouldLoadBlueprints = assistantOpen || workshopShelfOpen;
   const blueprints = useLiveQuery<SavedBlueprintRecord[]>(
@@ -179,6 +224,10 @@ export function BuildPage() {
       : []),
     [shouldLoadBlueprints],
   );
+  const challengeProgress = useLiveQuery<ChallengeProgressRecord[]>(
+    () => db.challengeProgress.toArray(),
+    [],
+  ) ?? [];
 
   const showStatus = useCallback((message: string, tone: NoticeTone = 'info') => {
     window.clearTimeout(statusTimeoutRef.current);
@@ -301,6 +350,72 @@ export function BuildPage() {
   );
   const runtimeSnapshot = runtime.snapshot;
   const simulationStatus = runtime.status;
+  const completedChallengeIds = useMemo(
+    () => challengeProgress
+      .filter((record) => record.completed)
+      .map((record) => record.challengeId),
+    [challengeProgress],
+  );
+  const activeChallenges = useMemo(
+    () => CHALLENGES
+      .filter((challenge) => !completedChallengeIds.includes(challenge.id))
+      .slice(0, ACTIVE_CHALLENGE_LIMIT),
+    [completedChallengeIds],
+  );
+
+  useEffect(() => {
+    runtimeSnapshotRef.current = runtimeSnapshot;
+  }, [runtimeSnapshot]);
+
+  useEffect(() => {
+    completedChallengeIdsRef.current = new Set(completedChallengeIds);
+  }, [completedChallengeIds]);
+
+  useEffect(() => {
+    challengeScratchRef.current = createChallengeScratchState();
+    challengeLastEvalAtRef.current = Date.now();
+  }, [manifest]);
+
+  useEffect(() => {
+    if (!manifest) return undefined;
+
+    const interval = window.setInterval(() => {
+      const currentManifest = currentManifestRef.current;
+      const currentRuntime = runtimeSnapshotRef.current;
+      if (!currentManifest || simulationStatus !== 'ready') return;
+
+      const now = Date.now();
+      const deltaSeconds = Math.min(2, Math.max(0.25, (now - challengeLastEvalAtRef.current) / 1000));
+      challengeLastEvalAtRef.current = now;
+
+      const completedIds = new Set(completedChallengeIdsRef.current);
+      const pendingChallenges = CHALLENGES
+        .filter((challenge) => !completedIds.has(challenge.id))
+        .slice(0, ACTIVE_CHALLENGE_LIMIT);
+      const newlyCompleted = pendingChallenges.filter((challenge) =>
+        evaluateChallengeCompletion(
+          challenge,
+          currentManifest,
+          currentRuntime,
+          challengeScratchRef.current,
+          deltaSeconds,
+        ),
+      );
+
+      if (newlyCompleted.length === 0) return;
+
+      newlyCompleted.forEach((challenge) => completedIds.add(challenge.id));
+      completedChallengeIdsRef.current = completedIds;
+      setChallengeToast((current) => current ?? newlyCompleted[0]);
+      void Promise.all(newlyCompleted.map((challenge) => db.challengeProgress.put({
+        challengeId: challenge.id,
+        completed: true,
+        completedAt: Date.now(),
+      }))).catch(() => {});
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [manifest, simulationStatus]);
 
   const selectedPrimitive = useMemo<PrimitiveInstance | undefined>(
     () => manifest?.primitives.find((primitive) => primitive.id === selectedPrimitiveId),
@@ -1131,6 +1246,7 @@ export function BuildPage() {
           </span>
           <span className="builder-chip">Flow: {Math.round(runtimeSnapshot.throughput ?? 0)}/s</span>
           <span className="builder-chip">Canvas: {manifest.primitives.length} part{manifest.primitives.length === 1 ? '' : 's'}</span>
+          <span className="builder-chip">Challenges: {completedChallengeIds.length}/{CHALLENGES.length}</span>
         </div>
 
         <div className="builder-step-strip task-ribbon-steps">
@@ -1354,6 +1470,7 @@ export function BuildPage() {
           {flashToast && (
             <div className="connection-toast">The machine is responding.</div>
           )}
+          <ChallengeToast challenge={challengeToast} onDismiss={() => setChallengeToast(null)} />
           {stepCelebrating && !jobComplete && (
             <div className="step-complete-toast">
               <span className="step-complete-star">★</span>
@@ -1434,6 +1551,29 @@ export function BuildPage() {
               }
             }}
           />
+
+          <details
+            className="panel small-panel disclosure-panel"
+            open={challengePanelOpen}
+            onToggle={(event) => setChallengePanelOpen(event.currentTarget.open)}
+          >
+            <summary className="disclosure-summary">
+              <div>
+                <p className="eyebrow">Challenges</p>
+                <h3>Sandbox medals</h3>
+              </div>
+              <span className="muted">{completedChallengeIds.length}/{CHALLENGES.length}</span>
+            </summary>
+            <div className="disclosure-content">
+              <Suspense fallback={<p className="muted">Loading challenge panel…</p>}>
+                <LazyChallengePanel
+                  challenges={CHALLENGES}
+                  completedChallengeIds={completedChallengeIds}
+                  activeChallengeIds={activeChallenges.map((challenge) => challenge.id)}
+                />
+              </Suspense>
+            </div>
+          </details>
 
           {(projectUnlocked || !job) ? (
             <details
