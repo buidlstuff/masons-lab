@@ -320,6 +320,8 @@ export function MachineCanvas({
         return 'Counterweight — a heavy block that can balance or collide with other parts';
       case 'bucket':
         return 'Bucket — it collects nearby material and dumps when it tips far enough';
+      case 'water':
+        return 'Water — bodies inside the pool slow down and get a buoyancy lift';
       case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
       case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
       case 'winch':    return 'Winch — place a Hook below, then Quick Connect → Winch to Hook';
@@ -388,6 +390,16 @@ function drawScene(
     const selected = primitive.id === selectedPrimitiveId;
     const hovered = primitive.id === hoveredPrimitiveId && primitive.id !== draggingPrimitiveId;
     drawPrimitive(instance, primitive, runtime, selected, hovered, manifest.primitives, flashTimes);
+  }
+
+  if (runtime.sandParticlePositions.length > 0) {
+    instance.push();
+    instance.noStroke();
+    instance.fill(194, 178, 128);
+    for (const pos of runtime.sandParticlePositions) {
+      instance.circle(pos.x, pos.y, 8);
+    }
+    instance.pop();
   }
 
   if (
@@ -676,6 +688,11 @@ function drawPlacingPreview(
       instance.line(mx - 20, my + 8, mx - 20, my - 14);
       instance.line(mx + 20, my + 8, mx + 20, my - 14);
       break;
+    case 'water':
+      instance.rect(mx - 60, my - 40, 120, 80, 12);
+      instance.line(mx - 46, my - 12, mx + 46, my - 12);
+      instance.line(mx - 40, my + 4, mx + 40, my + 4);
+      break;
     case 'motor':
       instance.rect(mx - 28, my - 18, 56, 36, 10);
       instance.noFill();
@@ -955,6 +972,12 @@ function getPlacementAssessment(
         tone: 'info',
         title: 'Ready to scoop',
         detail: 'Buckets react best when there is falling material nearby to collect.',
+      };
+    case 'water':
+      return {
+        tone: 'info',
+        title: 'Splash zone',
+        detail: 'Water works best where falling bodies can drift through the pool for a moment.',
       };
     case 'conveyor':
       return hasNearbyMotor(manifest, x, y)
@@ -1594,6 +1617,21 @@ function drawPrimitive(
       }
       break;
     }
+    case 'water': {
+      const { x, y, width = 120, height = 80 } = primitive.config as { x: number; y: number; width?: number; height?: number };
+      instance.rectMode(instance.CENTER);
+      instance.noStroke();
+      instance.fill(selected ? 'rgba(56, 189, 248, 0.34)' : 'rgba(59, 130, 246, 0.22)');
+      instance.rect(x, y, width, height, 12);
+      instance.stroke(selected ? '#fbbf24' : '#38bdf8');
+      instance.strokeWeight(1.5);
+      instance.noFill();
+      instance.rect(x, y, width, height, 12);
+      instance.stroke(selected ? '#fbbf24' : '#7dd3fc');
+      instance.line(x - width / 2 + 10, y - height * 0.2, x + width / 2 - 10, y - height * 0.2);
+      instance.line(x - width / 2 + 16, y + height * 0.05, x + width / 2 - 16, y + height * 0.05);
+      break;
+    }
     // ---- NEW PARTS (Phase 1) ----
     case 'ramp':
     case 'platform': {
@@ -1689,6 +1727,12 @@ function hitTest(
       case 'conveyor': {
         const path = (primitive.config as { path: Array<{ x: number; y: number }> }).path;
         return distanceToPolyline(path, x, y) < 26;
+      }
+      case 'water': {
+        const cfg = primitive.config as { x: number; y: number; width?: number; height?: number };
+        const width = cfg.width ?? 120;
+        const height = cfg.height ?? 80;
+        return Math.abs(cfg.x - x) <= width / 2 && Math.abs(cfg.y - y) <= height / 2;
       }
       case 'locomotive': {
         const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);

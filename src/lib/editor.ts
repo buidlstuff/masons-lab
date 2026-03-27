@@ -186,6 +186,8 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
       return { id: `cargo-${nanoid(6)}`, kind, label: 'Cargo Block', config: { x, y, weight: 5 } };
     case 'material-pile':
       return { id: `pile-${nanoid(6)}`, kind, label: 'Material Pile', config: { x, y, quantity: 20 } };
+    case 'water':
+      return { id: `water-${nanoid(6)}`, kind, label: 'Water', config: { x, y, width: 120, height: 80, density: 0.8 } };
     case 'ramp':
       return { id: `ramp-${nanoid(6)}`, kind, label: 'Ramp', config: { x, y, width: 120, angle: 20 } };
     case 'platform':

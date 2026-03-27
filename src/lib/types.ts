@@ -256,6 +256,14 @@ export interface MaterialPileConfig {
   quantity: number;
 }
 
+export interface WaterConfig {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  density: number;
+}
+
 export interface RampConfig {
   x: number;
   y: number;
@@ -372,6 +380,7 @@ export type PrimitiveConfig =
   | HopperConfig
   | CargoBlockConfig
   | MaterialPileConfig
+  | WaterConfig
   | RampConfig
   | WallConfig
   | PlatformConfig
@@ -686,6 +695,7 @@ export const SLICE_PARTS: PrimitiveKind[] = [
   'hopper',
   'cargo-block',
   'material-pile',
+  'water',
   'ball',
   'rock',
 ];
@@ -694,5 +704,5 @@ export const PART_CATEGORIES: Array<{ label: string; kinds: PrimitiveKind[] }> =
   { label: 'Structure', kinds: ['node', 'wheel', 'axle', 'ramp', 'platform', 'wall'] },
   { label: 'Power', kinds: ['motor', 'gear', 'pulley', 'chain-sprocket', 'flywheel', 'gearbox', 'piston', 'rack', 'spring-linear', 'crane-arm', 'counterweight', 'bucket', 'winch', 'hook'] },
   { label: 'Rail', kinds: ['rail-segment', 'rail-switch', 'locomotive', 'wagon'] },
-  { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile', 'ball', 'rock'] },
+  { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile', 'water', 'ball', 'rock'] },
 ];

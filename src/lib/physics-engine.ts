@@ -118,6 +118,9 @@ export function buildMatterWorld(
   const springCompressionsState: Record<string, number> = {};
   const bucketContentsState: Record<string, number> = {};
   const bucketStateMap: Record<string, 'collecting' | 'dumping'> = {};
+  const sandParticleBodies: Matter.Body[] = [];
+  let totalParticleCount = 0;
+  const MAX_PARTICLES = 30;
 
   const conveyorSupports: Array<{
     conveyorId: string;
@@ -161,8 +164,35 @@ export function buildMatterWorld(
     cargoStates.set(cargo.id, 'spawned');
   }
 
+  function spawnSandParticlesForPile(prim: PrimitiveInstance) {
+    const cfg = prim.config as { x: number; y: number; quantity?: number };
+    const qty = Math.min(cfg.quantity ?? 10, Math.max(0, MAX_PARTICLES - totalParticleCount));
+    totalParticleCount += qty;
+    for (let index = 0; index < qty; index += 1) {
+      const particle = Matter.Bodies.circle(
+        cfg.x + (Math.random() - 0.5) * 20,
+        cfg.y + (Math.random() - 0.5) * 10 - index * 5,
+        4,
+        {
+          label: `sand-${prim.id}-${index}`,
+          mass: 0.1,
+          restitution: 0,
+          friction: 0.5,
+          frictionAir: 0.01,
+          collisionFilter: { category: 0x0004, mask: 0x0001 },
+        },
+      );
+      sandParticleBodies.push(particle);
+      Matter.World.add(engine.world, particle);
+    }
+  }
+
   // ── Create a body for each positioned primitive ───────────────────────────
   for (const prim of manifest.primitives) {
+    if (prim.kind === 'material-pile') {
+      spawnSandParticlesForPile(prim);
+      continue;
+    }
     const body = createBodyForPrimitive(prim);
     if (body) {
       bodyMap.set(prim.id, body);
@@ -525,6 +555,38 @@ export function buildMatterWorld(
         if (c.bodyA === winchBody) {
           c.length = newLength;
         }
+      }
+    }
+  }
+
+  function tickWaterZones(supportedCargoIds: Set<string>) {
+    const waterZones = manifest.primitives.filter((p) => p.kind === 'water');
+    if (waterZones.length === 0) return;
+
+    for (const body of Matter.Composite.allBodies(engine.world)) {
+      if (body.isStatic) continue;
+      const primForBody = manifest.primitives.find((p) => bodyMap.get(p.id) === body);
+      if (primForBody && supportedCargoIds.has(primForBody.id)) continue;
+
+      for (const zone of waterZones) {
+        const cfg = zone.config as { x: number; y: number; width?: number; height?: number; density?: number };
+        const width = cfg.width ?? 100;
+        const height = cfg.height ?? 80;
+        const left = cfg.x - width / 2;
+        const right = cfg.x + width / 2;
+        const top = cfg.y - height / 2;
+        const bottom = cfg.y + height / 2;
+        if (body.position.x < left || body.position.x > right) continue;
+        if (body.position.y < top || body.position.y > bottom) continue;
+        Matter.Body.setVelocity(body, {
+          x: body.velocity.x * 0.94,
+          y: body.velocity.y * 0.94,
+        });
+        const density = cfg.density ?? 0.8;
+        Matter.Body.applyForce(body, body.position, {
+          x: 0,
+          y: -(body.mass * engine.gravity.y * density),
+        });
       }
     }
   }
@@ -966,9 +1028,24 @@ export function buildMatterWorld(
     tickRacks();
     tickSprings();
     const conveyorFrame = tickConveyors();
+    tickWaterZones(conveyorFrame.supportedCargoIds);
     const collectedThisTick = tickHopper();
     tickBuckets();
     recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
+    for (const particle of sandParticleBodies) {
+      if (
+        particle.position.y > CANVAS_H + 50
+        || particle.position.x < -80
+        || particle.position.x > CANVAS_W + 80
+      ) {
+        const pileId = particle.label.replace(/^sand-/, '').replace(/-\d+$/, '');
+        const pilePrim = manifest.primitives.find((p) => p.id === pileId);
+        if (!pilePrim) continue;
+        const cfg = pilePrim.config as { x: number; y: number };
+        Matter.Body.setPosition(particle, { x: cfg.x + (Math.random() - 0.5) * 20, y: cfg.y });
+        Matter.Body.setVelocity(particle, { x: 0, y: 0 });
+      }
+    }
     throughput = throughput * 0.84 + (collectedThisTick > 0 ? (collectedThisTick / Math.max(_dt, 0.016)) : 0) * 0.16;
 
     // Advance loco
@@ -1074,7 +1151,7 @@ export function buildMatterWorld(
       bucketContents: { ...bucketContentsState },
       bucketStates: { ...bucketStateMap },
       springCompressions: { ...springCompressionsState },
-      sandParticlePositions: [],
+      sandParticlePositions: sandParticleBodies.map((body) => ({ x: body.position.x, y: body.position.y })),
     };
   }
 
@@ -1379,6 +1456,7 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
     case 'conveyor':
     case 'hopper':
     case 'material-pile':
+    case 'water':
     case 'rail-segment':
     case 'rail-switch':
     case 'locomotive':

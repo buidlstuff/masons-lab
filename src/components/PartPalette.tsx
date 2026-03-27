@@ -462,6 +462,8 @@ function taglineForPart(kind: PrimitiveKind) {
       return 'Stores motion and momentum';
     case 'gearbox':
       return 'Changes ratio across the box';
+    case 'water':
+      return 'Applies drag and buoyancy';
     case 'wheel':
       return 'Shows spinning clearly';
     case 'ramp':
@@ -551,6 +553,8 @@ function iconForPart(kind: PrimitiveKind): string {
       return '#';
     case 'material-pile':
       return '^';
+    case 'water':
+      return '~';
     case 'ball':
       return '0';
     case 'rock':
