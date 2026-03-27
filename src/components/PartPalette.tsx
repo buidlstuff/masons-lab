@@ -289,10 +289,14 @@ function deriveSuggestions(
       case 'motor':
         push('gear', 'Drop it inside the motor ring for instant rotation.');
         push('wheel', 'A wheel inside the ring gives quick visible motion.');
+        push('pulley', 'Pulleys give you another driven rotating part right away.');
+        push('flywheel', 'A flywheel makes stored momentum visible.');
         break;
       case 'gear':
       case 'wheel':
         push('gear', 'Touching gears mesh and make the motion legible.');
+        push('pulley', 'Pulleys mesh like gears but read as smooth wheels.');
+        push('flywheel', 'Flywheels keep the drivetrain moving longer.');
         push('motor', 'Add or move a motor nearby if this part is still idle.');
         break;
       case 'conveyor':
@@ -410,9 +414,16 @@ function countKinds(manifest: ExperimentManifest) {
 function connectionHintForKind(kind: PrimitiveKind) {
   switch (kind) {
     case 'motor':
-      return 'Motors only feel useful when a gear, wheel, or conveyor can pick up the power.';
+      return 'Motors feel best when a gear, wheel, pulley, flywheel, or conveyor can pick up the power.';
     case 'gear':
-      return 'Gears want either motor reach or contact with another gear.';
+      return 'Gears want either motor reach or contact with another rotating part.';
+    case 'pulley':
+    case 'chain-sprocket':
+      return 'These mesh with gears and pulleys, so place them touching another rotating part or inside a motor ring.';
+    case 'flywheel':
+      return 'Flywheels store spin, so feed them from a motor or gear train first.';
+    case 'gearbox':
+      return 'Gearboxes work best with rotating parts on both sides of the box.';
     case 'conveyor':
       return 'Conveyors are easiest to read when cargo moves into a hopper.';
     case 'winch':
@@ -431,6 +442,14 @@ function taglineForPart(kind: PrimitiveKind) {
       return 'Starts the motion';
     case 'gear':
       return 'Transfers and changes speed';
+    case 'pulley':
+      return 'Smooth rotating transfer';
+    case 'chain-sprocket':
+      return 'Toothed rotary transfer';
+    case 'flywheel':
+      return 'Stores motion and momentum';
+    case 'gearbox':
+      return 'Changes ratio across the box';
     case 'wheel':
       return 'Shows spinning clearly';
     case 'ramp':
@@ -480,6 +499,14 @@ function iconForPart(kind: PrimitiveKind): string {
       return 'M';
     case 'gear':
       return '*';
+    case 'pulley':
+      return 'P';
+    case 'chain-sprocket':
+      return 'C';
+    case 'flywheel':
+      return 'F';
+    case 'gearbox':
+      return 'G';
     case 'winch':
       return 'W';
     case 'hook':
@@ -519,6 +546,8 @@ function labelForPart(kind: PrimitiveKind): string {
       return 'Cargo';
     case 'material-pile':
       return 'Pile';
+    case 'chain-sprocket':
+      return 'Chain Sprocket';
     default:
       return kind
         .split('-')

@@ -7,7 +7,7 @@ interface InspectorPanelProps {
   onUpdateValue: (primitiveId: string, key: string, value: number | string | boolean) => void;
 }
 
-const SAFE_NUMBER_FIELDS = ['x', 'y', 'rpm', 'teeth', 'speed', 'ropeLength', 'capacity', 'releaseRate', 'fill', 'radius', 'traction'];
+const SAFE_NUMBER_FIELDS = ['x', 'y', 'rpm', 'teeth', 'speed', 'ropeLength', 'capacity', 'releaseRate', 'fill', 'radius', 'traction', 'mass', 'inputTeeth', 'outputTeeth'];
 const SAFE_TEXT_FIELDS = ['trackId'];
 const POSITION_ONLY_KINDS: PrimitiveKind[] = ['ball', 'rock'];
 const CUSTOM_NUMBER_FIELDS: Partial<Record<PrimitiveKind, Array<{

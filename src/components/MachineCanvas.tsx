@@ -9,6 +9,40 @@ const MOTOR_RANGE = 220;       // px — must match physics-engine motorGearMap 
 const CONVEYOR_MOTOR_RANGE = 300; // px — must match physics-engine conveyorMotorRpm distance
 const FLASH_DURATION_MS = 900; // how long a connection flash glows
 
+function isRotatingKind(kind: PrimitiveKind | null | undefined): kind is PrimitiveKind {
+  return kind === 'gear'
+    || kind === 'wheel'
+    || kind === 'pulley'
+    || kind === 'chain-sprocket'
+    || kind === 'flywheel';
+}
+
+function rotatingRadiusFromKind(kind: PrimitiveKind, config: unknown): number {
+  switch (kind) {
+    case 'gear':
+      return teethToRadius(Number((config as { teeth?: number }).teeth ?? 24));
+    case 'wheel':
+    case 'pulley':
+    case 'chain-sprocket':
+      return Number((config as { radius?: number }).radius ?? 28);
+    case 'flywheel':
+      return Number((config as { radius?: number }).radius ?? 36);
+    default:
+      return 20;
+  }
+}
+
+function rotatingRadiusForPrimitive(primitive: PrimitiveInstance): number {
+  return rotatingRadiusFromKind(primitive.kind, primitive.config);
+}
+
+function placementRadiusForKind(kind: PrimitiveKind): number {
+  if (kind === 'gear') return teethToRadius(20);
+  if (kind === 'wheel' || kind === 'pulley' || kind === 'chain-sprocket') return 28;
+  if (kind === 'flywheel') return 36;
+  return 20;
+}
+
 interface MachineCanvasProps {
   manifest: ExperimentManifest;
   runtime: RuntimeSnapshot;
@@ -264,9 +298,16 @@ export function MachineCanvas({
     const sel = manifest.primitives.find((p) => p.id === selectedPrimitiveId);
     if (!sel) return 'Click a part to select · Drag to reposition';
     switch (sel.kind) {
-      case 'motor':    return 'Motor — place a Gear or Wheel inside the green ring to drive it';
-      case 'gear':     return 'Gear — place another Gear or Wheel touching this one to mesh them';
-      case 'wheel':    return 'Wheel — inside Motor range it spins · touching a Gear it meshes';
+      case 'motor':    return 'Motor — place a rotating part inside the green ring to drive it';
+      case 'gear':     return 'Gear — place another rotating part touching this one to mesh it';
+      case 'wheel':    return 'Wheel — inside Motor range it spins · touching a rotating part it meshes';
+      case 'pulley':
+      case 'chain-sprocket':
+        return 'Rotating part — place it in a motor ring or touching another rotating part to wake it up';
+      case 'flywheel':
+        return 'Flywheel — feed it from a motor or gear train to store motion';
+      case 'gearbox':
+        return 'Gearbox — place rotating parts on both sides to transmit a ratio change';
       case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
       case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
       case 'winch':    return 'Winch — place a Hook below, then Quick Connect → Winch to Hook';
@@ -375,7 +416,7 @@ function drawConnectionOverlay(
 ) {
   instance.push();
   const ctx = instance.drawingContext as CanvasRenderingContext2D;
-  const isPlacingRotating = placingKind === 'gear' || placingKind === 'wheel';
+  const isPlacingRotating = isRotatingKind(placingKind);
 
   for (const prim of manifest.primitives) {
     // ── Motor ───────────────────────────────────────────────────────────────
@@ -442,7 +483,7 @@ function drawConnectionOverlay(
         instance.fill(71, 197, 165, 120);
         instance.textSize(11);
         instance.textAlign(instance.CENTER, instance.TOP);
-        instance.text('Place a Gear or Wheel in this ring', x, y + 26);
+        instance.text('Place a rotating part in this ring', x, y + 26);
       }
 
       // Show power-off hint when motor is off and selected
@@ -491,7 +532,7 @@ function drawConnectionOverlay(
     }
 
     // ── Gear / Wheel mesh lines ─────────────────────────────────────────────
-    if (prim.kind === 'gear' || prim.kind === 'wheel') {
+    if (isRotatingKind(prim.kind)) {
       const pos = getLivePos(prim, runtime);
       for (const meshId of runtime.gearMeshes?.[prim.id] ?? []) {
         const meshPart = manifest.primitives.find((p) => p.id === meshId);
@@ -505,11 +546,8 @@ function drawConnectionOverlay(
 
       // When placing a gear/wheel, show the meshing zone around existing ones
       if (isPlacingRotating) {
-        const existingRadius = prim.kind === 'gear'
-          ? teethToRadius((prim.config as { teeth: number }).teeth)
-          : ((prim.config as { radius?: number }).radius ?? 28);
-        // Default new gear radius (teeth=20 → 28px, wheel default 28px)
-        const newRadius = placingKind === 'gear' ? teethToRadius(20) : 28;
+        const existingRadius = rotatingRadiusForPrimitive(prim);
+        const newRadius = placementRadiusForKind(placingKind);
         const meshZone = existingRadius + newRadius + 16;
         instance.noFill();
         instance.stroke(94, 234, 212, 50);
@@ -568,6 +606,38 @@ function drawPlacingPreview(
       instance.line(mx, my - radius, mx, my + radius);
       break;
     }
+    case 'pulley':
+    case 'chain-sprocket': {
+      const radius = 28;
+      instance.circle(mx, my, radius * 2);
+      instance.line(mx - radius, my, mx + radius, my);
+      instance.line(mx, my - radius, mx, my + radius);
+      if (placingKind === 'chain-sprocket') {
+        for (let i = 0; i < 12; i += 1) {
+          const angle = (Math.PI * 2 * i) / 12;
+          instance.line(
+            Math.cos(angle) * radius + mx,
+            Math.sin(angle) * radius + my,
+            Math.cos(angle) * (radius + 6) + mx,
+            Math.sin(angle) * (radius + 6) + my,
+          );
+        }
+      }
+      break;
+    }
+    case 'flywheel': {
+      const radius = 36;
+      instance.circle(mx, my, radius * 2);
+      instance.circle(mx, my, radius * 1.35);
+      instance.line(mx - radius, my, mx + radius, my);
+      instance.line(mx, my - radius, mx, my + radius);
+      break;
+    }
+    case 'gearbox':
+      instance.rect(mx - 24, my - 16, 48, 32, 8);
+      instance.circle(mx - 10, my, 12);
+      instance.circle(mx + 10, my, 12);
+      break;
     case 'motor':
       instance.rect(mx - 28, my - 18, 56, 36, 10);
       instance.noFill();
@@ -786,16 +856,19 @@ function getPlacementAssessment(
 ): { tone: 'good' | 'info' | 'warn'; title: string; detail: string } {
   switch (placingKind) {
     case 'gear':
+    case 'pulley':
+    case 'chain-sprocket':
+    case 'flywheel':
       return canWakeRotatingPart(manifest, placingKind, x, y)
         ? {
             tone: 'good',
             title: 'Good placement',
-            detail: 'This gear is close enough to power or mesh right away.',
+            detail: 'This rotating part is close enough to power or mesh right away.',
           }
         : {
             tone: 'warn',
             title: 'Likely idle here',
-            detail: 'Move it inside a motor ring or touching another gear if you want motion.',
+            detail: 'Move it inside a motor ring or touching another rotating part if you want motion.',
           };
     case 'wheel':
       return canWakeRotatingPart(manifest, placingKind, x, y)
@@ -809,6 +882,12 @@ function getPlacementAssessment(
             title: 'Needs a driver',
             detail: 'Wheels need a motor ring or a gear contact to feel alive.',
           };
+    case 'gearbox':
+      return {
+        tone: 'info',
+        title: 'Bridge two sides',
+        detail: 'Gearboxes work best when rotating parts sit on both the left and right side.',
+      };
     case 'conveyor':
       return hasNearbyMotor(manifest, x, y)
         ? {
@@ -937,9 +1016,7 @@ function drawPrimitive(
       const t = age / FLASH_DURATION_MS; // 0→1
       instance.push();
       const pos = getLivePos(primitive, runtime);
-      const baseR = primitive.kind === 'gear'
-        ? teethToRadius((primitive.config as { teeth: number }).teeth)
-        : (primitive.kind === 'wheel' ? ((primitive.config as { radius?: number }).radius ?? 28) : 20);
+      const baseR = isRotatingKind(primitive.kind) ? rotatingRadiusForPrimitive(primitive) : 20;
       const flashR = baseR + t * 40;
       instance.noFill();
       instance.stroke(71, 197, 165, Math.round((1 - t) * 200));
@@ -1031,6 +1108,59 @@ function drawPrimitive(
         instance.text('●', 0, 0);
       }
       instance.pop();
+      break;
+    }
+    case 'pulley':
+    case 'chain-sprocket': {
+      const { x, y } = getLivePos(primitive, runtime);
+      const radius = rotatingRadiusForPrimitive(primitive);
+      const teeth = primitive.kind === 'chain-sprocket' ? 14 : 0;
+      instance.push();
+      instance.translate(x, y);
+      instance.rotate(runtime.rotations[primitive.id] ?? 0);
+      instance.stroke(selected ? '#fbbf24' : '#94a3b8');
+      instance.noFill();
+      instance.circle(0, 0, radius * 2);
+      instance.line(-radius, 0, radius, 0);
+      instance.line(0, -radius, 0, radius);
+      if (teeth > 0) {
+        for (let i = 0; i < teeth; i += 1) {
+          const angle = (Math.PI * 2 * i) / teeth;
+          instance.line(
+            Math.cos(angle) * radius,
+            Math.sin(angle) * radius,
+            Math.cos(angle) * (radius + 6),
+            Math.sin(angle) * (radius + 6),
+          );
+        }
+      }
+      instance.pop();
+      break;
+    }
+    case 'flywheel': {
+      const { x, y } = getLivePos(primitive, runtime);
+      const radius = rotatingRadiusForPrimitive(primitive);
+      instance.push();
+      instance.translate(x, y);
+      instance.rotate(runtime.rotations[primitive.id] ?? 0);
+      instance.stroke(selected ? '#fbbf24' : '#64748b');
+      instance.strokeWeight(selected ? 3 : 2);
+      instance.noFill();
+      instance.circle(0, 0, radius * 2);
+      instance.circle(0, 0, radius * 1.3);
+      instance.line(-radius, 0, radius, 0);
+      instance.line(0, -radius, 0, radius);
+      instance.pop();
+      break;
+    }
+    case 'gearbox': {
+      const { x, y } = primitive.config as { x: number; y: number };
+      instance.fill(selected ? '#fbbf24' : '#475569');
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.rect(x - 24, y - 16, 48, 32, 8);
+      instance.noFill();
+      instance.circle(x - 10, y, 12);
+      instance.circle(x + 10, y, 12);
       break;
     }
     case 'wheel': {
@@ -1545,15 +1675,13 @@ function canWakeRotatingPart(
   }
 
   return manifest.primitives.some((primitive) => {
-    if (primitive.kind !== 'gear' && primitive.kind !== 'wheel') {
+    if (!isRotatingKind(primitive.kind)) {
       return false;
     }
 
-    const anchor = primitive.config as { x: number; y: number; teeth?: number; radius?: number };
-    const radius = primitive.kind === 'gear'
-      ? teethToRadius(Number(anchor.teeth ?? 24))
-      : (anchor.radius ?? 28);
-    const nextRadius = placingKind === 'gear' ? teethToRadius(20) : 28;
+    const anchor = primitive.config as { x: number; y: number };
+    const radius = rotatingRadiusForPrimitive(primitive);
+    const nextRadius = placementRadiusForKind(placingKind);
     return Math.hypot(anchor.x - x, anchor.y - y) <= radius + nextRadius + 16;
   });
 }

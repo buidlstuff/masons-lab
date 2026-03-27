@@ -28,9 +28,23 @@ function teethToRadius(teeth: number): number {
   return Math.max(24, teeth * 1.4);
 }
 
+function isRotatingPrimitiveKind(kind: PrimitiveKind): boolean {
+  return kind === 'gear'
+    || kind === 'wheel'
+    || kind === 'pulley'
+    || kind === 'chain-sprocket'
+    || kind === 'flywheel';
+}
+
 function rotatingRadius(prim: PrimitiveInstance): number {
   if (prim.kind === 'gear') return teethToRadius((prim.config as { teeth: number }).teeth);
   if (prim.kind === 'wheel') return (prim.config as { radius: number }).radius ?? 28;
+  if (prim.kind === 'pulley' || prim.kind === 'chain-sprocket') {
+    return (prim.config as { radius?: number }).radius ?? 28;
+  }
+  if (prim.kind === 'flywheel') {
+    return (prim.config as { radius?: number }).radius ?? 36;
+  }
   return 0;
 }
 
@@ -277,7 +291,8 @@ export function buildMatterWorld(
 
   // ── Pin gears to their spawn point (spin in place) ────────────────────────
   for (const prim of manifest.primitives) {
-    if (prim.kind !== 'gear') continue;
+    if (prim.kind !== 'gear' && prim.kind !== 'pulley' && prim.kind !== 'chain-sprocket') continue;
+    // Flywheels are intentionally not pinned so later phases can mount them on moving assemblies.
     const body = bodyMap.get(prim.id);
     if (!body) continue;
     Matter.World.add(
@@ -299,7 +314,7 @@ export function buildMatterWorld(
   for (const motor of manifest.primitives.filter((p) => p.kind === 'motor')) {
     const mCfg = motor.config as { x: number; y: number };
     const gearIds = manifest.primitives
-      .filter((p) => p.kind === 'gear')
+      .filter((p) => p.kind === 'gear' || p.kind === 'pulley' || p.kind === 'chain-sprocket' || p.kind === 'flywheel')
       .filter((p) => {
         const gCfg = p.config as { x: number; y: number };
         return Math.hypot(gCfg.x - mCfg.x, gCfg.y - mCfg.y) < 220;
@@ -327,9 +342,7 @@ export function buildMatterWorld(
   // Includes gear-gear, gear-wheel, and wheel-wheel pairs.
   // When two rotating parts' radii nearly touch, they counter-rotate.
   const gearMeshMap = new Map<string, Array<{ id: string; ratio: number }>>();
-  const rotatingPrims = manifest.primitives.filter(
-    (p) => p.kind === 'gear' || p.kind === 'wheel',
-  );
+  const rotatingPrims = manifest.primitives.filter((p) => isRotatingPrimitiveKind(p.kind));
   for (let i = 0; i < rotatingPrims.length; i += 1) {
     for (let j = i + 1; j < rotatingPrims.length; j += 1) {
       const a = rotatingPrims[i];
@@ -347,6 +360,33 @@ export function buildMatterWorld(
         if (!gearMeshMap.has(b.id)) gearMeshMap.set(b.id, []);
         gearMeshMap.get(a.id)!.push({ id: b.id, ratio: ratioAtoB });
         gearMeshMap.get(b.id)!.push({ id: a.id, ratio: ratioBtoA });
+      }
+    }
+  }
+
+  // Gearbox virtual transmission: connects input-side rotating parts to output-side.
+  for (const gb of manifest.primitives.filter((p) => p.kind === 'gearbox')) {
+    const cfg = gb.config as { x: number; y: number; inputTeeth: number; outputTeeth: number };
+    const ratio = cfg.inputTeeth / Math.max(1, cfg.outputTeeth);
+    const inputSide = rotatingPrims.filter((p) => {
+      const pc = p.config as { x: number; y: number };
+      return pc.x < cfg.x && Math.hypot(pc.x - cfg.x, pc.y - cfg.y) < 220;
+    });
+    const outputSide = rotatingPrims.filter((p) => {
+      const pc = p.config as { x: number; y: number };
+      return pc.x >= cfg.x && Math.hypot(pc.x - cfg.x, pc.y - cfg.y) < 220;
+    });
+    for (const inp of inputSide) {
+      for (const out of outputSide) {
+        if (inp.id === out.id) continue;
+        if (!gearMeshMap.has(inp.id)) gearMeshMap.set(inp.id, []);
+        if (!gearMeshMap.has(out.id)) gearMeshMap.set(out.id, []);
+        if (!gearMeshMap.get(inp.id)!.some((mesh) => mesh.id === out.id)) {
+          gearMeshMap.get(inp.id)!.push({ id: out.id, ratio });
+        }
+        if (!gearMeshMap.get(out.id)!.some((mesh) => mesh.id === inp.id)) {
+          gearMeshMap.get(out.id)!.push({ id: inp.id, ratio: 1 / ratio });
+        }
       }
     }
   }
@@ -710,6 +750,33 @@ export function buildMatterWorld(
     }
 
     const drivenVels = driveMotors();
+    const inertiaDriven = new Map<string, number>();
+    // Flywheel inertia: spinning flywheels keep driving nearby meshes after motor power drops.
+    for (const prim of manifest.primitives.filter((p) => p.kind === 'flywheel')) {
+      const body = bodyMap.get(prim.id);
+      if (!body) continue;
+      if (Math.abs(body.angularVelocity) < 0.05) continue;
+      if (drivenVels.has(prim.id)) continue;
+
+      const flywheelQueue: Array<[string, number]> = [[prim.id, body.angularVelocity]];
+      const flywheelVisited = new Set([prim.id]);
+      let flywheelHops = 0;
+      while (flywheelQueue.length > 0 && flywheelHops < 3) {
+        const [driverId, vel] = flywheelQueue.shift()!;
+        for (const { id: meshId, ratio } of gearMeshMap.get(driverId) ?? []) {
+          if (flywheelVisited.has(meshId) || drivenVels.has(meshId)) continue;
+          const meshVel = -vel / ratio;
+          const meshBody = bodyMap.get(meshId);
+          if (meshBody) {
+            Matter.Body.setAngularVelocity(meshBody, meshVel);
+          }
+          inertiaDriven.set(meshId, meshVel);
+          flywheelVisited.add(meshId);
+          flywheelQueue.push([meshId, meshVel]);
+        }
+        flywheelHops += 1;
+      }
+    }
     const conveyorFrame = tickConveyors();
     const collectedThisTick = tickHopper();
     recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
@@ -724,9 +791,13 @@ export function buildMatterWorld(
     for (const [id, body] of bodyMap) {
       bodyPositions[id] = { x: body.position.x, y: body.position.y, angle: body.angle };
       const prim = manifest.primitives.find((p) => p.id === id);
-      if (prim?.kind === 'gear' || prim?.kind === 'wheel') {
+      if (prim && isRotatingPrimitiveKind(prim.kind)) {
         rotations[id] = body.angle;
       }
+    }
+    for (const [id, angVel] of inertiaDriven) {
+      const baseAngle = bodyPositions[id]?.angle ?? rotations[id] ?? 0;
+      rotations[id] = baseAngle + angVel * _dt;
     }
 
     // Virtual positions for loco + wagons (not real physics bodies)
@@ -914,6 +985,37 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
         frictionAir: 0.05,
         restitution: 0.0,
         density: 0.002,
+      });
+    }
+
+    case 'pulley':
+    case 'chain-sprocket': {
+      const cfg = prim.config as { x: number; y: number; radius?: number };
+      return Matter.Bodies.circle(cfg.x, cfg.y, cfg.radius ?? 28, {
+        label: prim.id,
+        frictionAir: 0.02,
+        density: 0.002,
+        restitution: 0.0,
+      });
+    }
+
+    case 'flywheel': {
+      const cfg = prim.config as { x: number; y: number; radius?: number; mass?: number };
+      const radius = cfg.radius ?? 36;
+      const mass = cfg.mass ?? 5;
+      return Matter.Bodies.circle(cfg.x, cfg.y, radius, {
+        label: prim.id,
+        frictionAir: 0.001,
+        density: mass / (Math.PI * radius * radius),
+        restitution: 0.0,
+      });
+    }
+
+    case 'gearbox': {
+      const cfg = prim.config as { x: number; y: number };
+      return Matter.Bodies.rectangle(cfg.x, cfg.y, 48, 32, {
+        isStatic: true,
+        label: prim.id,
       });
     }
 

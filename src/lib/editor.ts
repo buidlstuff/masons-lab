@@ -127,6 +127,14 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
       return { id: `motor-${nanoid(6)}`, kind, label: 'Motor', config: { x, y, rpm: 60, torque: 1, powerState: true } };
     case 'gear':
       return { id: `gear-${nanoid(6)}`, kind, label: 'Gear', config: { x, y, teeth: 24, input: false, color: '#47c5a5' } };
+    case 'pulley':
+      return { id: `pulley-${nanoid(6)}`, kind, label: 'Pulley', config: { x, y, radius: 28 } };
+    case 'chain-sprocket':
+      return { id: `chain-${nanoid(6)}`, kind, label: 'Chain Sprocket', config: { x, y, radius: 28 } };
+    case 'flywheel':
+      return { id: `flywheel-${nanoid(6)}`, kind, label: 'Flywheel', config: { x, y, radius: 36, mass: 5 } };
+    case 'gearbox':
+      return { id: `gearbox-${nanoid(6)}`, kind, label: 'Gearbox', config: { x, y, inputTeeth: 24, outputTeeth: 12 } };
     case 'winch':
       return { id: `winch-${nanoid(6)}`, kind, label: 'Winch', config: { x, y, speed: 30, ropeLength: 180 } };
     case 'rope':
