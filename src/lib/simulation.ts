@@ -152,6 +152,10 @@ export function useMachineSimulation(
         matter.Engine.update(pw.engine, dt * 1000);
         const prev = snapshotRef.current;
         const frame = pw.tick(dt, prev.rotations, prev.hookY, prev.hopperFill, prev.trainProgress);
+        let trainProgressDelta = frame.trainProgress - prev.trainProgress;
+        if (Math.abs(trainProgressDelta) > 0.5) {
+          trainProgressDelta += trainProgressDelta > 0 ? -1 : 1;
+        }
         const next: RuntimeSnapshot = {
           ...prev,
           time: prev.time + dt,
@@ -182,7 +186,7 @@ export function useMachineSimulation(
             lostCargoCount: frame.lostCargoCount,
             cargoStates: frame.cargoStates,
             trainSpeed: frame.trainProgress !== prev.trainProgress
-              ? Number(((frame.trainProgress - prev.trainProgress) / dt * 10).toFixed(1))
+              ? Number((Math.abs(trainProgressDelta) / dt * 10).toFixed(1))
               : prev.telemetry.trainSpeed,
             ...(frame.gearTelemetry
               ? {

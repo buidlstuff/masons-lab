@@ -8,7 +8,7 @@ interface InspectorPanelProps {
 }
 
 const SAFE_NUMBER_FIELDS = ['x', 'y', 'rpm', 'teeth', 'speed', 'ropeLength', 'capacity', 'releaseRate', 'fill', 'radius', 'traction', 'mass', 'inputTeeth', 'outputTeeth', 'width', 'height', 'length', 'depth', 'stroke', 'restLength', 'stiffness', 'quantity', 'density', 'angle'];
-const SAFE_TEXT_FIELDS = ['trackId', 'orientation'];
+const SAFE_TEXT_FIELDS = ['trackId', 'drivePartId', 'orientation'];
 const SAFE_BOOLEAN_FIELDS = ['gateOpen'];
 const POSITION_ONLY_KINDS: PrimitiveKind[] = ['ball', 'rock'];
 const CUSTOM_NUMBER_FIELDS: Partial<Record<PrimitiveKind, Array<{

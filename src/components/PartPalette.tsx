@@ -369,6 +369,8 @@ function countKinds(manifest: ExperimentManifest) {
     gear: 0,
     winch: 0,
     rope: 0,
+    'belt-link': 0,
+    'chain-link': 0,
     hook: 0,
     'rail-segment': 0,
     'rail-switch': 0,
@@ -436,7 +438,9 @@ function connectionHintForKind(kind: PrimitiveKind) {
     case 'hook':
       return 'Hoists only make sense once the winch and hook are linked, and the winch can also be mounted to a chassis.';
     case 'rail-segment':
-      return 'Rails define the path, but trains still need their trackId set in the Inspector.';
+      return 'Rails define the path, and locomotives can now be linked to a real rotating drive part.';
+    case 'locomotive':
+      return 'Locomotives need rail plus a linked rotating driver if you want them to feel part of the machine.';
     default:
       return 'Pick a matching part below if you want a clearer reaction from the canvas.';
   }

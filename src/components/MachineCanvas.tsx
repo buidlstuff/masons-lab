@@ -43,6 +43,20 @@ function placementRadiusForKind(kind: PrimitiveKind): number {
   return 20;
 }
 
+function connectorPathPoints(
+  config: { fromId: string; toId: string; viaIds?: string[] },
+  primitives: PrimitiveInstance[],
+  runtime: RuntimeSnapshot,
+) {
+  const ids = [config.fromId, ...(config.viaIds ?? []), config.toId];
+  return ids
+    .map((id) => {
+      const primitive = findPrimitiveById(primitives, id);
+      return primitive ? getPrimitiveAnchor(primitive, primitives, runtime) : null;
+    })
+    .filter((point): point is { x: number; y: number } => Boolean(point));
+}
+
 interface MachineCanvasProps {
   manifest: ExperimentManifest;
   runtime: RuntimeSnapshot;
@@ -337,7 +351,7 @@ export function MachineCanvas({
       case 'winch':    return 'Winch — place a Hook below for lifting, or mount it onto a chassis first';
       case 'node':     return 'Node — place another Node then Quick Connect → Beam';
       case 'hook':     return 'Hook — Quick Connect to attach it to a Winch';
-      case 'locomotive': return 'Locomotive — place Rail Segment, set its trackId in the Inspector';
+      case 'locomotive': return 'Locomotive — set its trackId, then Quick Connect it to a rotating drive part';
       default:         return `${sel.label ?? sel.kind} — drag to move · Inspector to adjust`;
     }
   })();
@@ -1642,6 +1656,24 @@ function drawPrimitive(
       }
       break;
     }
+    case 'belt-link':
+    case 'chain-link': {
+      const config = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
+      const points = connectorPathPoints(config, primitives, runtime);
+      if (points.length >= 2) {
+        const ctx = instance.drawingContext as CanvasRenderingContext2D;
+        instance.stroke(selected ? '#fbbf24' : (primitive.kind === 'chain-link' ? '#f59e0b' : '#3dd5a1'));
+        instance.strokeWeight(selected ? 3 : 2);
+        if (primitive.kind === 'chain-link') {
+          ctx.setLineDash([10, 6]);
+        }
+        for (let i = 0; i < points.length - 1; i += 1) {
+          instance.line(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y);
+        }
+        ctx.setLineDash([]);
+      }
+      break;
+    }
     case 'rail-segment': {
       const { points } = primitive.config as { points: Array<{ x: number; y: number }> };
       instance.stroke(selected ? '#fbbf24' : '#475569');
@@ -1878,6 +1910,8 @@ function hitTest(
     switch (primitive.kind) {
       case 'beam':
       case 'rope':
+      case 'belt-link':
+      case 'chain-link':
         return false;
       case 'rail-segment': {
         const points = (primitive.config as { points: Array<{ x: number; y: number }> }).points;

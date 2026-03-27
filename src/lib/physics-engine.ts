@@ -36,6 +36,10 @@ function isRotatingPrimitiveKind(kind: PrimitiveKind): boolean {
     || kind === 'flywheel';
 }
 
+function isTransmissionConnectorKind(kind: PrimitiveKind): boolean {
+  return kind === 'belt-link' || kind === 'chain-link';
+}
+
 function rotatingRadius(prim: PrimitiveInstance): number {
   if (prim.kind === 'gear') return teethToRadius((prim.config as { teeth: number }).teeth);
   if (prim.kind === 'wheel') return (prim.config as { radius: number }).radius ?? 28;
@@ -324,11 +328,13 @@ export function buildMatterWorld(
       }
     }
 
-    if (prim.kind === 'rope') {
+    if (prim.kind === 'rope' || isTransmissionConnectorKind(prim.kind)) {
       const cfg = prim.config as { fromId: string; toId: string; length: number };
       const fromPrim = manifest.primitives.find((item) => item.id === cfg.fromId);
       const toPrim = manifest.primitives.find((item) => item.id === cfg.toId);
-      if (fromPrim && toPrim && isRotatingPrimitiveKind(fromPrim.kind) && isRotatingPrimitiveKind(toPrim.kind)) {
+      const actsAsTransmission = prim.kind !== 'rope'
+        || (fromPrim && toPrim && isRotatingPrimitiveKind(fromPrim.kind) && isRotatingPrimitiveKind(toPrim.kind));
+      if (actsAsTransmission && fromPrim && toPrim && isRotatingPrimitiveKind(fromPrim.kind) && isRotatingPrimitiveKind(toPrim.kind)) {
         const ratioAtoB = rotatingRadius(fromPrim) / Math.max(1, rotatingRadius(toPrim));
         const ratioBtoA = rotatingRadius(toPrim) / Math.max(1, rotatingRadius(fromPrim));
         if (!beltLinkMap.has(fromPrim.id)) beltLinkMap.set(fromPrim.id, []);
@@ -339,7 +345,7 @@ export function buildMatterWorld(
         if (!beltLinkMap.get(toPrim.id)!.some((link) => link.id === fromPrim.id)) {
           beltLinkMap.get(toPrim.id)!.push({ id: fromPrim.id, ratio: ratioBtoA });
         }
-      } else {
+      } else if (prim.kind === 'rope') {
         const winchBody = bodyMap.get(cfg.fromId);
         const hookBody = bodyMap.get(cfg.toId);
         if (!winchBody || !hookBody) continue;
@@ -1100,7 +1106,17 @@ export function buildMatterWorld(
   // Returns updated locoProgress (0..1).
   function tickLocomotive(dt: number, prevProgress: number): number {
     if (!locoPrim) return prevProgress;
-    const cfg = locoPrim.config as { speed: number; trackId: string };
+    const cfg = locoPrim.config as { speed: number; trackId: string; drivePartId?: string };
+    const trackPrim = manifest.primitives.find((p) => p.id === cfg.trackId);
+    if (cfg.drivePartId && trackPrim) {
+      const drivePrim = manifest.primitives.find((p) => p.id === cfg.drivePartId);
+      const driveBody = drivePrim ? bodyMap.get(drivePrim.id) : null;
+      if (drivePrim && driveBody && isRotatingPrimitiveKind(drivePrim.kind)) {
+        const linearSpeed = Math.abs(driveBody.angularVelocity * rotatingRadius(drivePrim));
+        const delta = dt * (linearSpeed / Math.max(1, trackLength(trackPrim)));
+        return (prevProgress + delta) % 1;
+      }
+    }
     const speedControl = manifest.controls.find(
       (c) => c.bind?.targetId === locoPrim.id && c.bind?.path === 'speed',
     );
@@ -1363,6 +1379,17 @@ function trackPoint(
   const a = pts[seg];
   const b = pts[seg + 1];
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+function trackLength(track: PrimitiveInstance | undefined): number {
+  if (!track || track.kind !== 'rail-segment') return 1;
+  const pts = (track.config as { points: Array<{ x: number; y: number }> }).points;
+  if (pts.length < 2) return 1;
+  let total = 0;
+  for (let index = 0; index < pts.length - 1; index += 1) {
+    total += Math.hypot(pts[index + 1].x - pts[index].x, pts[index + 1].y - pts[index].y);
+  }
+  return Math.max(1, total);
 }
 
 // ─── Body factory ─────────────────────────────────────────────────────────────
@@ -1646,6 +1673,8 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
 
     case 'beam':
     case 'rope':
+    case 'belt-link':
+    case 'chain-link':
     case 'conveyor':
     case 'hopper':
     case 'material-pile':

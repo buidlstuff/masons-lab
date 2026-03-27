@@ -22,6 +22,8 @@ export type PrimitiveKind =
   | 'gear'
   | 'winch'
   | 'rope'
+  | 'belt-link'
+  | 'chain-link'
   | 'hook'
   | 'rail-segment'
   | 'rail-switch'
@@ -213,6 +215,20 @@ export interface RopeConfig {
   length: number;
 }
 
+export interface BeltLinkConfig {
+  fromId: string;
+  toId: string;
+  length: number;
+  viaIds?: string[];
+}
+
+export interface ChainLinkConfig {
+  fromId: string;
+  toId: string;
+  length: number;
+  viaIds?: string[];
+}
+
 export interface HookConfig {
   x: number;
   y: number;
@@ -240,6 +256,7 @@ export interface LocomotiveConfig {
   trackId: string;
   progress: number;
   speed: number;
+  drivePartId?: string;
 }
 
 export interface WagonConfig {
@@ -436,6 +453,8 @@ export type PrimitiveConfig =
   | GearConfig
   | WinchConfig
   | RopeConfig
+  | BeltLinkConfig
+  | ChainLinkConfig
   | HookConfig
   | RailSegmentConfig
   | RailSwitchConfig

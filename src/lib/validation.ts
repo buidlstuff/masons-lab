@@ -6,10 +6,23 @@ const ALLOWED_AI_PRIMITIVES = new Set<PrimitiveKind>([
   'beam',
   'wheel',
   'axle',
+  'chassis',
   'motor',
   'gear',
+  'pulley',
+  'chain-sprocket',
+  'flywheel',
+  'gearbox',
+  'spring-linear',
+  'rack',
+  'piston',
+  'crane-arm',
+  'bucket',
+  'counterweight',
   'winch',
   'rope',
+  'belt-link',
+  'chain-link',
   'hook',
   'rail-segment',
   'rail-switch',
@@ -19,6 +32,19 @@ const ALLOWED_AI_PRIMITIVES = new Set<PrimitiveKind>([
   'hopper',
   'cargo-block',
   'material-pile',
+  'ramp',
+  'platform',
+  'wall',
+  'ball',
+  'rock',
+  'cam',
+  'cam-follower',
+  'bevel-gear',
+  'chute',
+  'silo-bin',
+  'water',
+  'hinge',
+  'tunnel',
 ]);
 
 export interface ValidationResult {
@@ -66,14 +92,28 @@ export function validateExperimentManifest(input: unknown): ValidationResult {
         errors.push(`Beam ${primitive.id} has an invalid toNodeId.`);
       }
     }
-    if (primitive.kind === 'rope') {
-      const config = primitive.config as { fromId?: string; toId?: string };
+    if (primitive.kind === 'rope' || primitive.kind === 'belt-link' || primitive.kind === 'chain-link') {
+      const config = primitive.config as { fromId?: string; toId?: string; viaIds?: string[] };
       if (!config.fromId || !ids.has(config.fromId)) {
-        errors.push(`Rope ${primitive.id} has an invalid fromId.`);
+        errors.push(`Connector ${primitive.id} has an invalid fromId.`);
       }
       if (!config.toId || !ids.has(config.toId)) {
-        errors.push(`Rope ${primitive.id} has an invalid toId.`);
+        errors.push(`Connector ${primitive.id} has an invalid toId.`);
       }
+      if (Array.isArray(config.viaIds)) {
+        for (const viaId of config.viaIds) {
+          if (!ids.has(viaId)) {
+            errors.push(`Connector ${primitive.id} has an invalid viaId.`);
+          }
+        }
+      }
+    }
+    if (
+      primitive.kind === 'locomotive'
+      && typeof (primitive.config as { drivePartId?: string }).drivePartId === 'string'
+      && !ids.has((primitive.config as { drivePartId: string }).drivePartId)
+    ) {
+      errors.push(`Locomotive ${primitive.id} has an invalid drivePartId.`);
     }
     if (
       (primitive.kind === 'cargo-block'

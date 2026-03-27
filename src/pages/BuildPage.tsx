@@ -751,7 +751,7 @@ export function BuildPage() {
       selectedPrimitive,
       (primitive) => beltKinds.includes(primitive.kind)
         && !manifest.primitives.some(
-          (item) => item.kind === 'rope'
+          (item) => (item.kind === 'belt-link' || item.kind === 'chain-link' || item.kind === 'rope')
             && (
               ((item.config as { fromId: string; toId: string }).fromId === selectedPrimitive.id
                 && (item.config as { fromId: string; toId: string }).toId === primitive.id)
@@ -765,7 +765,32 @@ export function BuildPage() {
       return;
     }
     void persistDraft(connectPrimitives(manifest, selectedPrimitive.id, target.id), undefined, { recordHistory: true });
-    showStatus('Connected the rotating parts with a visible belt link.', 'success');
+    showStatus('Connected the rotating parts with a visible drive link.', 'success');
+  }, [manifest, persistDraft, selectedPrimitive, showStatus]);
+
+  const handleConnectLocomotiveDrive = useCallback(() => {
+    if (!manifest || !selectedPrimitive) return;
+    const driveKinds: PrimitiveKind[] = ['gear', 'wheel', 'pulley', 'chain-sprocket', 'flywheel'];
+    const locomotiveHasTrack = (primitive: PrimitiveInstance) => primitive.kind === 'locomotive'
+      && manifest.primitives.some(
+        (item) => item.kind === 'rail-segment' && item.id === (primitive.config as { trackId?: string }).trackId,
+      );
+    const locomotive = selectedPrimitive.kind === 'locomotive'
+      ? selectedPrimitive
+      : findNearestPrimitive(manifest, selectedPrimitive, locomotiveHasTrack);
+    if (locomotive && !locomotiveHasTrack(locomotive)) {
+      showStatus('Set the locomotive trackId to a real rail segment first.', 'warning');
+      return;
+    }
+    const driver = driveKinds.includes(selectedPrimitive.kind)
+      ? selectedPrimitive
+      : findNearestPrimitive(manifest, selectedPrimitive, (primitive) => driveKinds.includes(primitive.kind));
+    if (!locomotive || !driver) {
+      showStatus('Place both a locomotive and a rotating driver first.', 'warning');
+      return;
+    }
+    void persistDraft(connectPrimitives(manifest, locomotive.id, driver.id), undefined, { recordHistory: true });
+    showStatus(`Linked the locomotive to the ${driver.label ?? driver.kind}.`, 'success');
   }, [manifest, persistDraft, selectedPrimitive, showStatus]);
 
   useEffect(() => {
@@ -1296,6 +1321,7 @@ export function BuildPage() {
             || selectedPrimitive?.kind === 'pulley'
             || selectedPrimitive?.kind === 'chain-sprocket'
             || selectedPrimitive?.kind === 'flywheel'
+            || selectedPrimitive?.kind === 'locomotive'
             || selectedPrimitive?.kind === 'chassis'
             || selectedPrimitive?.kind === 'motor'
             || selectedPrimitive?.kind === 'crane-arm'
@@ -1339,7 +1365,14 @@ export function BuildPage() {
                 disabled={!selectedPrimitiveId || !['wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(selectedPrimitive.kind)}
                 onClick={handleConnectBelt}
               >
-                Connect Rotating Parts with Belt
+                Connect Rotating Parts with Drive Link
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPrimitiveId || !['locomotive', 'gear', 'wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(selectedPrimitive.kind)}
+                onClick={handleConnectLocomotiveDrive}
+              >
+                Drive Locomotive from Rotating Part
               </button>
               <button
                 type="button"
@@ -2026,7 +2059,7 @@ function placementInstructionForKind(kind: PrimitiveKind) {
     case 'conveyor':
       return 'Conveyors come alive once cargo, a hopper, and a nearby motor join the setup.';
     case 'rail-segment':
-      return 'Rails are the track. Locomotives still need their trackId set in the Inspector afterward.';
+      return 'Rails are the track. Locomotives still need their trackId set, and can later be linked to a rotating driver.';
     case 'hook':
       return 'Hooks are most useful when they sit below a winch so Quick Connect can rope them together.';
     default:
@@ -2048,7 +2081,7 @@ function selectedInstructionForKind(kind: PrimitiveKind) {
       return 'Rails define the path, but locomotives and wagons still need the right trackId to follow them.';
     case 'locomotive':
     case 'wagon':
-      return 'Use the Inspector to point this train part at a real rail segment. Otherwise it has nowhere to go.';
+      return 'Point this at a real rail segment first. Locomotives can also be driven by a wheel, gear, pulley, sprocket, or flywheel.';
     default:
       return 'Drag it to reposition it, or change its safe numeric fields in the Inspector.';
   }

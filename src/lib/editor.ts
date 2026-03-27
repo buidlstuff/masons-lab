@@ -1,6 +1,30 @@
 import { nanoid } from 'nanoid';
 import type { ExperimentManifest, PrimitiveConfig, PrimitiveInstance, PrimitiveKind } from './types';
 
+function isRotaryLinkEndpointKind(kind: PrimitiveKind) {
+  return kind === 'wheel'
+    || kind === 'pulley'
+    || kind === 'chain-sprocket'
+    || kind === 'flywheel';
+}
+
+function isLocomotiveDriverKind(kind: PrimitiveKind) {
+  return kind === 'gear' || isRotaryLinkEndpointKind(kind);
+}
+
+function isTransmissionLinkKind(kind: PrimitiveKind) {
+  return kind === 'belt-link' || kind === 'chain-link';
+}
+
+function isLegacyRotaryRope(primitive: PrimitiveInstance, sourceId: string, targetId: string) {
+  if (primitive.kind !== 'rope') return false;
+  const cfg = primitive.config as { fromId?: string; toId?: string };
+  return (
+    (cfg.fromId === sourceId && cfg.toId === targetId)
+    || (cfg.fromId === targetId && cfg.toId === sourceId)
+  );
+}
+
 export function addPrimitive(manifest: ExperimentManifest, kind: PrimitiveKind, x: number, y: number): ExperimentManifest {
   const primitive = createPrimitive(kind, x, y);
   return {
@@ -126,14 +150,22 @@ export function deletePrimitive(manifest: ExperimentManifest, primitiveId: strin
           const cfg = primitive.config as { fromNodeId: string; toNodeId: string };
           return cfg.fromNodeId !== primitiveId && cfg.toNodeId !== primitiveId;
         }
-        if (primitive.kind === 'rope') {
-          const cfg = primitive.config as { fromId: string; toId: string };
-          return cfg.fromId !== primitiveId && cfg.toId !== primitiveId;
+        if (primitive.kind === 'rope' || isTransmissionLinkKind(primitive.kind)) {
+          const cfg = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
+          return cfg.fromId !== primitiveId
+            && cfg.toId !== primitiveId
+            && !(cfg.viaIds?.includes(primitiveId));
         }
         return true;
       })
       .map((primitive) => {
         const attachedToId = (primitive.config as { attachedToId?: string }).attachedToId;
+        const drivePartId = (primitive.config as { drivePartId?: string }).drivePartId;
+        if (primitive.kind === 'locomotive' && drivePartId === primitiveId) {
+          const nextConfig = { ...primitive.config } as Record<string, unknown>;
+          delete nextConfig.drivePartId;
+          return { ...primitive, config: nextConfig as unknown as PrimitiveConfig };
+        }
         if (attachedToId !== primitiveId) {
           return primitive;
         }
@@ -191,11 +223,30 @@ export function connectPrimitives(
   }
 
   if (
-    ['wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(source.kind)
-    && ['wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(target.kind)
+    (source.kind === 'locomotive' && isLocomotiveDriverKind(target.kind))
+    || (target.kind === 'locomotive' && isLocomotiveDriverKind(source.kind))
   ) {
+    const loco = source.kind === 'locomotive' ? source : target;
+    const driver = source.kind === 'locomotive' ? target : source;
+    return {
+      ...manifest,
+      primitives: manifest.primitives.map((primitive) => (
+        primitive.id === loco.id
+          ? {
+              ...primitive,
+              config: {
+                ...primitive.config,
+                drivePartId: driver.id,
+              } as PrimitiveConfig,
+            }
+          : primitive
+      )),
+    };
+  }
+
+  if (isRotaryLinkEndpointKind(source.kind) && isRotaryLinkEndpointKind(target.kind)) {
     const exists = manifest.primitives.some((primitive) => (
-      primitive.kind === 'rope'
+      (isTransmissionLinkKind(primitive.kind) || isLegacyRotaryRope(primitive, sourceId, targetId))
       && (
         ((primitive.config as { fromId: string; toId: string }).fromId === sourceId
           && (primitive.config as { fromId: string; toId: string }).toId === targetId)
@@ -208,14 +259,17 @@ export function connectPrimitives(
     }
     const sourcePos = getAttachmentAnchor(source);
     const targetPos = getAttachmentAnchor(target);
+    const kind: PrimitiveKind = source.kind === 'chain-sprocket' || target.kind === 'chain-sprocket'
+      ? 'chain-link'
+      : 'belt-link';
     return {
       ...manifest,
       primitives: [
         ...manifest.primitives,
         {
-          id: `rope-${nanoid(6)}`,
-          kind: 'rope',
-          label: source.kind === 'chain-sprocket' || target.kind === 'chain-sprocket' ? 'Chain Link' : 'Drive Belt',
+          id: `${kind === 'chain-link' ? 'chain' : 'belt'}-${nanoid(6)}`,
+          kind,
+          label: kind === 'chain-link' ? 'Chain Link' : 'Drive Belt',
           config: {
             fromId: sourceId,
             toId: targetId,
@@ -333,6 +387,10 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
       return { id: `winch-${nanoid(6)}`, kind, label: 'Winch', config: { x, y, speed: 30, ropeLength: 180 } };
     case 'rope':
       return { id: `rope-${nanoid(6)}`, kind, label: 'Rope', config: { fromId: '', toId: '', length: 180 } };
+    case 'belt-link':
+      return { id: `belt-${nanoid(6)}`, kind, label: 'Drive Belt', config: { fromId: '', toId: '', length: 180 } };
+    case 'chain-link':
+      return { id: `chain-${nanoid(6)}`, kind, label: 'Chain Link', config: { fromId: '', toId: '', length: 180 } };
     case 'hook':
       return { id: `hook-${nanoid(6)}`, kind, label: 'Hook', config: { x, y } };
     case 'rail-segment':

@@ -241,13 +241,20 @@ function remapPrimitiveConfig(
     config.toNodeId = idMap.get(String(config.toNodeId)) ?? config.toNodeId;
   }
 
-  if (primitive.kind === 'rope') {
+  if (primitive.kind === 'rope' || primitive.kind === 'belt-link' || primitive.kind === 'chain-link') {
     config.fromId = idMap.get(String(config.fromId)) ?? config.fromId;
     config.toId = idMap.get(String(config.toId)) ?? config.toId;
+    if (Array.isArray(config.viaIds)) {
+      config.viaIds = config.viaIds.map((viaId) => idMap.get(String(viaId)) ?? viaId);
+    }
   }
 
   if (primitive.kind === 'locomotive' || primitive.kind === 'wagon') {
     config.trackId = idMap.get(String(config.trackId)) ?? config.trackId;
+  }
+
+  if (primitive.kind === 'locomotive' && typeof config.drivePartId === 'string') {
+    config.drivePartId = idMap.get(config.drivePartId) ?? config.drivePartId;
   }
 
   if (
