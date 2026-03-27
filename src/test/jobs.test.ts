@@ -20,6 +20,11 @@ function createRuntimeSnapshot(overrides: Partial<RuntimeSnapshot> = {}): Runtim
     beltPowered: false,
     lostCargoCount: 0,
     stableCargoSpawns: {},
+    pistonExtensions: {},
+    bucketContents: {},
+    bucketStates: {},
+    springCompressions: {},
+    sandParticlePositions: [],
     bodyPositions: {},
     ...overrides,
   };

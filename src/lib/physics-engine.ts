@@ -18,7 +18,7 @@
  */
 
 import Matter from 'matter-js';
-import type { CargoLifecycleState, ExperimentManifest, PrimitiveInstance } from './types';
+import type { CargoLifecycleState, ExperimentManifest, PrimitiveInstance, PrimitiveKind } from './types';
 
 // Must match MachineCanvas createCanvas(960, 560)
 const CANVAS_W = 960;
@@ -56,6 +56,11 @@ export interface PhysicsFrame {
   beltPowered: boolean;
   lostCargoCount: number;
   stableCargoSpawns: Record<string, { x: number; y: number }>;
+  pistonExtensions: Record<string, number>;
+  bucketContents: Record<string, number>;
+  bucketStates: Record<string, 'collecting' | 'dumping'>;
+  springCompressions: Record<string, number>;
+  sandParticlePositions: Array<{ x: number; y: number }>;
 }
 
 export interface MatterWorldOptions {
@@ -81,6 +86,7 @@ export function buildMatterWorld(
   manifest: ExperimentManifest,
   options: MatterWorldOptions = {},
 ): PhysicsWorld {
+  const MATERIAL_KINDS: PrimitiveKind[] = ['cargo-block', 'ball', 'rock'];
   const engine = Matter.Engine.create({ gravity: { x: 0, y: 1.2 } });
   const bodyMap = new Map<string, Matter.Body>();
   const ropeConstraints: Matter.Constraint[] = [];
@@ -125,7 +131,7 @@ export function buildMatterWorld(
     }),
   ]);
 
-  for (const cargo of manifest.primitives.filter((primitive) => primitive.kind === 'cargo-block')) {
+  for (const cargo of manifest.primitives.filter((primitive) => MATERIAL_KINDS.includes(primitive.kind))) {
     const cfg = cargo.config as { x: number; y: number };
     cargoSpawnMap.set(
       cargo.id,
@@ -489,7 +495,7 @@ export function buildMatterWorld(
   // Cargo now rides on thin physical supports while the belt adds tangential
   // drive along the segment. That keeps blocks from tunneling through the lane.
   function tickConveyors() {
-    const cargoBlocks = manifest.primitives.filter((p) => p.kind === 'cargo-block');
+    const cargoBlocks = manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind));
     const supportedCargoIds = new Set<string>();
     let anyPowered = false;
     if (cargoBlocks.length === 0) {
@@ -568,7 +574,7 @@ export function buildMatterWorld(
     }
 
     for (const prim of manifest.primitives) {
-      if (prim.kind !== 'cargo-block') continue;
+      if (!MATERIAL_KINDS.includes(prim.kind)) continue;
       const body = bodyMap.get(prim.id);
       if (!body) continue;
 
@@ -617,7 +623,7 @@ export function buildMatterWorld(
     const conveyors = manifest.primitives.filter((primitive) => primitive.kind === 'conveyor');
     const hoppers = manifest.primitives.filter((primitive) => primitive.kind === 'hopper');
 
-    for (const cargo of manifest.primitives.filter((primitive) => primitive.kind === 'cargo-block')) {
+    for (const cargo of manifest.primitives.filter((primitive) => MATERIAL_KINDS.includes(primitive.kind))) {
       const body = bodyMap.get(cargo.id);
       if (!body || collectedCargoIds.has(cargo.id)) {
         continue;
@@ -691,6 +697,18 @@ export function buildMatterWorld(
     _prevHopperFill: number,
     prevTrainProgress: number,
   ): PhysicsFrame {
+    // Cap velocities from the just-completed Matter.Engine.update to prevent tunneling.
+    const MAX_VELOCITY = 18;
+    for (const body of Matter.Composite.allBodies(engine.world)) {
+      if (body.isStatic) continue;
+      if (Math.abs(body.velocity.x) > MAX_VELOCITY || Math.abs(body.velocity.y) > MAX_VELOCITY) {
+        Matter.Body.setVelocity(body, {
+          x: Math.sign(body.velocity.x) * Math.min(Math.abs(body.velocity.x), MAX_VELOCITY),
+          y: Math.sign(body.velocity.y) * Math.min(Math.abs(body.velocity.y), MAX_VELOCITY),
+        });
+      }
+    }
+
     const drivenVels = driveMotors();
     const conveyorFrame = tickConveyors();
     const collectedThisTick = tickHopper();
@@ -792,6 +810,11 @@ export function buildMatterWorld(
       beltPowered: conveyorFrame.beltPowered,
       lostCargoCount,
       stableCargoSpawns: Object.fromEntries(cargoSpawnMap.entries()),
+      pistonExtensions: {},
+      bucketContents: {},
+      bucketStates: {},
+      springCompressions: {},
+      sandParticlePositions: [],
     };
   }
 
@@ -938,6 +961,51 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
       });
     }
 
+    case 'ramp':
+    case 'platform': {
+      const cfg = prim.config as { x: number; y: number; width?: number; angle?: number };
+      return Matter.Bodies.rectangle(cfg.x, cfg.y, cfg.width ?? 120, 12, {
+        isStatic: true,
+        label: prim.id,
+        angle: ((cfg.angle ?? 0) * Math.PI) / 180,
+        friction: 0.6,
+        restitution: 0.1,
+      });
+    }
+
+    case 'wall': {
+      const cfg = prim.config as { x: number; y: number; height?: number };
+      return Matter.Bodies.rectangle(cfg.x, cfg.y, 12, cfg.height ?? 80, {
+        isStatic: true,
+        label: prim.id,
+        friction: 0.8,
+        restitution: 0.1,
+      });
+    }
+
+    case 'ball': {
+      const cfg = prim.config as { x: number; y: number; radius?: number };
+      return Matter.Bodies.circle(cfg.x, cfg.y, cfg.radius ?? 12, {
+        label: prim.id,
+        restitution: 0.3,
+        friction: 0.3,
+        frictionAir: 0.005,
+        density: 0.002,
+      });
+    }
+
+    case 'rock': {
+      const cfg = prim.config as { x: number; y: number };
+      return Matter.Bodies.circle(cfg.x, cfg.y, 16, {
+        label: prim.id,
+        isStatic: false,
+        mass: 3,
+        restitution: 0.05,
+        friction: 0.9,
+        frictionAir: 0.008,
+      });
+    }
+
     case 'beam':
     case 'rope':
     case 'conveyor':
@@ -947,7 +1015,11 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
     case 'rail-switch':
     case 'locomotive':
     case 'wagon':
-    default:
       return null;
+
+    default: {
+      console.warn(`createBodyForPrimitive: unknown kind "${(prim as { kind: string }).kind}", skipping`);
+      return null;
+    }
   }
 }

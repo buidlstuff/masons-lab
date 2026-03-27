@@ -25,6 +25,11 @@ export interface RuntimeSnapshot {
   beltPowered: boolean;
   lostCargoCount: number;
   stableCargoSpawns: Record<string, { x: number; y: number }>;
+  pistonExtensions: Record<string, number>;
+  bucketContents: Record<string, number>;
+  bucketStates: Record<string, 'collecting' | 'dumping'>;
+  springCompressions: Record<string, number>;
+  sandParticlePositions: Array<{ x: number; y: number }>;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -162,6 +167,11 @@ export function useMachineSimulation(
           beltPowered: frame.beltPowered,
           lostCargoCount: frame.lostCargoCount,
           stableCargoSpawns: frame.stableCargoSpawns,
+          pistonExtensions: frame.pistonExtensions,
+          bucketContents: frame.bucketContents,
+          bucketStates: frame.bucketStates,
+          springCompressions: frame.springCompressions,
+          sandParticlePositions: frame.sandParticlePositions,
           telemetry: {
             ...prev.telemetry,
             hookHeight: frame.hookY !== null ? Math.round(frame.hookY) : prev.telemetry.hookHeight,
@@ -229,6 +239,11 @@ function createInitialSnapshot(manifest: ExperimentManifest | null): RuntimeSnap
     beltPowered: false,
     lostCargoCount: 0,
     stableCargoSpawns: {},
+    pistonExtensions: {},
+    bucketContents: {},
+    bucketStates: {},
+    springCompressions: {},
+    sandParticlePositions: [],
     telemetry: {},
   };
 }

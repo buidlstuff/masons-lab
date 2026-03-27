@@ -30,7 +30,31 @@ export type PrimitiveKind =
   | 'conveyor'
   | 'hopper'
   | 'cargo-block'
-  | 'material-pile';
+  | 'material-pile'
+  | 'ramp'
+  | 'platform'
+  | 'wall'
+  | 'ball'
+  | 'rock'
+  | 'spring-linear'
+  | 'pulley'
+  | 'chain-sprocket'
+  | 'rack'
+  | 'piston'
+  | 'crane-arm'
+  | 'bucket'
+  | 'counterweight'
+  | 'cam'
+  | 'cam-follower'
+  | 'bevel-gear'
+  | 'flywheel'
+  | 'gearbox'
+  | 'chassis'
+  | 'chute'
+  | 'silo-bin'
+  | 'water'
+  | 'hinge'
+  | 'tunnel';
 
 export type BehaviorRecipeKind =
   | 'gear-mesh'
@@ -232,6 +256,36 @@ export interface MaterialPileConfig {
   quantity: number;
 }
 
+export interface RampConfig {
+  x: number;
+  y: number;
+  width: number;
+  angle: number;
+}
+
+export interface WallConfig {
+  x: number;
+  y: number;
+  height: number;
+}
+
+export interface PlatformConfig {
+  x: number;
+  y: number;
+  width: number;
+}
+
+export interface BallConfig {
+  x: number;
+  y: number;
+  radius: number;
+}
+
+export interface RockConfig {
+  x: number;
+  y: number;
+}
+
 export type PrimitiveConfig =
   | NodeConfig
   | BeamConfig
@@ -249,7 +303,12 @@ export type PrimitiveConfig =
   | ConveyorConfig
   | HopperConfig
   | CargoBlockConfig
-  | MaterialPileConfig;
+  | MaterialPileConfig
+  | RampConfig
+  | WallConfig
+  | PlatformConfig
+  | BallConfig
+  | RockConfig;
 
 export interface PrimitiveInstance {
   id: string;
@@ -521,6 +580,9 @@ export const SLICE_PARTS: PrimitiveKind[] = [
   'node',
   'wheel',
   'axle',
+  'ramp',
+  'platform',
+  'wall',
   // Power & Motion
   'motor',
   'gear',
@@ -536,11 +598,13 @@ export const SLICE_PARTS: PrimitiveKind[] = [
   'hopper',
   'cargo-block',
   'material-pile',
+  'ball',
+  'rock',
 ];
 
 export const PART_CATEGORIES: Array<{ label: string; kinds: PrimitiveKind[] }> = [
-  { label: 'Structure', kinds: ['node', 'wheel', 'axle'] },
+  { label: 'Structure', kinds: ['node', 'wheel', 'axle', 'ramp', 'platform', 'wall'] },
   { label: 'Power', kinds: ['motor', 'gear', 'winch', 'hook'] },
   { label: 'Rail', kinds: ['rail-segment', 'rail-switch', 'locomotive', 'wagon'] },
-  { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile'] },
+  { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile', 'ball', 'rock'] },
 ];

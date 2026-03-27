@@ -601,6 +601,28 @@ function drawPlacingPreview(
     case 'cargo-block':
       instance.rect(mx - 12, my - 12, 24, 24, 4);
       break;
+    case 'ramp':
+    case 'platform':
+      instance.push();
+      instance.translate(mx, my);
+      instance.rotate(placingKind === 'ramp' ? Math.PI / 9 : 0);
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, 120, 12, 2);
+      instance.pop();
+      break;
+    case 'wall':
+      instance.push();
+      instance.translate(mx, my);
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, 12, 80, 2);
+      instance.pop();
+      break;
+    case 'ball':
+      instance.circle(mx, my, 24);
+      break;
+    case 'rock':
+      instance.circle(mx, my, 32);
+      break;
     case 'locomotive':
       instance.rect(mx - 22, my - 18, 44, 24, 6);
       break;
@@ -1252,6 +1274,46 @@ function drawPrimitive(
         instance.textAlign(instance.CENTER, instance.CENTER);
         instance.text(`qty: ${quantity}`, x, y + 20);
       }
+      break;
+    }
+    // ---- NEW PARTS (Phase 1) ----
+    case 'ramp':
+    case 'platform': {
+      const cfg = primitive.config as { x: number; y: number; width?: number; angle?: number };
+      instance.push();
+      instance.translate(cfg.x, cfg.y);
+      instance.rotate(((cfg.angle ?? 0) * Math.PI) / 180);
+      instance.fill(selected ? 100 : 140, 110, 80);
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, cfg.width ?? 120, 12, 2);
+      instance.pop();
+      break;
+    }
+    case 'wall': {
+      const cfg = primitive.config as { x: number; y: number; height?: number };
+      instance.push();
+      instance.translate(cfg.x, cfg.y);
+      instance.fill(selected ? 100 : 120, 110, 100);
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, 12, cfg.height ?? 80, 2);
+      instance.pop();
+      break;
+    }
+    case 'ball': {
+      const pos = runtime.bodyPositions?.[primitive.id] ?? (primitive.config as { x: number; y: number });
+      const radius = (primitive.config as { radius?: number }).radius ?? 12;
+      instance.fill(selected ? 200 : 220, 80, 60);
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.circle(pos.x, pos.y, radius * 2);
+      break;
+    }
+    case 'rock': {
+      const pos = runtime.bodyPositions?.[primitive.id] ?? (primitive.config as { x: number; y: number });
+      instance.fill(selected ? 160 : 100, 95, 90);
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.circle(pos.x, pos.y, 32);
       break;
     }
     default:

@@ -166,6 +166,16 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
       return { id: `cargo-${nanoid(6)}`, kind, label: 'Cargo Block', config: { x, y, weight: 5 } };
     case 'material-pile':
       return { id: `pile-${nanoid(6)}`, kind, label: 'Material Pile', config: { x, y, quantity: 20 } };
+    case 'ramp':
+      return { id: `ramp-${nanoid(6)}`, kind, label: 'Ramp', config: { x, y, width: 120, angle: 20 } };
+    case 'platform':
+      return { id: `platform-${nanoid(6)}`, kind, label: 'Platform', config: { x, y, width: 120 } };
+    case 'wall':
+      return { id: `wall-${nanoid(6)}`, kind, label: 'Wall', config: { x, y, height: 80 } };
+    case 'ball':
+      return { id: `ball-${nanoid(6)}`, kind, label: 'Ball', config: { x, y, radius: 12 } };
+    case 'rock':
+      return { id: `rock-${nanoid(6)}`, kind, label: 'Rock', config: { x, y } };
     case 'rail-switch':
       return { id: `switch-${nanoid(6)}`, kind, label: 'Rail Switch', config: { x, y, branch: 'right' } };
     case 'locomotive':

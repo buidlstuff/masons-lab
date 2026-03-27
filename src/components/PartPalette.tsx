@@ -374,6 +374,30 @@ function countKinds(manifest: ExperimentManifest) {
     hopper: 0,
     'cargo-block': 0,
     'material-pile': 0,
+    ramp: 0,
+    platform: 0,
+    wall: 0,
+    ball: 0,
+    rock: 0,
+    'spring-linear': 0,
+    pulley: 0,
+    'chain-sprocket': 0,
+    rack: 0,
+    piston: 0,
+    'crane-arm': 0,
+    bucket: 0,
+    counterweight: 0,
+    cam: 0,
+    'cam-follower': 0,
+    'bevel-gear': 0,
+    flywheel: 0,
+    gearbox: 0,
+    chassis: 0,
+    chute: 0,
+    'silo-bin': 0,
+    water: 0,
+    hinge: 0,
+    tunnel: 0,
   };
 
   manifest.primitives.forEach((primitive) => {
@@ -409,10 +433,20 @@ function taglineForPart(kind: PrimitiveKind) {
       return 'Transfers and changes speed';
     case 'wheel':
       return 'Shows spinning clearly';
+    case 'ramp':
+      return 'Turns falling into rolling';
+    case 'platform':
+      return 'Flat support surface';
+    case 'wall':
+      return 'Stops or redirects motion';
     case 'conveyor':
       return 'Moves cargo across the floor';
     case 'hopper':
       return 'Collects what the conveyor feeds';
+    case 'ball':
+      return 'Rolls through machines';
+    case 'rock':
+      return 'Heavy piece that drops hard';
     case 'node':
       return 'Anchor point for beams';
     case 'winch':
@@ -436,6 +470,12 @@ function iconForPart(kind: PrimitiveKind): string {
       return 'o';
     case 'axle':
       return '=';
+    case 'ramp':
+      return '/';
+    case 'platform':
+      return '_';
+    case 'wall':
+      return '|';
     case 'motor':
       return 'M';
     case 'gear':
@@ -460,6 +500,10 @@ function iconForPart(kind: PrimitiveKind): string {
       return '#';
     case 'material-pile':
       return '^';
+    case 'ball':
+      return '0';
+    case 'rock':
+      return '@';
     default:
       return '+';
   }
