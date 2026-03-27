@@ -82,7 +82,18 @@ export function movePrimitive(manifest: ExperimentManifest, primitiveId: string,
     if (
       !attachedToId
       || !('x' in primitive.config && 'y' in primitive.config)
-      || (primitive.kind !== 'wheel' && primitive.kind !== 'motor' && primitive.kind !== 'bucket' && primitive.kind !== 'counterweight')
+      || (
+        primitive.kind !== 'wheel'
+        && primitive.kind !== 'motor'
+        && primitive.kind !== 'gear'
+        && primitive.kind !== 'pulley'
+        && primitive.kind !== 'chain-sprocket'
+        && primitive.kind !== 'flywheel'
+        && primitive.kind !== 'winch'
+        && primitive.kind !== 'crane-arm'
+        && primitive.kind !== 'bucket'
+        && primitive.kind !== 'counterweight'
+      )
     ) {
       return primitive;
     }
@@ -180,6 +191,42 @@ export function connectPrimitives(
   }
 
   if (
+    ['wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(source.kind)
+    && ['wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(target.kind)
+  ) {
+    const exists = manifest.primitives.some((primitive) => (
+      primitive.kind === 'rope'
+      && (
+        ((primitive.config as { fromId: string; toId: string }).fromId === sourceId
+          && (primitive.config as { fromId: string; toId: string }).toId === targetId)
+        || ((primitive.config as { fromId: string; toId: string }).fromId === targetId
+          && (primitive.config as { fromId: string; toId: string }).toId === sourceId)
+      )
+    ));
+    if (exists) {
+      return manifest;
+    }
+    const sourcePos = getAttachmentAnchor(source);
+    const targetPos = getAttachmentAnchor(target);
+    return {
+      ...manifest,
+      primitives: [
+        ...manifest.primitives,
+        {
+          id: `rope-${nanoid(6)}`,
+          kind: 'rope',
+          label: source.kind === 'chain-sprocket' || target.kind === 'chain-sprocket' ? 'Chain Link' : 'Drive Belt',
+          config: {
+            fromId: sourceId,
+            toId: targetId,
+            length: Math.max(40, Math.hypot(targetPos.x - sourcePos.x, targetPos.y - sourcePos.y)),
+          },
+        },
+      ],
+    };
+  }
+
+  if (
     (source.kind === 'wheel' && target.kind === 'chassis')
     || (source.kind === 'chassis' && target.kind === 'wheel')
   ) {
@@ -195,6 +242,21 @@ export function connectPrimitives(
     const motor = source.kind === 'motor' ? source : target;
     const chassis = source.kind === 'chassis' ? source : target;
     return attachPrimitive(manifest, motor.id, chassis.id);
+  }
+
+  if (
+    (
+      ['gear', 'pulley', 'chain-sprocket', 'flywheel', 'winch', 'crane-arm'].includes(source.kind)
+      && target.kind === 'chassis'
+    )
+    || (
+      source.kind === 'chassis'
+      && ['gear', 'pulley', 'chain-sprocket', 'flywheel', 'winch', 'crane-arm'].includes(target.kind)
+    )
+  ) {
+    const mounted = source.kind === 'chassis' ? target : source;
+    const chassis = source.kind === 'chassis' ? source : target;
+    return attachPrimitive(manifest, mounted.id, chassis.id);
   }
 
   if (

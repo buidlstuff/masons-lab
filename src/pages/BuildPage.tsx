@@ -683,6 +683,27 @@ export function BuildPage() {
     showStatus('Mounted the motor onto the chassis.', 'success');
   }, [manifest, persistDraft, selectedPrimitive, showStatus]);
 
+  const handleMountAssemblyToChassis = useCallback(() => {
+    if (!manifest || !selectedPrimitive) return;
+    const mountKinds: PrimitiveKind[] = ['gear', 'pulley', 'chain-sprocket', 'flywheel', 'winch', 'crane-arm'];
+    const mountable = mountKinds.includes(selectedPrimitive.kind)
+      ? selectedPrimitive
+      : findNearestPrimitive(
+          manifest,
+          selectedPrimitive,
+          (primitive) => mountKinds.includes(primitive.kind) && (primitive.config as { attachedToId?: string }).attachedToId !== selectedPrimitive.id,
+        );
+    const chassis = selectedPrimitive.kind === 'chassis'
+      ? selectedPrimitive
+      : findNearestPrimitive(manifest, selectedPrimitive, (primitive) => primitive.kind === 'chassis');
+    if (!mountable || !chassis) {
+      showStatus('Place both a chassis and a rotary part, winch, or crane arm first.', 'warning');
+      return;
+    }
+    void persistDraft(connectPrimitives(manifest, mountable.id, chassis.id), undefined, { recordHistory: true });
+    showStatus(`Mounted the ${(mountable.label ?? mountable.kind).toLowerCase()} onto the chassis.`, 'success');
+  }, [manifest, persistDraft, selectedPrimitive, showStatus]);
+
   const handleAttachArmLoad = useCallback((loadKind: 'bucket' | 'counterweight') => {
     if (!manifest || !selectedPrimitive) return;
     const arm = selectedPrimitive.kind === 'crane-arm'
@@ -717,6 +738,34 @@ export function BuildPage() {
     }
     void persistDraft(connectPrimitives(manifest, hook.id, cargo.id), undefined, { recordHistory: true });
     showStatus('Attached the cargo block to the hook.', 'success');
+  }, [manifest, persistDraft, selectedPrimitive, showStatus]);
+
+  const handleConnectBelt = useCallback(() => {
+    if (!manifest || !selectedPrimitive) return;
+    const beltKinds: PrimitiveKind[] = ['wheel', 'pulley', 'chain-sprocket', 'flywheel'];
+    if (!beltKinds.includes(selectedPrimitive.kind)) {
+      return;
+    }
+    const target = findNearestPrimitive(
+      manifest,
+      selectedPrimitive,
+      (primitive) => beltKinds.includes(primitive.kind)
+        && !manifest.primitives.some(
+          (item) => item.kind === 'rope'
+            && (
+              ((item.config as { fromId: string; toId: string }).fromId === selectedPrimitive.id
+                && (item.config as { fromId: string; toId: string }).toId === primitive.id)
+              || ((item.config as { fromId: string; toId: string }).fromId === primitive.id
+                && (item.config as { fromId: string; toId: string }).toId === selectedPrimitive.id)
+            ),
+        ),
+    );
+    if (!target) {
+      showStatus('Place another wheel, pulley, sprocket, or flywheel nearby first.', 'warning');
+      return;
+    }
+    void persistDraft(connectPrimitives(manifest, selectedPrimitive.id, target.id), undefined, { recordHistory: true });
+    showStatus('Connected the rotating parts with a visible belt link.', 'success');
   }, [manifest, persistDraft, selectedPrimitive, showStatus]);
 
   useEffect(() => {
@@ -1243,6 +1292,10 @@ export function BuildPage() {
             || selectedPrimitive?.kind === 'hook'
             || selectedPrimitive?.kind === 'node'
             || selectedPrimitive?.kind === 'wheel'
+            || selectedPrimitive?.kind === 'gear'
+            || selectedPrimitive?.kind === 'pulley'
+            || selectedPrimitive?.kind === 'chain-sprocket'
+            || selectedPrimitive?.kind === 'flywheel'
             || selectedPrimitive?.kind === 'chassis'
             || selectedPrimitive?.kind === 'motor'
             || selectedPrimitive?.kind === 'crane-arm'
@@ -1260,8 +1313,10 @@ export function BuildPage() {
             <p className="muted">
               {selectedPrimitive.kind === 'node'
                 ? 'Use this when two nodes should become a beam.'
-                : selectedPrimitive.kind === 'winch' || selectedPrimitive.kind === 'hook'
+                : selectedPrimitive.kind === 'hook'
                   ? 'Use this when a winch and hook are already on the canvas.'
+                  : selectedPrimitive.kind === 'winch'
+                    ? 'Use this to either hang the winch from a hook path or mount it onto a chassis.'
                   : 'Use this to mount or attach the selected part to the nearest compatible partner.'}
             </p>
             <div className="button-row vertical">
@@ -1281,6 +1336,13 @@ export function BuildPage() {
               </button>
               <button
                 type="button"
+                disabled={!selectedPrimitiveId || !['wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(selectedPrimitive.kind)}
+                onClick={handleConnectBelt}
+              >
+                Connect Rotating Parts with Belt
+              </button>
+              <button
+                type="button"
                 disabled={!selectedPrimitiveId || !['wheel', 'chassis'].includes(selectedPrimitive.kind)}
                 onClick={handleMountWheelToChassis}
               >
@@ -1292,6 +1354,13 @@ export function BuildPage() {
                 onClick={handleMountMotorToChassis}
               >
                 Mount Motor to Chassis
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPrimitiveId || !['gear', 'pulley', 'chain-sprocket', 'flywheel', 'winch', 'crane-arm', 'chassis'].includes(selectedPrimitive.kind)}
+                onClick={handleMountAssemblyToChassis}
+              >
+                Mount Rotary/Tool to Chassis
               </button>
               <button
                 type="button"

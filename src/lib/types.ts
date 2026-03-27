@@ -192,6 +192,9 @@ export interface GearConfig {
   input: boolean;
   rpm?: number;
   color: string;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export interface WinchConfig {
@@ -199,6 +202,9 @@ export interface WinchConfig {
   y: number;
   speed: number;
   ropeLength: number;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export interface RopeConfig {
@@ -338,12 +344,18 @@ export interface PulleyConfig {
   x: number;
   y: number;
   radius: number;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export interface ChainSprocketConfig {
   x: number;
   y: number;
   radius: number;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export interface FlywheelConfig {
@@ -351,6 +363,9 @@ export interface FlywheelConfig {
   y: number;
   radius: number;
   mass: number;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export interface GearboxConfig {
@@ -387,6 +402,9 @@ export interface CraneArmConfig {
   x: number;
   y: number;
   length: number;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export interface CounterweightConfig {

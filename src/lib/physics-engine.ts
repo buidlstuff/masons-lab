@@ -122,6 +122,7 @@ export function buildMatterWorld(
   let totalParticleCount = 0;
   const MAX_PARTICLES = 30;
   const siloFloorMap = new Map<string, Matter.Body>();
+  const beltLinkMap = new Map<string, Array<{ id: string; ratio: number }>>();
 
   const conveyorSupports: Array<{
     conveyorId: string;
@@ -325,9 +326,23 @@ export function buildMatterWorld(
 
     if (prim.kind === 'rope') {
       const cfg = prim.config as { fromId: string; toId: string; length: number };
-      const winchBody = bodyMap.get(cfg.fromId);
-      const hookBody = bodyMap.get(cfg.toId);
-      if (winchBody && hookBody) {
+      const fromPrim = manifest.primitives.find((item) => item.id === cfg.fromId);
+      const toPrim = manifest.primitives.find((item) => item.id === cfg.toId);
+      if (fromPrim && toPrim && isRotatingPrimitiveKind(fromPrim.kind) && isRotatingPrimitiveKind(toPrim.kind)) {
+        const ratioAtoB = rotatingRadius(fromPrim) / Math.max(1, rotatingRadius(toPrim));
+        const ratioBtoA = rotatingRadius(toPrim) / Math.max(1, rotatingRadius(fromPrim));
+        if (!beltLinkMap.has(fromPrim.id)) beltLinkMap.set(fromPrim.id, []);
+        if (!beltLinkMap.has(toPrim.id)) beltLinkMap.set(toPrim.id, []);
+        if (!beltLinkMap.get(fromPrim.id)!.some((link) => link.id === toPrim.id)) {
+          beltLinkMap.get(fromPrim.id)!.push({ id: toPrim.id, ratio: ratioAtoB });
+        }
+        if (!beltLinkMap.get(toPrim.id)!.some((link) => link.id === fromPrim.id)) {
+          beltLinkMap.get(toPrim.id)!.push({ id: fromPrim.id, ratio: ratioBtoA });
+        }
+      } else {
+        const winchBody = bodyMap.get(cfg.fromId);
+        const hookBody = bodyMap.get(cfg.toId);
+        if (!winchBody || !hookBody) continue;
         const constraint = Matter.Constraint.create({
           bodyA: winchBody,
           bodyB: hookBody,
@@ -362,7 +377,17 @@ export function buildMatterWorld(
       }
     }
 
-    if (prim.kind === 'wheel' || prim.kind === 'motor' || prim.kind === 'bucket' || prim.kind === 'counterweight') {
+    if (
+      prim.kind === 'wheel'
+      || prim.kind === 'motor'
+      || prim.kind === 'gear'
+      || prim.kind === 'pulley'
+      || prim.kind === 'chain-sprocket'
+      || prim.kind === 'flywheel'
+      || prim.kind === 'winch'
+      || prim.kind === 'bucket'
+      || prim.kind === 'counterweight'
+    ) {
       const cfg = prim.config as {
         attachedToId?: string;
         attachOffsetX?: number;
@@ -412,14 +437,32 @@ export function buildMatterWorld(
     }
 
     if (prim.kind === 'crane-arm') {
-      const cfg = prim.config as { x: number; y: number; length?: number };
+      const cfg = prim.config as {
+        x: number;
+        y: number;
+        length?: number;
+        attachedToId?: string;
+        attachOffsetX?: number;
+        attachOffsetY?: number;
+      };
       const armBody = bodyMap.get(prim.id);
       if (armBody) {
         const length = cfg.length ?? 120;
+        const parentBody = cfg.attachedToId ? bodyMap.get(cfg.attachedToId) : null;
         Matter.World.add(
           engine.world,
           Matter.Constraint.create({
-            pointA: { x: cfg.x, y: cfg.y },
+            ...(parentBody
+              ? {
+                  bodyA: parentBody,
+                  pointA: {
+                    x: cfg.attachOffsetX ?? 0,
+                    y: cfg.attachOffsetY ?? 0,
+                  },
+                }
+              : {
+                  pointA: { x: cfg.x, y: cfg.y },
+                }),
             bodyB: armBody,
             pointB: { x: -length / 2, y: 0 },
             length: 0,
@@ -436,6 +479,8 @@ export function buildMatterWorld(
   for (const prim of manifest.primitives) {
     if (prim.kind !== 'gear' && prim.kind !== 'pulley' && prim.kind !== 'chain-sprocket') continue;
     // Flywheels are intentionally not pinned so later phases can mount them on moving assemblies.
+    const cfg = prim.config as { attachedToId?: string };
+    if (cfg.attachedToId) continue;
     const body = bodyMap.get(prim.id);
     if (!body) continue;
     Matter.World.add(
@@ -720,6 +765,13 @@ export function buildMatterWorld(
           const meshVel = -driverVel / ratio;
           driven.set(meshId, meshVel);
           queue.push([meshId, meshVel]);
+        }
+      }
+      for (const { id: linkId, ratio } of beltLinkMap.get(driverId) ?? []) {
+        if (!driven.has(linkId)) {
+          const linkVel = driverVel / ratio;
+          driven.set(linkId, linkVel);
+          queue.push([linkId, linkVel]);
         }
       }
       hop += 1;
@@ -1103,6 +1155,17 @@ export function buildMatterWorld(
           flywheelVisited.add(meshId);
           flywheelQueue.push([meshId, meshVel]);
         }
+        for (const { id: linkId, ratio } of beltLinkMap.get(driverId) ?? []) {
+          if (flywheelVisited.has(linkId) || drivenVels.has(linkId)) continue;
+          const linkVel = vel / ratio;
+          const linkBody = bodyMap.get(linkId);
+          if (linkBody) {
+            Matter.Body.setAngularVelocity(linkBody, linkVel);
+          }
+          inertiaDriven.set(linkId, linkVel);
+          flywheelVisited.add(linkId);
+          flywheelQueue.push([linkId, linkVel]);
+        }
         flywheelHops += 1;
       }
     }
@@ -1475,10 +1538,12 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
     }
 
     case 'winch': {
-      const cfg = prim.config as { x: number; y: number };
+      const cfg = prim.config as { x: number; y: number; attachedToId?: string };
       return Matter.Bodies.rectangle(cfg.x, cfg.y, 40, 40, {
         label: prim.id,
-        isStatic: true,
+        isStatic: !cfg.attachedToId,
+        density: cfg.attachedToId ? 0.0015 : undefined,
+        frictionAir: cfg.attachedToId ? 0.08 : undefined,
       });
     }
 

@@ -254,6 +254,12 @@ function remapPrimitiveConfig(
     (primitive.kind === 'cargo-block'
       || primitive.kind === 'wheel'
       || primitive.kind === 'motor'
+      || primitive.kind === 'gear'
+      || primitive.kind === 'pulley'
+      || primitive.kind === 'chain-sprocket'
+      || primitive.kind === 'flywheel'
+      || primitive.kind === 'winch'
+      || primitive.kind === 'crane-arm'
       || primitive.kind === 'bucket'
       || primitive.kind === 'counterweight')
     && typeof config.attachedToId === 'string'

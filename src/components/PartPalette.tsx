@@ -416,25 +416,25 @@ function connectionHintForKind(kind: PrimitiveKind) {
     case 'motor':
       return 'Motors feel best when a gear, wheel, pulley, flywheel, or conveyor can pick up the power.';
     case 'gear':
-      return 'Gears want either motor reach or contact with another rotating part.';
+      return 'Gears want motor reach, contact with another rotating part, or a chassis mount for a real drivetrain.';
     case 'pulley':
     case 'chain-sprocket':
-      return 'These mesh with gears and pulleys, so place them touching another rotating part or inside a motor ring.';
+      return 'These can mesh by contact, use Quick Connect for a visible belt/chain link, or mount onto a chassis.';
     case 'flywheel':
-      return 'Flywheels store spin, so feed them from a motor or gear train first.';
+      return 'Flywheels store spin, so feed them from a motor or belt train and mount them onto a frame if needed.';
     case 'gearbox':
       return 'Gearboxes work best with rotating parts on both sides of the box.';
     case 'chassis':
       return 'Chassis parts come alive once wheels or a motor are mounted onto them.';
     case 'crane-arm':
-      return 'Crane arms are strongest when they pick up a bucket or counterweight through Quick Connect.';
+      return 'Crane arms are strongest when they are mounted to a chassis and pick up a bucket or counterweight.';
     case 'cargo-block':
       return 'Cargo can be dropped loose or hooked directly to a lifting tool.';
     case 'conveyor':
       return 'Conveyors are easiest to read when cargo moves into a hopper.';
     case 'winch':
     case 'hook':
-      return 'Hoists only make sense once both the winch and hook are on the canvas.';
+      return 'Hoists only make sense once the winch and hook are linked, and the winch can also be mounted to a chassis.';
     case 'rail-segment':
       return 'Rails define the path, but trains still need their trackId set in the Inspector.';
     default:

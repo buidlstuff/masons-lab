@@ -299,15 +299,15 @@ export function MachineCanvas({
     if (!sel) return 'Click a part to select · Drag to reposition';
     switch (sel.kind) {
       case 'motor':    return 'Motor — place a rotating part inside the green ring to drive it';
-      case 'gear':     return 'Gear — place another rotating part touching this one to mesh it';
+      case 'gear':     return 'Gear — mesh it with another rotating part, or mount it onto a chassis as part of a drivetrain';
       case 'wheel':    return 'Wheel — inside Motor range it spins · touching a rotating part it meshes';
       case 'chassis':
         return 'Chassis — mount wheels and a motor onto it to build a simple rolling machine';
       case 'pulley':
       case 'chain-sprocket':
-        return 'Rotating part — place it in a motor ring or touching another rotating part to wake it up';
+        return 'Rotating part — place it in a motor ring, touch another rotating part, or Quick Connect a belt link';
       case 'flywheel':
-        return 'Flywheel — feed it from a motor or gear train to store motion';
+        return 'Flywheel — feed it from a motor, gear train, or belt link to store motion';
       case 'gearbox':
         return 'Gearbox — place rotating parts on both sides to transmit a ratio change';
       case 'piston':
@@ -317,7 +317,7 @@ export function MachineCanvas({
       case 'spring-linear':
         return 'Linear spring — it stores stretch and compression between the anchor and plate';
       case 'crane-arm':
-        return 'Crane arm — it pivots around the left end and can sweep loads through an arc';
+        return 'Crane arm — mount it to a chassis or let it pivot from the ground, then hang a bucket or counterweight';
       case 'counterweight':
         return 'Counterweight — a heavy block that can balance or collide with other parts';
       case 'bucket':
@@ -334,7 +334,7 @@ export function MachineCanvas({
         return 'Tunnel — a covered channel that keeps flow between two openings';
       case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
       case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
-      case 'winch':    return 'Winch — place a Hook below, then Quick Connect → Winch to Hook';
+      case 'winch':    return 'Winch — place a Hook below for lifting, or mount it onto a chassis first';
       case 'node':     return 'Node — place another Node then Quick Connect → Beam';
       case 'hook':     return 'Hook — Quick Connect to attach it to a Winch';
       case 'locomotive': return 'Locomotive — place Rail Segment, set its trackId in the Inspector';
@@ -1406,6 +1406,8 @@ function drawPrimitive(
       const cfg = primitive.config as { x: number; y: number; length?: number };
       const pos = runtime.bodyPositions?.[primitive.id] ?? { x: cfg.x + (cfg.length ?? 120) / 2, y: cfg.y, angle: 0 };
       const length = cfg.length ?? 120;
+      const pivotX = pos.x - Math.cos(pos.angle ?? 0) * (length / 2);
+      const pivotY = pos.y - Math.sin(pos.angle ?? 0) * (length / 2);
       instance.push();
       instance.translate(pos.x, pos.y);
       instance.rotate(pos.angle ?? 0);
@@ -1416,7 +1418,7 @@ function drawPrimitive(
       instance.pop();
       instance.fill(selected ? '#fbbf24' : '#94a3b8');
       instance.noStroke();
-      instance.circle(cfg.x, cfg.y, 12);
+      instance.circle(pivotX, pivotY, 12);
       break;
     }
     case 'counterweight': {
@@ -1592,7 +1594,7 @@ function drawPrimitive(
       break;
     }
     case 'winch': {
-      const { x, y } = primitive.config as { x: number; y: number };
+      const { x, y } = getLivePos(primitive, runtime);
       instance.fill(selected ? '#374151' : '#1f2937');
       instance.stroke(selected ? '#fbbf24' : highlight);
       instance.rect(x - 20, y - 20, 40, 40, 8);
@@ -1609,12 +1611,16 @@ function drawPrimitive(
       const phys = runtime.bodyPositions?.[primitive.id];
       const hx = phys ? phys.x : config.x;
       const hy = phys ? phys.y : (runtime.hookY || config.y);
-      const winchPrim = primitives.find((p) => p.kind === 'winch');
-      const wx = winchPrim ? (winchPrim.config as { x: number }).x : config.x;
-      const wy = winchPrim ? (winchPrim.config as { y: number }).y : config.y;
+      const ropePrim = primitives.find(
+        (item) => item.kind === 'rope' && (item.config as { toId?: string }).toId === primitive.id,
+      );
+      const winchPrim = ropePrim
+        ? findPrimitiveById(primitives, (ropePrim.config as { fromId: string }).fromId)
+        : primitives.find((p) => p.kind === 'winch');
+      const winchPos = winchPrim ? getLivePos(winchPrim, runtime) : { x: config.x, y: config.y };
       instance.stroke('#f59e0b');
       instance.strokeWeight(2);
-      instance.line(wx, wy, hx, hy);
+      instance.line(winchPos.x, winchPos.y, hx, hy);
       instance.noFill();
       instance.stroke(selected ? '#fbbf24' : '#94a3b8');
       instance.strokeWeight(selected ? 3 : 2);
