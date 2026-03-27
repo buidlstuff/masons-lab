@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { buildMatterWorld, type PhysicsWorld } from './physics-engine';
 import type { BuildTelemetry, CargoLifecycleState, ExperimentManifest, PrimitiveInstance } from './types';
-import Matter from 'matter-js';
+import type { PhysicsWorld } from './physics-engine';
+
+type MatterRuntime = typeof import('matter-js');
 
 export interface RuntimeSnapshot {
   time: number;
@@ -29,16 +30,21 @@ export interface RuntimeSnapshot {
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useMachineSimulation(
-  manifest: ExperimentManifest,
+  manifest: ExperimentManifest | null,
   controlValues: Record<string, string | number | boolean>,
   options?: {
     stableCargoSpawns?: Record<string, { x: number; y: number }>;
+    enabled?: boolean;
   },
-): RuntimeSnapshot {
+): { snapshot: RuntimeSnapshot; status: 'loading' | 'ready' } {
   const [snapshot, setSnapshot] = useState<RuntimeSnapshot>(() => createInitialSnapshot(manifest));
+  const [status, setStatus] = useState<'loading' | 'ready'>(() => (
+    manifest && manifest.metadata.recipeId ? 'ready' : 'loading'
+  ));
 
   // Refs let the single rAF loop pick up the latest values without restarting.
   const physicsRef = useRef<PhysicsWorld | null>(null);
+  const matterRef = useRef<MatterRuntime | null>(null);
   const snapshotRef = useRef<RuntimeSnapshot>(snapshot);
   const controlsRef = useRef(controlValues);
   const manifestRef = useRef(manifest);
@@ -62,13 +68,7 @@ export function useMachineSimulation(
     let cancelled = false;
     physicsRef.current?.cleanup();
     physicsRef.current = null;
-
-    const recipeId = manifest.metadata.recipeId;
-    if (!recipeId) {
-      physicsRef.current = buildMatterWorld(manifest, {
-        stableCargoSpawns: options?.stableCargoSpawns,
-      });
-    }
+    matterRef.current = null;
 
     const initial = createInitialSnapshot(manifest);
     snapshotRef.current = initial;
@@ -78,12 +78,52 @@ export function useMachineSimulation(
       }
     });
 
+    if (!options?.enabled || !manifest) {
+      setStatus('loading');
+      return () => {
+        cancelled = true;
+        physicsRef.current?.cleanup();
+        physicsRef.current = null;
+        matterRef.current = null;
+      };
+    }
+
+    const recipeId = manifest.metadata.recipeId;
+    if (recipeId) {
+      setStatus('ready');
+      return () => {
+        cancelled = true;
+        physicsRef.current?.cleanup();
+        physicsRef.current = null;
+        matterRef.current = null;
+      };
+    }
+
+    setStatus('loading');
+    void Promise.all([import('./physics-engine'), import('matter-js')])
+      .then(([physicsModule, matterModule]) => {
+        if (cancelled) {
+          return;
+        }
+        physicsRef.current = physicsModule.buildMatterWorld(manifest, {
+          stableCargoSpawns: options?.stableCargoSpawns,
+        });
+        matterRef.current = (matterModule.default ?? matterModule) as MatterRuntime;
+        setStatus('ready');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStatus('ready');
+        }
+      });
+
     return () => {
       cancelled = true;
       physicsRef.current?.cleanup();
       physicsRef.current = null;
+      matterRef.current = null;
     };
-  }, [manifest, options?.stableCargoSpawns]);
+  }, [manifest, options?.enabled, options?.stableCargoSpawns]);
 
   // Single rAF loop — never restarts, reads everything through refs.
   useEffect(() => {
@@ -98,12 +138,13 @@ export function useMachineSimulation(
       frame = requestAnimationFrame(tick);
 
       const pw = physicsRef.current;
+      const matter = matterRef.current;
       const currentManifest = manifestRef.current;
       const currentControls = controlsRef.current;
 
-      if (pw) {
+      if (pw && matter) {
         // ── Physics mode (free build) ──────────────────────────────────────
-        Matter.Engine.update(pw.engine, dt * 1000);
+        matter.Engine.update(pw.engine, dt * 1000);
         const prev = snapshotRef.current;
         const frame = pw.tick(dt, prev.rotations, prev.hookY, prev.hopperFill, prev.trainProgress);
         const next: RuntimeSnapshot = {
@@ -144,9 +185,13 @@ export function useMachineSimulation(
         };
         snapshotRef.current = next;
         setSnapshot(next);
-      } else {
+      } else if (currentManifest) {
         // ── Scripted simulation mode (recipe machines) ─────────────────────
         const next = stepSimulation(currentManifest, snapshotRef.current, currentControls, dt);
+        snapshotRef.current = next;
+        setSnapshot(next);
+      } else {
+        const next = { ...snapshotRef.current, time: snapshotRef.current.time + dt };
         snapshotRef.current = next;
         setSnapshot(next);
       }
@@ -159,12 +204,12 @@ export function useMachineSimulation(
     };
   }, []); // intentionally empty — everything accessed through refs
 
-  return snapshot;
+  return { snapshot, status };
 }
 
 // ─── Scripted simulation (recipe machines — unchanged) ───────────────────────
 
-function createInitialSnapshot(manifest: ExperimentManifest): RuntimeSnapshot {
+function createInitialSnapshot(manifest: ExperimentManifest | null): RuntimeSnapshot {
   const primitives = manifest?.primitives ?? [];
   const hook = primitives.find((primitive) => primitive.kind === 'hook');
   const hookY = hook && 'y' in hook.config ? (hook.config.y as number) : 0;
@@ -188,7 +233,7 @@ function createInitialSnapshot(manifest: ExperimentManifest): RuntimeSnapshot {
   };
 }
 
-function getInitialHopperFill(manifest: ExperimentManifest) {
+function getInitialHopperFill(manifest: ExperimentManifest | null) {
   const hopper = (manifest?.primitives ?? []).find((primitive) => primitive.kind === 'hopper');
   return hopper && 'fill' in hopper.config ? (hopper.config.fill as number) : 0;
 }

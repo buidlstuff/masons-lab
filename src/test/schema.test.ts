@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getFeaturedMachines } from '../lib/seed-data';
+import { getFeaturedMachines } from '../lib/starter-catalog';
 import { validateExperimentManifest } from '../lib/validation';
 
 describe('experiment validation', () => {

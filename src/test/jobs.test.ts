@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateProject } from '../lib/jobs';
 import { createDraftPlayState } from '../lib/play-state';
-import { createEmptyManifest, getStarterJobs } from '../lib/seed-data';
+import { createEmptyManifest } from '../lib/seed-data';
+import { getStarterJobs } from '../lib/starter-catalog';
 import type { RuntimeSnapshot } from '../lib/simulation';
 
 function createRuntimeSnapshot(overrides: Partial<RuntimeSnapshot> = {}): RuntimeSnapshot {

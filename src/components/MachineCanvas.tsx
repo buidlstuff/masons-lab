@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import p5 from 'p5';
+import { useEffect, useRef, useState } from 'react';
+import type p5 from 'p5';
 import type { BuildTelemetry, ExperimentManifest, PrimitiveInstance, PrimitiveKind } from '../lib/types';
 import { findPrimitiveById, type RuntimeSnapshot } from '../lib/simulation';
 
@@ -30,6 +30,7 @@ interface MachineCanvasProps {
   onTelemetry: (telemetry: BuildTelemetry) => void;
   onConnectionFlash?: (ids: string[]) => void;
   onTogglePower?: (primitiveId: string) => void;
+  onCanvasReady?: () => void;
 }
 
 export function MachineCanvas({
@@ -46,8 +47,10 @@ export function MachineCanvas({
   onTelemetry,
   onConnectionFlash,
   onTogglePower,
+  onCanvasReady,
 }: MachineCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const [canvasReady, setCanvasReady] = useState(false);
 
   // Refs keep the sketch alive while props change
   const manifestRef = useRef(manifest);
@@ -61,6 +64,7 @@ export function MachineCanvas({
   const onTelemetryRef = useRef(onTelemetry);
   const onConnectionFlashRef = useRef(onConnectionFlash);
   const onTogglePowerRef = useRef(onTogglePower);
+  const onCanvasReadyRef = useRef(onCanvasReady);
   const diagnosticsRef = useRef(diagnosticsEnabled ?? false);
   const draggingIdRef = useRef<string | undefined>(undefined);
   const hoveredIdRef = useRef<string | undefined>(undefined);
@@ -88,8 +92,10 @@ export function MachineCanvas({
     onTelemetryRef.current = onTelemetry;
     onConnectionFlashRef.current = onConnectionFlash;
     onTogglePowerRef.current = onTogglePower;
+    onCanvasReadyRef.current = onCanvasReady;
     diagnosticsRef.current = diagnosticsEnabled ?? false;
   }, [
+    onCanvasReady,
     diagnosticsEnabled,
     manifest,
     onConnectionFlash,
@@ -107,140 +113,150 @@ export function MachineCanvas({
   useEffect(() => {
     if (!hostRef.current) return;
 
-    const sketch = new p5((instance) => {
-      instance.setup = () => {
-        instance.createCanvas(960, 560);
-        instance.frameRate(60);
-      };
+    let sketch: p5 | null = null;
+    let cancelled = false;
+    setCanvasReady(false);
 
-      instance.draw = () => {
-        // ── Connection flash detection ────────────────────────────────
-        const curDrives = runtimeRef.current.motorDrives ?? {};
-        const prev = prevDrivesRef.current;
-        const newlyConnected: string[] = [];
-        for (const [mId, ids] of Object.entries(curDrives)) {
-          for (const id of ids) {
-            if (!(prev[mId] ?? []).includes(id)) newlyConnected.push(id);
+    void import('../lib/p5-lite').then(({ default: P5 }) => {
+      if (cancelled || !hostRef.current) {
+        return;
+      }
+
+      sketch = new P5((instance) => {
+        instance.setup = () => {
+          instance.createCanvas(960, 560);
+          instance.frameRate(60);
+          setCanvasReady(true);
+          onCanvasReadyRef.current?.();
+        };
+
+        instance.draw = () => {
+          // ── Connection flash detection ────────────────────────────────
+          const curDrives = runtimeRef.current.motorDrives ?? {};
+          const prev = prevDrivesRef.current;
+          const newlyConnected: string[] = [];
+          for (const [mId, ids] of Object.entries(curDrives)) {
+            for (const id of ids) {
+              if (!(prev[mId] ?? []).includes(id)) newlyConnected.push(id);
+            }
           }
-        }
-        if (newlyConnected.length > 0) {
-          const now = Date.now();
-          for (const id of newlyConnected) flashTimesRef.current[id] = now;
-          onConnectionFlashRef.current?.(newlyConnected);
-        }
-        prevDrivesRef.current = curDrives;
+          if (newlyConnected.length > 0) {
+            const now = Date.now();
+            for (const id of newlyConnected) flashTimesRef.current[id] = now;
+            onConnectionFlashRef.current?.(newlyConnected);
+          }
+          prevDrivesRef.current = curDrives;
 
-        // During drag, apply buffered position to the manifest for rendering
-        // so the part follows the cursor without triggering a physics rebuild.
-        const dragBuf = dragBufferRef.current;
-        const displayManifest = dragBuf
-          ? applyDragToManifest(manifestRef.current, dragBuf)
-          : manifestRef.current;
+          const dragBuf = dragBufferRef.current;
+          const displayManifest = dragBuf
+            ? applyDragToManifest(manifestRef.current, dragBuf)
+            : manifestRef.current;
 
-        drawScene(
-          instance,
-          displayManifest,
-          runtimeRef.current,
-          selectedRef.current,
-          hoveredIdRef.current,
-          draggingIdRef.current,
-          placingRef.current,
-          projectGuideRef.current,
-          flashTimesRef.current,
-          diagnosticsRef.current,
-        );
-        onTelemetryRef.current(runtimeRef.current.telemetry);
-
-        const hoveredPrimitive = hoveredIdRef.current
-          ? manifestRef.current.primitives.find((primitive) => primitive.id === hoveredIdRef.current)
-          : undefined;
-        if (placingRef.current) {
-          instance.cursor('crosshair');
-        } else if (draggingIdRef.current) {
-          instance.cursor('grabbing');
-        } else if (hoveredPrimitive && isDraggablePrimitive(hoveredPrimitive)) {
-          instance.cursor('grab');
-        } else if (hoveredPrimitive) {
-          instance.cursor('pointer');
-        } else {
-          instance.cursor('default');
-        }
-      };
-
-      instance.mousePressed = () => {
-        const x = instance.mouseX;
-        const y = instance.mouseY;
-        if (x < 0 || x > instance.width || y < 0 || y > instance.height) return;
-
-        if (placingRef.current) {
-          onPlaceRef.current(x, y);
-          return;
-        }
-
-        const hit = hitTest(
-          manifestRef.current.primitives,
-          x,
-          y,
-          runtimeRef.current,
-        );
-        const anchor = hit ? getPrimitiveAnchor(hit, manifestRef.current.primitives, runtimeRef.current) : undefined;
-        dragOffsetRef.current = anchor
-          ? { x: anchor.x - x, y: anchor.y - y }
-          : { x: 0, y: 0 };
-        draggingIdRef.current = hit && isDraggablePrimitive(hit) ? hit.id : undefined;
-        dragBufferRef.current = null;
-        pressPositionRef.current = { x, y };
-        onSelectRef.current(hit?.id);
-      };
-
-      instance.mouseDragged = () => {
-        const id = draggingIdRef.current;
-        if (!id) return;
-        const nx = instance.mouseX + dragOffsetRef.current.x;
-        const ny = instance.mouseY + dragOffsetRef.current.y;
-        // Buffer position locally — don't call onMove yet (avoids per-frame physics rebuild)
-        dragBufferRef.current = { id, x: nx, y: ny };
-      };
-
-      instance.mouseReleased = () => {
-        const pressPos = pressPositionRef.current;
-        const releaseX = instance.mouseX;
-        const releaseY = instance.mouseY;
-        const moved = pressPos
-          ? Math.hypot(releaseX - pressPos.x, releaseY - pressPos.y) > 5
-          : false;
-
-        if (draggingIdRef.current && dragBufferRef.current && moved) {
-          // Commit drag — one physics rebuild per drag operation
-          onMoveRef.current(
-            dragBufferRef.current.id,
-            dragBufferRef.current.x,
-            dragBufferRef.current.y,
+          drawScene(
+            instance,
+            displayManifest,
+            runtimeRef.current,
+            selectedRef.current,
+            hoveredIdRef.current,
+            draggingIdRef.current,
+            placingRef.current,
+            projectGuideRef.current,
+            flashTimesRef.current,
+            diagnosticsRef.current,
           );
-        } else if (!moved && draggingIdRef.current && onTogglePowerRef.current) {
-          // Click without drag: toggle motor power
-          const prim = manifestRef.current.primitives.find((p) => p.id === draggingIdRef.current);
-          if (prim?.kind === 'motor') {
-            onTogglePowerRef.current(prim.id);
+          onTelemetryRef.current(runtimeRef.current.telemetry);
+
+          const hoveredPrimitive = hoveredIdRef.current
+            ? manifestRef.current.primitives.find((primitive) => primitive.id === hoveredIdRef.current)
+            : undefined;
+          if (placingRef.current) {
+            instance.cursor('crosshair');
+          } else if (draggingIdRef.current) {
+            instance.cursor('grabbing');
+          } else if (hoveredPrimitive && isDraggablePrimitive(hoveredPrimitive)) {
+            instance.cursor('grab');
+          } else if (hoveredPrimitive) {
+            instance.cursor('pointer');
+          } else {
+            instance.cursor('default');
           }
-        }
+        };
 
-        draggingIdRef.current = undefined;
-        dragBufferRef.current = null;
-        pressPositionRef.current = null;
-      };
+        instance.mousePressed = () => {
+          const x = instance.mouseX;
+          const y = instance.mouseY;
+          if (x < 0 || x > instance.width || y < 0 || y > instance.height) return;
 
-      instance.mouseMoved = () => {
-        hoveredIdRef.current = hitTest(
-          manifestRef.current.primitives,
-          instance.mouseX,
-          instance.mouseY,
-          runtimeRef.current,
-        )?.id;
-      };
-    }, hostRef.current);
+          if (placingRef.current) {
+            onPlaceRef.current(x, y);
+            return;
+          }
 
-    return () => { sketch.remove(); };
+          const hit = hitTest(
+            manifestRef.current.primitives,
+            x,
+            y,
+            runtimeRef.current,
+          );
+          const anchor = hit ? getPrimitiveAnchor(hit, manifestRef.current.primitives, runtimeRef.current) : undefined;
+          dragOffsetRef.current = anchor
+            ? { x: anchor.x - x, y: anchor.y - y }
+            : { x: 0, y: 0 };
+          draggingIdRef.current = hit && isDraggablePrimitive(hit) ? hit.id : undefined;
+          dragBufferRef.current = null;
+          pressPositionRef.current = { x, y };
+          onSelectRef.current(hit?.id);
+        };
+
+        instance.mouseDragged = () => {
+          const id = draggingIdRef.current;
+          if (!id) return;
+          const nx = instance.mouseX + dragOffsetRef.current.x;
+          const ny = instance.mouseY + dragOffsetRef.current.y;
+          dragBufferRef.current = { id, x: nx, y: ny };
+        };
+
+        instance.mouseReleased = () => {
+          const pressPos = pressPositionRef.current;
+          const releaseX = instance.mouseX;
+          const releaseY = instance.mouseY;
+          const moved = pressPos
+            ? Math.hypot(releaseX - pressPos.x, releaseY - pressPos.y) > 5
+            : false;
+
+          if (draggingIdRef.current && dragBufferRef.current && moved) {
+            onMoveRef.current(
+              dragBufferRef.current.id,
+              dragBufferRef.current.x,
+              dragBufferRef.current.y,
+            );
+          } else if (!moved && draggingIdRef.current && onTogglePowerRef.current) {
+            const prim = manifestRef.current.primitives.find((p) => p.id === draggingIdRef.current);
+            if (prim?.kind === 'motor') {
+              onTogglePowerRef.current(prim.id);
+            }
+          }
+
+          draggingIdRef.current = undefined;
+          dragBufferRef.current = null;
+          pressPositionRef.current = null;
+        };
+
+        instance.mouseMoved = () => {
+          hoveredIdRef.current = hitTest(
+            manifestRef.current.primitives,
+            instance.mouseX,
+            instance.mouseY,
+            runtimeRef.current,
+          )?.id;
+        };
+      }, hostRef.current);
+    });
+
+    return () => {
+      cancelled = true;
+      sketch?.remove();
+    };
   }, []); // intentionally empty
 
   const hint = (() => {
@@ -280,7 +296,18 @@ export function MachineCanvas({
           {activeJobHint}
         </div>
       )}
-      <div className="machine-canvas" ref={hostRef} />
+      <div className="machine-canvas" ref={hostRef}>
+        {!canvasReady ? (
+          <div className="machine-canvas-loading" aria-hidden="true">
+            <div className="machine-canvas-loading-grid" />
+            <div className="machine-canvas-loading-copy">
+              <div className="skeleton-line skeleton-line-eyebrow" />
+              <div className="skeleton-line skeleton-line-copy" />
+              <div className="skeleton-line skeleton-line-copy short" />
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

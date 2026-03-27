@@ -1,5 +1,4 @@
 import { db } from './db';
-import { getFeaturedMachines, getStarterBlueprints, getStarterJobs } from './seed-data';
 
 export async function ensureSeedData() {
   const contentEpoch = 'relaunch-3-projects-v2';
@@ -8,6 +7,7 @@ export async function ensureSeedData() {
     return;
   }
 
+  const { getFeaturedMachines, getStarterBlueprints, getStarterJobs } = await import('./starter-catalog');
   const machines = getFeaturedMachines();
   const blueprints = getStarterBlueprints();
   const jobs = getStarterJobs();

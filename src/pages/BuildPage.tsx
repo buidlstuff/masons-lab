@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { AssistantPanel } from '../components/AssistantPanel';
 import { ControlPanel } from '../components/ControlPanel';
 import { HudOverlay } from '../components/HudOverlay';
 import { StarterOverlay } from '../components/StarterOverlay';
 import { InspectorPanel } from '../components/InspectorPanel';
 import { MachineCanvas } from '../components/MachineCanvas';
 import { PartPalette } from '../components/PartPalette';
-import { editExperiment, explainExperiment, generateExperiment } from '../lib/api';
+import { RouteSkeleton } from '../components/RouteSkeleton';
 import { createBlueprintFromExperiment, mountBlueprintToManifest } from '../lib/blueprints';
+import { useAppBoot } from '../lib/app-boot';
 import { db } from '../lib/db';
 import { addPrimitive, connectPrimitives, deletePrimitive, movePrimitive, updatePrimitive } from '../lib/editor';
 import {
@@ -26,7 +26,14 @@ import {
   START_CHECKPOINT_ID,
   toggleDiagnostics,
 } from '../lib/play-state';
-import { createDraftFromBlueprint, createDraftFromMachine, createDraftFromProject, createEmptyDraft } from '../lib/seed-data';
+import { markPerformance, measurePerformance } from '../lib/perf';
+import {
+  createDraftFromBlueprint,
+  createDraftFromMachine,
+  createDraftFromProject,
+  createEmptyDraft,
+  createEmptyManifest,
+} from '../lib/seed-data';
 import { useMachineSimulation, type RuntimeSnapshot } from '../lib/simulation';
 import { playUiTone } from '../lib/sfx';
 import { awardJobXp, TIER_NAMES } from '../lib/xp';
@@ -40,12 +47,23 @@ import type {
   PrimitiveConfig,
   PrimitiveKind,
   PrimitiveInstance,
+  SavedBlueprintRecord,
 } from '../lib/types';
+
+const LazyAssistantPanel = lazy(async () => {
+  const module = await import('../components/AssistantPanel');
+  return { default: module.AssistantPanel };
+});
+
+async function loadAssistantApi() {
+  return import('../lib/api');
+}
 
 export function BuildPage() {
   const { draftId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const boot = useAppBoot();
   const sourceMachineId = searchParams.get('machine');
   const sourceBlueprintId = searchParams.get('blueprint');
   const jobId = searchParams.get('job');
@@ -60,7 +78,6 @@ export function BuildPage() {
     [sourceBlueprintId],
   );
   const job = useLiveQuery(() => (jobId ? db.jobs.get(jobId) : undefined), [jobId]);
-  const blueprints = useLiveQuery(() => db.blueprints.orderBy('updatedAt').reverse().toArray(), []);
 
   const [manifest, setManifest] = useState<ExperimentManifest | null>(null);
   const [playState, setPlayState] = useState<DraftPlayState | null>(null);
@@ -77,6 +94,8 @@ export function BuildPage() {
   const [assistantPromptSeed, setAssistantPromptSeed] = useState<string | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [adultToolsOpen, setAdultToolsOpen] = useState(false);
+  const [workshopShelfOpen, setWorkshopShelfOpen] = useState(false);
+  const [canvasReady, setCanvasReady] = useState(false);
   const flashCountRef = useRef(0);
   const undoStackRef = useRef<Array<{ manifest: ExperimentManifest; playState: DraftPlayState | null }>>([]);
   const jobCompletedRef = useRef(false);
@@ -84,6 +103,14 @@ export function BuildPage() {
   const statusTimeoutRef = useRef<number | undefined>(undefined);
   const currentManifestRef = useRef<ExperimentManifest | null>(null);
   const currentPlayStateRef = useRef<DraftPlayState | null>(null);
+  const builderMeasureRef = useRef(false);
+  const shouldLoadBlueprints = assistantOpen || workshopShelfOpen;
+  const blueprints = useLiveQuery<SavedBlueprintRecord[]>(
+    () => (shouldLoadBlueprints
+      ? db.blueprints.orderBy('updatedAt').reverse().limit(8).toArray()
+      : []),
+    [shouldLoadBlueprints],
+  );
 
   const showStatus = useCallback((message: string, tone: NoticeTone = 'info') => {
     window.clearTimeout(statusTimeoutRef.current);
@@ -98,6 +125,10 @@ export function BuildPage() {
   useEffect(() => {
     currentPlayStateRef.current = playState;
   }, [playState]);
+
+  useEffect(() => {
+    markPerformance('build-route-entered');
+  }, []);
 
   useEffect(
     () => () => {
@@ -193,24 +224,15 @@ export function BuildPage() {
   }, [blueprintFromQuery, draft, draftId, job, jobId, machineFromQuery, navigate, shareParam]);
 
   const runtime = useMachineSimulation(
-    manifest ??
-      ({
-        world: {
-          stage: { width: 1280, height: 720, background: 'lab-dark', grid: 'engineering', boundaryMode: 'contain' },
-          camera: { mode: 'fixed', zoom: 1, minZoom: 1, maxZoom: 1, panX: 0, panY: 0 },
-          timeline: { paused: false, timeScale: 1, allowPause: true, allowStep: false, allowReset: true },
-          randomSeed: 42,
-        },
-        primitives: [],
-        behaviors: [],
-        controls: [],
-        metadata: { recipeId: undefined },
-      } as unknown as ExperimentManifest),
+    manifest,
     controlValues,
     {
       stableCargoSpawns: playState?.lastStableCargoSpawns,
+      enabled: Boolean(manifest),
     },
   );
+  const runtimeSnapshot = runtime.snapshot;
+  const simulationStatus = runtime.status;
 
   const selectedPrimitive = useMemo<PrimitiveInstance | undefined>(
     () => manifest?.primitives.find((primitive) => primitive.id === selectedPrimitiveId),
@@ -218,8 +240,8 @@ export function BuildPage() {
   );
 
   const projectState = useMemo(
-    () => (job && manifest ? evaluateProject(job, manifest, runtime, playState) : null),
-    [job, manifest, playState, runtime],
+    () => (job && manifest ? evaluateProject(job, manifest, runtimeSnapshot, playState) : null),
+    [job, manifest, playState, runtimeSnapshot],
   );
   const projectUnlocked = projectState?.unlockedAllParts ?? true;
   const activeProjectStep = projectState?.currentStep ?? null;
@@ -230,12 +252,22 @@ export function BuildPage() {
   }, [jobId]);
 
   useEffect(() => {
-    const currentFill = runtime.hopperFill ?? 0;
+    const currentFill = runtimeSnapshot.hopperFill ?? 0;
     if (currentFill > previousHopperFillRef.current) {
       playUiTone('capture');
     }
     previousHopperFillRef.current = currentFill;
-  }, [runtime.hopperFill]);
+  }, [runtimeSnapshot.hopperFill]);
+
+  useEffect(() => {
+    if (!manifest || !canvasReady || simulationStatus !== 'ready' || builderMeasureRef.current) {
+      return;
+    }
+
+    markPerformance('canvas-ready');
+    measurePerformance('build-ready-duration', 'build-route-entered', 'canvas-ready');
+    builderMeasureRef.current = true;
+  }, [canvasReady, manifest, simulationStatus]);
 
   useEffect(() => {
     if (!job || !jobComplete || jobCompletedRef.current) return;
@@ -315,7 +347,7 @@ export function BuildPage() {
       newlyLatched.map((step) => step.stepId),
       manifest,
     );
-    const nextProjectState = evaluateProject(job, manifest, runtime, nextPlayState);
+    const nextProjectState = evaluateProject(job, manifest, runtimeSnapshot, nextPlayState);
     const latestStep = newlyLatched[newlyLatched.length - 1];
 
     setStepCelebrating(true);
@@ -337,7 +369,7 @@ export function BuildPage() {
         );
       }
     }
-  }, [job, manifest, persistDraft, playState, projectState, runtime, showStatus]);
+  }, [job, manifest, persistDraft, playState, projectState, runtimeSnapshot, showStatus]);
 
   function handleSaveMachine() {
     if (!manifest) return;
@@ -453,9 +485,11 @@ export function BuildPage() {
     ),
     [activeProjectStep, manifest, placingKind],
   );
-  const activeJobHint = projectGuide?.detail ?? activeProjectStep?.instruction ?? (jobComplete ? job?.hints[0] : undefined);
+  const activeJobHint = simulationStatus !== 'ready'
+    ? 'Loading the live machine engine.'
+    : projectGuide?.detail ?? activeProjectStep?.instruction ?? (jobComplete ? job?.hints[0] : undefined);
   const machineActivity = manifest
-    ? deriveMachineActivity(manifest, runtime)
+    ? deriveMachineActivity(manifest, runtimeSnapshot)
     : { active: false, label: 'Preparing the canvas', tone: 'info' as NoticeTone };
   const builderFocus = manifest
     ? deriveBuilderFocus(manifest, placingKind, selectedPrimitive, activeProjectStep, machineActivity)
@@ -662,7 +696,7 @@ export function BuildPage() {
 
     const resetManifest = playState?.stepCheckpointManifest[START_CHECKPOINT_ID]
       ? structuredClone(playState.stepCheckpointManifest[START_CHECKPOINT_ID])
-      : createEmptyDraft().manifest;
+      : createEmptyManifest();
     const resetPlayState = ensureDraftPlayState(undefined, jobId ?? playState?.jobId, resetManifest);
     undoStackRef.current = [];
     setSelectedPrimitiveId(undefined);
@@ -690,9 +724,13 @@ export function BuildPage() {
 
   if (!manifest) {
     return (
-      <div className="page centered-page">
-        <h1>Preparing the yard...</h1>
-        <p>If you opened a featured machine, the draft is being cloned now.</p>
+      <div className="page page-build">
+        {boot.status === 'degraded' ? (
+          <p className="builder-status builder-status-warning">
+            {boot.message ?? 'Storage is limited, so the yard is loading in reduced mode.'}
+          </p>
+        ) : null}
+        <RouteSkeleton variant="build" />
       </div>
     );
   }
@@ -704,14 +742,18 @@ export function BuildPage() {
       : manifest.primitives.length === 0
         ? 'Start mode'
         : 'Select mode';
-  const goalProgress = job ? getGoalProgress(job, manifest, runtime, playState) : null;
+  const goalProgress = job ? getGoalProgress(job, manifest, runtimeSnapshot, playState) : null;
   const goalPct = goalProgress ? Math.min(100, goalProgress.target > 0 ? (goalProgress.current / goalProgress.target) * 100 : 0) : 0;
   const primaryStepKind = activeProjectStep?.allowedPartKinds[0] ?? null;
-  const recoveryHint = runtime.lostCargoCount > 0
-    ? `${runtime.lostCargoCount} cargo recovery${runtime.lostCargoCount === 1 ? '' : 'ies'} happened automatically.`
-    : runtime.beltPowered
+  const recoveryHint = runtimeSnapshot.lostCargoCount > 0
+    ? `${runtimeSnapshot.lostCargoCount} cargo recovery${runtimeSnapshot.lostCargoCount === 1 ? '' : 'ies'} happened automatically.`
+    : runtimeSnapshot.beltPowered
       ? 'The loader is powered. Keep testing the flow.'
       : 'Undo, reset, and respawn are ready if the build gets messy.';
+
+  const buildReadiness: 'loading-engine' | 'ready' = simulationStatus !== 'ready' || !canvasReady
+    ? 'loading-engine'
+    : 'ready';
 
   return (
     <div className="page page-build">
@@ -720,6 +762,11 @@ export function BuildPage() {
           <p className="eyebrow">Sunny Yard</p>
           <h1>{manifest.metadata.title}</h1>
           <p>{manifest.metadata.shortDescription}</p>
+          {buildReadiness === 'loading-engine' ? (
+            <p className="builder-status builder-status-info">
+              Loading the live engine and stage renderer.
+            </p>
+          ) : null}
           {statusNotice ? (
             <p className={`builder-status builder-status-${statusNotice.tone}`}>{statusNotice.message}</p>
           ) : null}
@@ -744,13 +791,13 @@ export function BuildPage() {
           <p>{activeProjectStep?.instruction ?? builderFocus.description}</p>
         </div>
 
-        <div className="task-ribbon-metrics">
-          <span className={`builder-chip ${placingKind ? 'is-active' : ''}`}>{builderModeLabel}</span>
-          <span className={`builder-chip is-${machineActivity.tone}`}>{machineActivity.label}</span>
-          <span className={`builder-chip ${runtime.beltPowered ? 'is-success' : ''}`}>
-            {runtime.beltPowered ? 'Powered belt' : 'Coasting belt'}
+          <div className="task-ribbon-metrics">
+            <span className={`builder-chip ${placingKind ? 'is-active' : ''}`}>{builderModeLabel}</span>
+            <span className={`builder-chip is-${machineActivity.tone}`}>{machineActivity.label}</span>
+          <span className={`builder-chip ${runtimeSnapshot.beltPowered ? 'is-success' : ''}`}>
+            {runtimeSnapshot.beltPowered ? 'Powered belt' : 'Coasting belt'}
           </span>
-          <span className="builder-chip">Flow: {Math.round(runtime.throughput ?? 0)}/s</span>
+          <span className="builder-chip">Flow: {Math.round(runtimeSnapshot.throughput ?? 0)}/s</span>
           <span className="builder-chip">Canvas: {manifest.primitives.length} part{manifest.primitives.length === 1 ? '' : 's'}</span>
         </div>
 
@@ -852,53 +899,68 @@ export function BuildPage() {
 
       {assistantOpen ? (
         <section className="panel build-help-drawer">
-          <AssistantPanel
-            manifest={manifest}
-            busy={busy}
-            project={job ? {
-              title: job.title,
-              unlocked: projectUnlocked,
-              currentStepTitle: activeProjectStep?.title,
-              currentStepInstruction: activeProjectStep?.instruction,
-              assistantPrompt: activeProjectStep?.assistantPrompt,
-            } : undefined}
-            promptSeed={assistantPromptSeed}
-            onPromptSeedConsumed={() => setAssistantPromptSeed(null)}
-            blueprints={blueprints ?? []}
-            onMount={(blueprintRecord) => {
-              void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint), undefined, { recordHistory: true });
-              showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
-            }}
-            onGenerate={async (prompt) => {
-              setBusy(true);
-              try {
-                const result = await generateExperiment(prompt);
-                await applyGenerated(result);
-                return result;
-              } finally {
-                setBusy(false);
-              }
-            }}
-            onEdit={async (prompt) => {
-              setBusy(true);
-              try {
-                const result = await editExperiment(prompt, manifest);
-                await applyEdited(result);
-                return result;
-              } finally {
-                setBusy(false);
-              }
-            }}
-            onExplain={async (prompt) => {
-              setBusy(true);
-              try {
-                const result = await explainExperiment(prompt, manifest);
-                return result.explanation.whatIsHappening;
-              } finally {
-                setBusy(false);
-              }
-            }}
-          />
+          <Suspense
+            fallback={(
+              <div className="assistant-panel assistant-skeleton" aria-hidden="true">
+                <div className="skeleton-line skeleton-line-eyebrow" />
+                <div className="skeleton-line skeleton-line-title" />
+                <div className="skeleton-line skeleton-line-copy" />
+                <div className="skeleton-line skeleton-line-copy" />
+                <div className="skeleton-line skeleton-line-copy short" />
+              </div>
+            )}
+          >
+            <LazyAssistantPanel
+              manifest={manifest}
+              busy={busy}
+              project={job ? {
+                title: job.title,
+                unlocked: projectUnlocked,
+                currentStepTitle: activeProjectStep?.title,
+                currentStepInstruction: activeProjectStep?.instruction,
+                assistantPrompt: activeProjectStep?.assistantPrompt,
+              } : undefined}
+              promptSeed={assistantPromptSeed}
+              onPromptSeedConsumed={() => setAssistantPromptSeed(null)}
+              blueprints={blueprints ?? []}
+              onMount={(blueprintRecord) => {
+                void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint), undefined, { recordHistory: true });
+                showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
+              }}
+              onGenerate={async (prompt) => {
+                setBusy(true);
+                try {
+                  const { generateExperiment } = await loadAssistantApi();
+                  const result = await generateExperiment(prompt);
+                  await applyGenerated(result);
+                  return result;
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              onEdit={async (prompt) => {
+                setBusy(true);
+                try {
+                  const { editExperiment } = await loadAssistantApi();
+                  const result = await editExperiment(prompt, manifest);
+                  await applyEdited(result);
+                  return result;
+                } finally {
+                  setBusy(false);
+                }
+              }}
+              onExplain={async (prompt) => {
+                setBusy(true);
+                try {
+                  const { explainExperiment } = await loadAssistantApi();
+                  const result = await explainExperiment(prompt, manifest);
+                  return result.explanation.whatIsHappening;
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            />
+          </Suspense>
         </section>
       ) : null}
 
@@ -968,7 +1030,7 @@ export function BuildPage() {
           )}
           <MachineCanvas
             manifest={manifest}
-            runtime={runtime}
+            runtime={runtimeSnapshot}
             selectedPrimitiveId={selectedPrimitiveId}
             placingKind={placingKind}
             activeJobHint={activeJobHint}
@@ -994,6 +1056,7 @@ export function BuildPage() {
               playUiTone('power');
               showStatus(!current ? 'Motor ON.' : 'Motor OFF.', 'info');
             }}
+            onCanvasReady={() => setCanvasReady(true)}
           />
         </div>
 
@@ -1041,13 +1104,17 @@ export function BuildPage() {
           />
 
           {(projectUnlocked || !job) ? (
-            <details className="panel small-panel disclosure-panel">
+            <details
+              className="panel small-panel disclosure-panel"
+              open={workshopShelfOpen}
+              onToggle={(event) => setWorkshopShelfOpen(event.currentTarget.open)}
+            >
               <summary className="disclosure-summary">
                 <div>
                   <p className="eyebrow">Workshop Shelf</p>
                   <h3>Mount a saved blueprint</h3>
                 </div>
-                <span className="muted">{(blueprints ?? []).length} saved</span>
+                <span className="muted">{workshopShelfOpen ? `${(blueprints ?? []).length} saved` : 'Load on open'}</span>
               </summary>
               <div className="blueprint-list disclosure-content">
                 {(blueprints ?? []).slice(0, 8).map((blueprintRecord) => (

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { experimentManifestSchema } from '../src/lib/schema';
-import { getFeaturedMachines } from '../src/lib/seed-data';
+import { getFeaturedMachines } from '../src/lib/starter-catalog';
 import { validateExperimentManifest } from '../src/lib/validation';
 import type {
   EditExperimentResult,

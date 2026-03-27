@@ -1,10 +1,41 @@
-import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { createBrowserRouter, Link, Outlet, RouterProvider } from 'react-router-dom';
-import { BlueprintPage } from './pages/BlueprintPage';
-import { BuildPage } from './pages/BuildPage';
+import { RouteSkeleton } from './components/RouteSkeleton';
 import { HomePage } from './pages/HomePage';
-import { JobPage } from './pages/JobPage';
-import { MachinePage } from './pages/MachinePage';
+import {
+  loadBlueprintPage,
+  loadBuildPage,
+  loadJobPage,
+  loadMachinePage,
+} from './lib/route-preload';
+
+const LazyBuildPage = lazy(async () => {
+  const module = await loadBuildPage();
+  return { default: module.BuildPage };
+});
+
+const LazyMachinePage = lazy(async () => {
+  const module = await loadMachinePage();
+  return { default: module.MachinePage };
+});
+
+const LazyJobPage = lazy(async () => {
+  const module = await loadJobPage();
+  return { default: module.JobPage };
+});
+
+const LazyBlueprintPage = lazy(async () => {
+  const module = await loadBlueprintPage();
+  return { default: module.BlueprintPage };
+});
+
+function withRouteFallback(node: ReactNode, variant: 'build' | 'detail' = 'detail') {
+  return (
+    <Suspense fallback={<RouteSkeleton variant={variant} />}>
+      {node}
+    </Suspense>
+  );
+}
 
 function RootLayout() {
   const pressTimerRef = useRef<number | null>(null);
@@ -80,11 +111,11 @@ const router = createBrowserRouter([
     element: <RootLayout />,
     children: [
       { index: true, element: <HomePage /> },
-      { path: 'build', element: <BuildPage /> },
-      { path: 'build/:draftId', element: <BuildPage /> },
-      { path: 'machines/:machineId', element: <MachinePage /> },
-      { path: 'jobs/:jobId', element: <JobPage /> },
-      { path: 'blueprints/:blueprintId', element: <BlueprintPage /> },
+      { path: 'build', element: withRouteFallback(<LazyBuildPage />, 'build') },
+      { path: 'build/:draftId', element: withRouteFallback(<LazyBuildPage />, 'build') },
+      { path: 'machines/:machineId', element: withRouteFallback(<LazyMachinePage />) },
+      { path: 'jobs/:jobId', element: withRouteFallback(<LazyJobPage />) },
+      { path: 'blueprints/:blueprintId', element: withRouteFallback(<LazyBlueprintPage />) },
     ],
   },
 ]);

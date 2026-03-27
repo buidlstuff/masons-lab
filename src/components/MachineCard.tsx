@@ -45,12 +45,23 @@ export function MachineCard({ machine, accent = '#47c5a5' }: MachineCardProps) {
             <span key={tag} className="tag-chip">{tag}</span>
           ))}
         </div>
-        <div className="link-row">
-          <button type="button" className="fav-btn" onClick={toggleFavorite} title={isFavorite ? 'Unfavorite' : 'Favorite'}>
+        <div className="machine-card-actions">
+          <button
+            type="button"
+            className="fav-btn"
+            onClick={toggleFavorite}
+            title={isFavorite ? 'Remove Favorite' : 'Save as Favorite'}
+            aria-label={isFavorite ? 'Remove favorite machine' : 'Save machine as favorite'}
+            aria-pressed={isFavorite}
+          >
             {isFavorite ? '★' : '☆'}
           </button>
-          <Link to={`/machines/${machine.recordId}`}>Inspect</Link>
-          <Link to={`/build?machine=${machine.recordId}`}>Play</Link>
+          <Link to={`/machines/${machine.recordId}`} className="machine-card-link">
+            Inspect
+          </Link>
+          <Link to={`/build?machine=${machine.recordId}`} className="machine-card-link machine-card-link-primary">
+            Open Build
+          </Link>
         </div>
       </div>
     </article>
