@@ -308,6 +308,12 @@ export function MachineCanvas({
         return 'Flywheel — feed it from a motor or gear train to store motion';
       case 'gearbox':
         return 'Gearbox — place rotating parts on both sides to transmit a ratio change';
+      case 'piston':
+        return 'Piston — bring a motor nearby to extend and retract it';
+      case 'rack':
+        return 'Rack — place a rotating part near one end to drive linear motion';
+      case 'spring-linear':
+        return 'Linear spring — it stores stretch and compression between the anchor and plate';
       case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
       case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
       case 'winch':    return 'Winch — place a Hook below, then Quick Connect → Winch to Hook';
@@ -638,6 +644,20 @@ function drawPlacingPreview(
       instance.circle(mx - 10, my, 12);
       instance.circle(mx + 10, my, 12);
       break;
+    case 'piston':
+      instance.rect(mx, my, 30, 12, 4);
+      instance.line(mx - 24, my, mx + 24, my);
+      break;
+    case 'rack':
+      instance.rect(mx - 40, my - 5, 80, 10, 3);
+      for (let i = -32; i <= 32; i += 8) {
+        instance.line(mx + i, my - 5, mx + i + 4, my - 11);
+      }
+      break;
+    case 'spring-linear':
+      instance.line(mx - 24, my, mx + 12, my);
+      instance.rect(mx + 12, my - 8, 24, 16, 4);
+      break;
     case 'motor':
       instance.rect(mx - 28, my - 18, 56, 36, 10);
       instance.noFill();
@@ -888,6 +908,30 @@ function getPlacementAssessment(
         title: 'Bridge two sides',
         detail: 'Gearboxes work best when rotating parts sit on both the left and right side.',
       };
+    case 'piston':
+      return hasNearbyMotor(manifest, x, y)
+        ? {
+            tone: 'good',
+            title: 'Ready to extend',
+            detail: 'This piston is close enough to power that a nearby motor can drive it.',
+          }
+        : {
+            tone: 'info',
+            title: 'Needs nearby power',
+            detail: 'Place a motor near the piston if you want it to start extending.',
+          };
+    case 'rack':
+      return canWakeRotatingPart(manifest, 'gear', x, y)
+        ? {
+            tone: 'good',
+            title: 'Ready to mesh',
+            detail: 'One end of the rack is close enough to a rotating part to pick up motion.',
+          }
+        : {
+            tone: 'info',
+            title: 'Add a driver',
+            detail: 'Place a gear, pulley, or flywheel near one end to make the rack move.',
+          };
     case 'conveyor':
       return hasNearbyMotor(manifest, x, y)
         ? {
@@ -1161,6 +1205,75 @@ function drawPrimitive(
       instance.noFill();
       instance.circle(x - 10, y, 12);
       instance.circle(x + 10, y, 12);
+      break;
+    }
+    case 'piston': {
+      const cfg = primitive.config as { x: number; y: number; orientation?: string; stroke?: number };
+      const pos = runtime.bodyPositions?.[primitive.id] ?? { x: cfg.x, y: cfg.y, angle: 0 };
+      const horizontal = cfg.orientation !== 'vertical';
+      const ext = runtime.pistonExtensions?.[primitive.id] ?? 0;
+      instance.stroke(selected ? '#fbbf24' : '#94a3b8');
+      instance.strokeWeight(3);
+      if (horizontal) {
+        instance.line(cfg.x - 24, cfg.y, cfg.x + (cfg.stroke ?? 60), cfg.y);
+      } else {
+        instance.line(cfg.x, cfg.y - 24, cfg.x, cfg.y + (cfg.stroke ?? 60));
+      }
+      instance.push();
+      instance.translate(pos.x, pos.y);
+      instance.rotate(pos.angle ?? 0);
+      instance.fill(selected ? '#fbbf24' : '#64748b');
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, horizontal ? 30 : 12, horizontal ? 12 : 30, 4);
+      instance.pop();
+      if (selected) {
+        instance.noStroke();
+        instance.fill('#f8fafc');
+        instance.textSize(10);
+        instance.textAlign(instance.CENTER, instance.BOTTOM);
+        instance.text(`ext ${Math.round(ext * 100)}%`, pos.x, pos.y - 12);
+      }
+      break;
+    }
+    case 'rack': {
+      const cfg = primitive.config as { width?: number };
+      const pos = runtime.bodyPositions?.[primitive.id] ?? getLivePos(primitive, runtime);
+      const angle = runtime.bodyPositions?.[primitive.id]?.angle ?? 0;
+      const width = cfg.width ?? 80;
+      instance.push();
+      instance.translate(pos.x, pos.y);
+      instance.rotate(angle);
+      instance.fill(selected ? '#fbbf24' : '#94a3b8');
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, width, 10, 3);
+      for (let i = -width / 2 + 8; i <= width / 2 - 8; i += 8) {
+        instance.line(i, -5, i + 4, -11);
+      }
+      instance.pop();
+      break;
+    }
+    case 'spring-linear': {
+      const cfg = primitive.config as { x: number; y: number };
+      const pos = runtime.bodyPositions?.[primitive.id] ?? getLivePos(primitive, runtime);
+      const compression = runtime.springCompressions?.[primitive.id] ?? 0;
+      instance.stroke(selected ? '#fbbf24' : '#cbd5e1');
+      instance.strokeWeight(2);
+      instance.line(cfg.x, cfg.y, pos.x, pos.y);
+      instance.push();
+      instance.translate(pos.x, pos.y);
+      instance.fill(selected ? '#fbbf24' : '#e2e8f0');
+      instance.stroke(selected ? '#fbbf24' : '#94a3b8');
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, 24, 12, 4);
+      instance.pop();
+      if (selected) {
+        instance.noStroke();
+        instance.fill('#f8fafc');
+        instance.textSize(10);
+        instance.textAlign(instance.CENTER, instance.BOTTOM);
+        instance.text(`cmp ${Math.round(compression * 100)}%`, pos.x, pos.y - 10);
+      }
       break;
     }
     case 'wheel': {

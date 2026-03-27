@@ -312,6 +312,29 @@ export interface GearboxConfig {
   outputTeeth: number;
 }
 
+export interface SpringLinearConfig {
+  x: number;
+  y: number;
+  orientation: 'horizontal' | 'vertical';
+  restLength: number;
+  stiffness: number;
+}
+
+export interface RackConfig {
+  x: number;
+  y: number;
+  width: number;
+  orientation: 'horizontal' | 'vertical';
+}
+
+export interface PistonConfig {
+  x: number;
+  y: number;
+  orientation: 'horizontal' | 'vertical';
+  stroke: number;
+  speed: number;
+}
+
 export type PrimitiveConfig =
   | NodeConfig
   | BeamConfig
@@ -338,7 +361,10 @@ export type PrimitiveConfig =
   | PulleyConfig
   | ChainSprocketConfig
   | FlywheelConfig
-  | GearboxConfig;
+  | GearboxConfig
+  | SpringLinearConfig
+  | RackConfig
+  | PistonConfig;
 
 export interface PrimitiveInstance {
   id: string;
@@ -620,6 +646,9 @@ export const SLICE_PARTS: PrimitiveKind[] = [
   'chain-sprocket',
   'flywheel',
   'gearbox',
+  'spring-linear',
+  'rack',
+  'piston',
   'winch',
   'hook',
   // Rail
@@ -638,7 +667,7 @@ export const SLICE_PARTS: PrimitiveKind[] = [
 
 export const PART_CATEGORIES: Array<{ label: string; kinds: PrimitiveKind[] }> = [
   { label: 'Structure', kinds: ['node', 'wheel', 'axle', 'ramp', 'platform', 'wall'] },
-  { label: 'Power', kinds: ['motor', 'gear', 'pulley', 'chain-sprocket', 'flywheel', 'gearbox', 'winch', 'hook'] },
+  { label: 'Power', kinds: ['motor', 'gear', 'pulley', 'chain-sprocket', 'flywheel', 'gearbox', 'piston', 'rack', 'spring-linear', 'winch', 'hook'] },
   { label: 'Rail', kinds: ['rail-segment', 'rail-switch', 'locomotive', 'wagon'] },
   { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile', 'ball', 'rock'] },
 ];

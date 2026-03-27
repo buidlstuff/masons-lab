@@ -442,6 +442,12 @@ function taglineForPart(kind: PrimitiveKind) {
       return 'Starts the motion';
     case 'gear':
       return 'Transfers and changes speed';
+    case 'piston':
+      return 'Pushes in a straight line';
+    case 'rack':
+      return 'Turns spin into sliding';
+    case 'spring-linear':
+      return 'Stores stretch and squeeze';
     case 'pulley':
       return 'Smooth rotating transfer';
     case 'chain-sprocket':
@@ -499,6 +505,12 @@ function iconForPart(kind: PrimitiveKind): string {
       return 'M';
     case 'gear':
       return '*';
+    case 'piston':
+      return 'T';
+    case 'rack':
+      return 'R';
+    case 'spring-linear':
+      return 'S';
     case 'pulley':
       return 'P';
     case 'chain-sprocket':

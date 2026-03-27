@@ -135,6 +135,12 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
       return { id: `flywheel-${nanoid(6)}`, kind, label: 'Flywheel', config: { x, y, radius: 36, mass: 5 } };
     case 'gearbox':
       return { id: `gearbox-${nanoid(6)}`, kind, label: 'Gearbox', config: { x, y, inputTeeth: 24, outputTeeth: 12 } };
+    case 'piston':
+      return { id: `piston-${nanoid(6)}`, kind, label: 'Piston', config: { x, y, orientation: 'horizontal', stroke: 60, speed: 30 } };
+    case 'rack':
+      return { id: `rack-${nanoid(6)}`, kind, label: 'Rack', config: { x, y, width: 80, orientation: 'horizontal' } };
+    case 'spring-linear':
+      return { id: `spring-${nanoid(6)}`, kind, label: 'Linear Spring', config: { x, y, orientation: 'horizontal', restLength: 40, stiffness: 0.05 } };
     case 'winch':
       return { id: `winch-${nanoid(6)}`, kind, label: 'Winch', config: { x, y, speed: 30, ropeLength: 180 } };
     case 'rope':
