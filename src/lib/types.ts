@@ -122,11 +122,18 @@ export interface TimelineSpec {
   allowReset: boolean;
 }
 
+export interface PhysicsOverrides {
+  gravityY?: number;
+  globalRestitution?: number;
+  globalFriction?: number;
+}
+
 export interface WorldConfig {
   stage: StageSpec;
   camera: CameraSpec;
   timeline: TimelineSpec;
   randomSeed: number;
+  physicsOverrides?: PhysicsOverrides;
 }
 
 export interface ExperimentMetadata {

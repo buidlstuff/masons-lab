@@ -431,6 +431,27 @@ export function buildMatterWorld(
     }
   }
 
+  const physicsOverrides = manifest.world.physicsOverrides;
+  if (physicsOverrides) {
+    if (typeof physicsOverrides.gravityY === 'number') {
+      engine.gravity.y = physicsOverrides.gravityY;
+    }
+    if (
+      typeof physicsOverrides.globalRestitution === 'number'
+      || typeof physicsOverrides.globalFriction === 'number'
+    ) {
+      for (const body of Matter.Composite.allBodies(engine.world)) {
+        if (typeof physicsOverrides.globalRestitution === 'number') {
+          body.restitution = physicsOverrides.globalRestitution;
+        }
+        if (typeof physicsOverrides.globalFriction === 'number') {
+          body.friction = physicsOverrides.globalFriction;
+          body.frictionStatic = physicsOverrides.globalFriction;
+        }
+      }
+    }
+  }
+
   // ── Create constraints ────────────────────────────────────────────────────
   for (const prim of manifest.primitives) {
     if (prim.kind === 'beam') {

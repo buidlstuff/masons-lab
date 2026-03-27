@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { mountBlueprintToManifest } from './blueprints';
 import { buildStarterDraft, createEmptyManifest } from './manifest-factories';
 import { createDraftPlayState } from './play-state';
+import { createSillySceneManifest } from './silly-scenes';
 import type {
   DraftRecord,
   SavedBlueprintRecord,
@@ -59,6 +60,19 @@ export function createDraftFromProject(project: SiteJobDefinition): DraftRecord 
 
 export function createEmptyDraft(): DraftRecord {
   const manifest = createEmptyManifest();
+  return {
+    draftId: nanoid(),
+    manifest,
+    playState: createDraftPlayState(undefined, manifest),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function createDraftFromSillyScene(sceneId: string): DraftRecord | null {
+  const manifest = createSillySceneManifest(sceneId);
+  if (!manifest) {
+    return null;
+  }
   return {
     draftId: nanoid(),
     manifest,

@@ -1094,6 +1094,82 @@ button:disabled {
   font-size: 0.84rem;
 }
 
+.scene-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.scene-selector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.scene-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.scene-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  text-align: left;
+  padding: 0.95rem;
+  border-radius: 18px;
+  border: 1px solid rgba(71, 197, 165, 0.16);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--text);
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.scene-card:hover,
+.scene-card:focus-visible {
+  transform: translateY(-1px);
+  border-color: rgba(71, 197, 165, 0.34);
+  box-shadow: 0 14px 30px rgba(75, 90, 102, 0.1);
+}
+
+.scene-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.scene-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.scene-card-emoji {
+  font-size: 1.35rem;
+}
+
+.scene-reliability {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.scene-reliability-safe {
+  background: rgba(71, 197, 165, 0.16);
+  color: var(--teal-strong);
+}
+
+.scene-reliability-low-risk {
+  background: rgba(255, 186, 73, 0.18);
+  color: #9a6400;
+}
+
 /* ── XP bar on home page ────────────────────────────────────── */
 .xp-bar-block {
   margin-top: 14px;

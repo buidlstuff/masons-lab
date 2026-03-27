@@ -41,8 +41,10 @@ import {
   createDraftFromProject,
   createEmptyDraft,
   createEmptyManifest,
+  createDraftFromSillyScene,
 } from '../lib/seed-data';
 import { useMachineSimulation, type RuntimeSnapshot } from '../lib/simulation';
+import { getRandomSillyScene, SILLY_SCENES } from '../lib/silly-scenes';
 import { playUiTone } from '../lib/sfx';
 import { awardJobXp, TIER_NAMES } from '../lib/xp';
 import type {
@@ -67,6 +69,11 @@ const LazyAssistantPanel = lazy(async () => {
 const LazyChallengePanel = lazy(async () => {
   const module = await import('../components/ChallengePanel');
   return { default: module.ChallengePanel };
+});
+
+const LazySillySceneSelector = lazy(async () => {
+  const module = await import('../components/SillySceneSelector');
+  return { default: module.SillySceneSelector };
 });
 
 async function loadAssistantApi() {
@@ -202,6 +209,7 @@ export function BuildPage() {
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [adultToolsOpen, setAdultToolsOpen] = useState(false);
   const [challengePanelOpen, setChallengePanelOpen] = useState(false);
+  const [sceneShelfOpen, setSceneShelfOpen] = useState(false);
   const [workshopShelfOpen, setWorkshopShelfOpen] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
   const [challengeToast, setChallengeToast] = useState<ChallengeDefinition | null>(null);
@@ -633,6 +641,22 @@ export function BuildPage() {
     await db.drafts.put(newDraft);
     navigate(`/build/${newDraft.draftId}`);
   }
+
+  const handleLoadSillyScene = useCallback(async (sceneId?: string) => {
+    const scene = sceneId ? SILLY_SCENES.find((candidate) => candidate.id === sceneId) : getRandomSillyScene();
+    if (!scene) {
+      showStatus('Could not find that scene right now.', 'warning');
+      return;
+    }
+    const nextDraft = createDraftFromSillyScene(scene.id);
+    if (!nextDraft) {
+      showStatus('Could not build that scene draft.', 'warning');
+      return;
+    }
+    await db.drafts.put(nextDraft);
+    navigate(`/build/${nextDraft.draftId}`);
+    showStatus(`Loaded ${scene.title}.`, 'success');
+  }, [navigate, showStatus]);
 
   async function applyGenerated(result: GenerateExperimentResult) {
     const nextManifest = result.experiment;
@@ -1574,6 +1598,35 @@ export function BuildPage() {
               </Suspense>
             </div>
           </details>
+
+          {(projectUnlocked || !job) ? (
+            <details
+              className="panel small-panel disclosure-panel"
+              open={sceneShelfOpen}
+              onToggle={(event) => setSceneShelfOpen(event.currentTarget.open)}
+            >
+              <summary className="disclosure-summary">
+                <div>
+                  <p className="eyebrow">Silly Scenes</p>
+                  <h3>Load a playful setup</h3>
+                </div>
+                <span className="muted">{sceneShelfOpen ? `${SILLY_SCENES.length} ready` : 'Fresh drafts'}</span>
+              </summary>
+              <div className="disclosure-content">
+                <Suspense fallback={<p className="muted">Loading silly scenes…</p>}>
+                  <LazySillySceneSelector
+                    scenes={SILLY_SCENES}
+                    onLoadScene={(sceneId) => {
+                      void handleLoadSillyScene(sceneId);
+                    }}
+                    onSurprise={() => {
+                      void handleLoadSillyScene();
+                    }}
+                  />
+                </Suspense>
+              </div>
+            </details>
+          ) : null}
 
           {(projectUnlocked || !job) ? (
             <details

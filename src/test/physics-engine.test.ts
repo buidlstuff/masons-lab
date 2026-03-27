@@ -26,6 +26,33 @@ function stepWorld(
 }
 
 describe('physics engine conveyor flow', () => {
+  it('applies world physics overrides once after the world is built', () => {
+    const manifest = createEmptyManifest();
+    manifest.world.physicsOverrides = {
+      gravityY: 0.2,
+      globalRestitution: 0.81,
+      globalFriction: 0.005,
+    };
+    manifest.primitives = [
+      {
+        id: 'ball-1',
+        kind: 'ball',
+        label: 'Ball',
+        config: { x: 240, y: 180, radius: 14 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const ball = Matter.Composite.allBodies(world.engine.world).find((body) => body.label === 'ball-1');
+
+    expect(world.engine.gravity.y).toBeCloseTo(0.2);
+    expect(ball).toBeTruthy();
+    expect(ball?.restitution).toBeCloseTo(0.81);
+    expect(ball?.friction).toBeCloseTo(0.005);
+    expect(ball?.frictionStatic).toBeCloseTo(0.005);
+    world.cleanup();
+  });
+
   it('powers the belt and captures cargo into the hopper', () => {
     const manifest = createEmptyManifest();
     manifest.primitives = [

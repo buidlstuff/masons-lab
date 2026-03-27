@@ -27,6 +27,12 @@ const timelineSchema = z.object({
   allowReset: z.boolean(),
 });
 
+const physicsOverridesSchema = z.object({
+  gravityY: z.number().optional(),
+  globalRestitution: z.number().optional(),
+  globalFriction: z.number().optional(),
+});
+
 const primitiveSchema = z.object({
   id: z.string().min(1),
   kind: z.enum([
@@ -172,6 +178,7 @@ export const experimentManifestSchema = z.object({
     camera: cameraSchema,
     timeline: timelineSchema,
     randomSeed: z.number().int(),
+    physicsOverrides: physicsOverridesSchema.optional(),
   }),
   primitives: z.array(primitiveSchema),
   behaviors: z.array(behaviorSchema),
