@@ -362,6 +362,36 @@ export function buildMatterWorld(
       }
     }
 
+    if (prim.kind === 'wheel' || prim.kind === 'motor' || prim.kind === 'bucket' || prim.kind === 'counterweight') {
+      const cfg = prim.config as {
+        attachedToId?: string;
+        attachOffsetX?: number;
+        attachOffsetY?: number;
+      };
+      if (cfg.attachedToId) {
+        const parentBody = bodyMap.get(cfg.attachedToId);
+        const childBody = bodyMap.get(prim.id);
+        if (parentBody && childBody) {
+          Matter.World.add(
+            engine.world,
+            Matter.Constraint.create({
+              bodyA: parentBody,
+              pointA: {
+                x: cfg.attachOffsetX ?? 0,
+                y: cfg.attachOffsetY ?? 0,
+              },
+              bodyB: childBody,
+              pointB: { x: 0, y: 0 },
+              length: 0,
+              stiffness: prim.kind === 'wheel' ? 0.95 : 0.9,
+              damping: 0.1,
+              label: `attach-${prim.id}`,
+            }),
+          );
+        }
+      }
+    }
+
     if (prim.kind === 'spring-linear') {
       const cfg = prim.config as { x: number; y: number; orientation?: string; restLength?: number; stiffness?: number };
       const plateBody = bodyMap.get(prim.id);
@@ -1416,10 +1446,12 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
     }
 
     case 'motor': {
-      const cfg = prim.config as { x: number; y: number };
+      const cfg = prim.config as { x: number; y: number; attachedToId?: string };
       return Matter.Bodies.rectangle(cfg.x, cfg.y, 56, 36, {
         label: prim.id,
-        isStatic: true,
+        isStatic: !cfg.attachedToId,
+        density: cfg.attachedToId ? 0.0015 : undefined,
+        frictionAir: cfg.attachedToId ? 0.08 : undefined,
       });
     }
 
@@ -1428,6 +1460,17 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
       return Matter.Bodies.circle(cfg.x, cfg.y, 5, {
         label: prim.id,
         isStatic: true,
+      });
+    }
+
+    case 'chassis': {
+      const cfg = prim.config as { x: number; y: number; width?: number; height?: number };
+      return Matter.Bodies.rectangle(cfg.x, cfg.y, cfg.width ?? 140, cfg.height ?? 20, {
+        label: prim.id,
+        density: 0.002,
+        friction: 0.7,
+        frictionAir: 0.02,
+        restitution: 0.05,
       });
     }
 

@@ -75,6 +75,17 @@ export function validateExperimentManifest(input: unknown): ValidationResult {
         errors.push(`Rope ${primitive.id} has an invalid toId.`);
       }
     }
+    if (
+      (primitive.kind === 'cargo-block'
+        || primitive.kind === 'wheel'
+        || primitive.kind === 'motor'
+        || primitive.kind === 'bucket'
+        || primitive.kind === 'counterweight')
+      && typeof (primitive.config as { attachedToId?: string }).attachedToId === 'string'
+      && !ids.has((primitive.config as { attachedToId: string }).attachedToId)
+    ) {
+      errors.push(`Attachment on ${primitive.id} points to a missing part.`);
+    }
   }
 
   if (manifest.primitives.length > 80) {

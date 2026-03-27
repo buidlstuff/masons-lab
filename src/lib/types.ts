@@ -164,6 +164,9 @@ export interface WheelConfig {
   y: number;
   radius: number;
   traction: number;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export interface AxleConfig {
@@ -177,6 +180,9 @@ export interface MotorConfig {
   rpm: number;
   torque: number;
   powerState: boolean;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export interface GearConfig {
@@ -204,6 +210,13 @@ export interface RopeConfig {
 export interface HookConfig {
   x: number;
   y: number;
+}
+
+export interface ChassisConfig {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface RailSegmentConfig {
@@ -380,6 +393,9 @@ export interface CounterweightConfig {
   x: number;
   y: number;
   mass: number;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export interface BucketConfig {
@@ -387,6 +403,9 @@ export interface BucketConfig {
   y: number;
   width: number;
   depth: number;
+  attachedToId?: string;
+  attachOffsetX?: number;
+  attachOffsetY?: number;
 }
 
 export type PrimitiveConfig =
@@ -394,6 +413,7 @@ export type PrimitiveConfig =
   | BeamConfig
   | WheelConfig
   | AxleConfig
+  | ChassisConfig
   | MotorConfig
   | GearConfig
   | WinchConfig
@@ -698,6 +718,7 @@ export const SLICE_PARTS: PrimitiveKind[] = [
   'node',
   'wheel',
   'axle',
+  'chassis',
   'ramp',
   'platform',
   'wall',
@@ -736,7 +757,7 @@ export const SLICE_PARTS: PrimitiveKind[] = [
 ];
 
 export const PART_CATEGORIES: Array<{ label: string; kinds: PrimitiveKind[] }> = [
-  { label: 'Structure', kinds: ['node', 'wheel', 'axle', 'ramp', 'platform', 'wall', 'hinge', 'chute', 'tunnel'] },
+  { label: 'Structure', kinds: ['node', 'wheel', 'axle', 'chassis', 'ramp', 'platform', 'wall', 'hinge', 'chute', 'tunnel'] },
   { label: 'Power', kinds: ['motor', 'gear', 'pulley', 'chain-sprocket', 'flywheel', 'gearbox', 'piston', 'rack', 'spring-linear', 'crane-arm', 'counterweight', 'bucket', 'winch', 'hook'] },
   { label: 'Rail', kinds: ['rail-segment', 'rail-switch', 'locomotive', 'wagon'] },
   { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile', 'water', 'ball', 'rock', 'silo-bin'] },

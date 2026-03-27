@@ -301,6 +301,8 @@ export function MachineCanvas({
       case 'motor':    return 'Motor — place a rotating part inside the green ring to drive it';
       case 'gear':     return 'Gear — place another rotating part touching this one to mesh it';
       case 'wheel':    return 'Wheel — inside Motor range it spins · touching a rotating part it meshes';
+      case 'chassis':
+        return 'Chassis — mount wheels and a motor onto it to build a simple rolling machine';
       case 'pulley':
       case 'chain-sprocket':
         return 'Rotating part — place it in a motor ring or touching another rotating part to wake it up';
@@ -453,7 +455,7 @@ function drawConnectionOverlay(
   for (const prim of manifest.primitives) {
     // ── Motor ───────────────────────────────────────────────────────────────
     if (prim.kind === 'motor') {
-      const { x, y } = prim.config as { x: number; y: number };
+      const { x, y } = getLivePos(prim, runtime);
       const isSelected = prim.id === selectedPrimitiveId;
       const drivenIds = runtime.motorDrives?.[prim.id] ?? [];
       const hasDriven = drivenIds.length > 0;
@@ -550,6 +552,20 @@ function drawConnectionOverlay(
       }
     }
 
+    const attachedToId = (prim.config as { attachedToId?: string }).attachedToId;
+    if (typeof attachedToId === 'string') {
+      const target = manifest.primitives.find((p) => p.id === attachedToId);
+      if (target) {
+        const from = getLivePos(prim, runtime);
+        const to = getLivePos(target, runtime);
+        ctx.setLineDash([4, 5]);
+        instance.stroke(245, 158, 11, prim.id === selectedPrimitiveId || target.id === selectedPrimitiveId ? 140 : 70);
+        instance.strokeWeight(1);
+        instance.line(from.x, from.y, to.x, to.y);
+        ctx.setLineDash([]);
+      }
+    }
+
     // ── Conveyor endpoint zones ─────────────────────────────────────────────
     if (prim.kind === 'conveyor' && prim.id === selectedPrimitiveId) {
       const cCfg = prim.config as { path: Array<{ x: number; y: number }> };
@@ -638,6 +654,9 @@ function drawPlacingPreview(
       instance.line(mx, my - radius, mx, my + radius);
       break;
     }
+    case 'chassis':
+      instance.rect(mx - 70, my - 10, 140, 20, 8);
+      break;
     case 'pulley':
     case 'chain-sprocket': {
       const radius = 28;
@@ -967,6 +986,12 @@ function getPlacementAssessment(
             title: 'Needs a driver',
             detail: 'Wheels need a motor ring or a gear contact to feel alive.',
           };
+    case 'chassis':
+      return {
+        tone: 'info',
+        title: 'Ready for mounts',
+        detail: 'Chassis parts get interesting once wheels or a motor are connected to them.',
+      };
     case 'gearbox':
       return {
         tone: 'info',
@@ -1207,7 +1232,7 @@ function drawPrimitive(
       break;
     }
     case 'motor': {
-      const { x, y } = primitive.config as { x: number; y: number };
+      const { x, y } = getLivePos(primitive, runtime);
       const on = (primitive.config as { powerState?: boolean }).powerState;
       instance.fill(selected ? '#1a6a63' : on ? '#134e4a' : '#0f2a27');
       instance.stroke(selected ? '#fbbf24' : highlight);
@@ -1442,6 +1467,22 @@ function drawPrimitive(
       instance.line(0, -wRadius, 0, wRadius);
       instance.line(-wRadius * 0.7, -wRadius * 0.7, wRadius * 0.7, wRadius * 0.7);
       instance.line(-wRadius * 0.7, wRadius * 0.7, wRadius * 0.7, -wRadius * 0.7);
+      instance.pop();
+      break;
+    }
+    case 'chassis': {
+      const cfg = primitive.config as { width?: number; height?: number };
+      const pos = runtime.bodyPositions?.[primitive.id] ?? getLivePos(primitive, runtime);
+      const width = cfg.width ?? 140;
+      const height = cfg.height ?? 20;
+      const angle = runtime.bodyPositions?.[primitive.id]?.angle ?? 0;
+      instance.push();
+      instance.translate(pos.x, pos.y);
+      instance.rotate(angle);
+      instance.fill(selected ? '#fbbf24' : '#475569');
+      instance.stroke(selected ? '#fbbf24' : '#94a3b8');
+      instance.rectMode(instance.CENTER);
+      instance.rect(0, 0, width, height, 8);
       instance.pop();
       break;
     }
@@ -1845,6 +1886,10 @@ function hitTest(
         const width = cfg.width ?? 120;
         const height = cfg.height ?? 80;
         return Math.abs(cfg.x - x) <= width / 2 && Math.abs(cfg.y - y) <= height / 2;
+      }
+      case 'chassis': {
+        const cfg = primitive.config as { x: number; y: number; width?: number; height?: number };
+        return Math.abs(cfg.x - x) <= (cfg.width ?? 140) / 2 && Math.abs(cfg.y - y) <= (cfg.height ?? 20) / 2 + 12;
       }
       case 'hinge': {
         const cfg = primitive.config as { x: number; y: number };

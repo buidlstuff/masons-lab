@@ -59,6 +59,30 @@ async function loadAssistantApi() {
   return import('../lib/api');
 }
 
+function getPrimitiveAnchor(primitive: PrimitiveInstance) {
+  if ('x' in primitive.config && 'y' in primitive.config) {
+    return { x: primitive.config.x, y: primitive.config.y };
+  }
+  return { x: 0, y: 0 };
+}
+
+function findNearestPrimitive(
+  manifest: ExperimentManifest,
+  source: PrimitiveInstance,
+  predicate: (primitive: PrimitiveInstance) => boolean,
+) {
+  const sourceAnchor = getPrimitiveAnchor(source);
+  return manifest.primitives
+    .filter((primitive) => primitive.id !== source.id)
+    .filter(predicate)
+    .sort((a, b) => {
+      const aAnchor = getPrimitiveAnchor(a);
+      const bAnchor = getPrimitiveAnchor(b);
+      return Math.hypot(aAnchor.x - sourceAnchor.x, aAnchor.y - sourceAnchor.y)
+        - Math.hypot(bAnchor.x - sourceAnchor.x, bAnchor.y - sourceAnchor.y);
+    })[0];
+}
+
 export function BuildPage() {
   const { draftId } = useParams();
   const [searchParams] = useSearchParams();
@@ -619,6 +643,82 @@ export function BuildPage() {
     showStatus('Connected the two nodes with a beam.', 'success');
   }, [manifest, persistDraft, selectedPrimitiveId, showStatus]);
 
+  const handleMountWheelToChassis = useCallback(() => {
+    if (!manifest || !selectedPrimitive) return;
+    const wheel = selectedPrimitive.kind === 'wheel'
+      ? selectedPrimitive
+      : findNearestPrimitive(
+          manifest,
+          selectedPrimitive,
+          (primitive) => primitive.kind === 'wheel' && (primitive.config as { attachedToId?: string }).attachedToId !== selectedPrimitive.id,
+        );
+    const chassis = selectedPrimitive.kind === 'chassis'
+      ? selectedPrimitive
+      : findNearestPrimitive(manifest, selectedPrimitive, (primitive) => primitive.kind === 'chassis');
+    if (!wheel || !chassis) {
+      showStatus('Place both a wheel and a chassis, then Quick Connect can mount them together.', 'warning');
+      return;
+    }
+    void persistDraft(connectPrimitives(manifest, wheel.id, chassis.id), undefined, { recordHistory: true });
+    showStatus('Mounted the wheel onto the chassis.', 'success');
+  }, [manifest, persistDraft, selectedPrimitive, showStatus]);
+
+  const handleMountMotorToChassis = useCallback(() => {
+    if (!manifest || !selectedPrimitive) return;
+    const motor = selectedPrimitive.kind === 'motor'
+      ? selectedPrimitive
+      : findNearestPrimitive(
+          manifest,
+          selectedPrimitive,
+          (primitive) => primitive.kind === 'motor' && (primitive.config as { attachedToId?: string }).attachedToId !== selectedPrimitive.id,
+        );
+    const chassis = selectedPrimitive.kind === 'chassis'
+      ? selectedPrimitive
+      : findNearestPrimitive(manifest, selectedPrimitive, (primitive) => primitive.kind === 'chassis');
+    if (!motor || !chassis) {
+      showStatus('Place both a motor and a chassis, then Quick Connect can mount the motor to the frame.', 'warning');
+      return;
+    }
+    void persistDraft(connectPrimitives(manifest, motor.id, chassis.id), undefined, { recordHistory: true });
+    showStatus('Mounted the motor onto the chassis.', 'success');
+  }, [manifest, persistDraft, selectedPrimitive, showStatus]);
+
+  const handleAttachArmLoad = useCallback((loadKind: 'bucket' | 'counterweight') => {
+    if (!manifest || !selectedPrimitive) return;
+    const arm = selectedPrimitive.kind === 'crane-arm'
+      ? selectedPrimitive
+      : findNearestPrimitive(manifest, selectedPrimitive, (primitive) => primitive.kind === 'crane-arm');
+    const load = selectedPrimitive.kind === loadKind
+      ? selectedPrimitive
+      : findNearestPrimitive(
+          manifest,
+          selectedPrimitive,
+          (primitive) => primitive.kind === loadKind && (primitive.config as { attachedToId?: string }).attachedToId !== arm?.id,
+        );
+    if (!arm || !load) {
+      showStatus(`Place both a crane arm and a ${loadKind === 'bucket' ? 'bucket' : 'counterweight'} first.`, 'warning');
+      return;
+    }
+    void persistDraft(connectPrimitives(manifest, arm.id, load.id), undefined, { recordHistory: true });
+    showStatus(`Attached the ${loadKind === 'bucket' ? 'bucket' : 'counterweight'} to the crane arm.`, 'success');
+  }, [manifest, persistDraft, selectedPrimitive, showStatus]);
+
+  const handleHookCargo = useCallback(() => {
+    if (!manifest || !selectedPrimitive) return;
+    const hook = selectedPrimitive.kind === 'hook'
+      ? selectedPrimitive
+      : findNearestPrimitive(manifest, selectedPrimitive, (primitive) => primitive.kind === 'hook');
+    const cargo = selectedPrimitive.kind === 'cargo-block'
+      ? selectedPrimitive
+      : findNearestPrimitive(manifest, selectedPrimitive, (primitive) => primitive.kind === 'cargo-block');
+    if (!hook || !cargo) {
+      showStatus('Place both a hook and a cargo block first, then Quick Connect can clip them together.', 'warning');
+      return;
+    }
+    void persistDraft(connectPrimitives(manifest, hook.id, cargo.id), undefined, { recordHistory: true });
+    showStatus('Attached the cargo block to the hook.', 'success');
+  }, [manifest, persistDraft, selectedPrimitive, showStatus]);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       // Don't intercept when typing in inputs/textareas
@@ -1138,7 +1238,18 @@ export function BuildPage() {
             </details>
           ) : null}
 
-          {(projectUnlocked || !job) && (selectedPrimitive?.kind === 'winch' || selectedPrimitive?.kind === 'hook' || selectedPrimitive?.kind === 'node') ? (
+          {(projectUnlocked || !job) && (
+            selectedPrimitive?.kind === 'winch'
+            || selectedPrimitive?.kind === 'hook'
+            || selectedPrimitive?.kind === 'node'
+            || selectedPrimitive?.kind === 'wheel'
+            || selectedPrimitive?.kind === 'chassis'
+            || selectedPrimitive?.kind === 'motor'
+            || selectedPrimitive?.kind === 'crane-arm'
+            || selectedPrimitive?.kind === 'bucket'
+            || selectedPrimitive?.kind === 'counterweight'
+            || selectedPrimitive?.kind === 'cargo-block'
+          ) ? (
             <section className="panel small-panel">
             <div className="panel-header compact">
               <div>
@@ -1149,7 +1260,9 @@ export function BuildPage() {
             <p className="muted">
               {selectedPrimitive.kind === 'node'
                 ? 'Use this when two nodes should become a beam.'
-                : 'Use this when a winch and hook are already on the canvas.'}
+                : selectedPrimitive.kind === 'winch' || selectedPrimitive.kind === 'hook'
+                  ? 'Use this when a winch and hook are already on the canvas.'
+                  : 'Use this to mount or attach the selected part to the nearest compatible partner.'}
             </p>
             <div className="button-row vertical">
               <button
@@ -1165,6 +1278,41 @@ export function BuildPage() {
                 onClick={handleConnectNodes}
               >
                 Connect Nodes with Beam
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPrimitiveId || !['wheel', 'chassis'].includes(selectedPrimitive.kind)}
+                onClick={handleMountWheelToChassis}
+              >
+                Mount Wheel to Chassis
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPrimitiveId || !['motor', 'chassis'].includes(selectedPrimitive.kind)}
+                onClick={handleMountMotorToChassis}
+              >
+                Mount Motor to Chassis
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPrimitiveId || !['crane-arm', 'bucket'].includes(selectedPrimitive.kind)}
+                onClick={() => handleAttachArmLoad('bucket')}
+              >
+                Attach Arm to Bucket
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPrimitiveId || !['crane-arm', 'counterweight'].includes(selectedPrimitive.kind)}
+                onClick={() => handleAttachArmLoad('counterweight')}
+              >
+                Attach Arm to Counterweight
+              </button>
+              <button
+                type="button"
+                disabled={!selectedPrimitiveId || !['hook', 'cargo-block'].includes(selectedPrimitive.kind)}
+                onClick={handleHookCargo}
+              >
+                Hook Cargo Block
               </button>
             </div>
           </section>

@@ -250,7 +250,14 @@ function remapPrimitiveConfig(
     config.trackId = idMap.get(String(config.trackId)) ?? config.trackId;
   }
 
-  if (primitive.kind === 'cargo-block' && typeof config.attachedToId === 'string') {
+  if (
+    (primitive.kind === 'cargo-block'
+      || primitive.kind === 'wheel'
+      || primitive.kind === 'motor'
+      || primitive.kind === 'bucket'
+      || primitive.kind === 'counterweight')
+    && typeof config.attachedToId === 'string'
+  ) {
     config.attachedToId = idMap.get(config.attachedToId) ?? config.attachedToId;
   }
 

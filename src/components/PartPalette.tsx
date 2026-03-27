@@ -424,6 +424,12 @@ function connectionHintForKind(kind: PrimitiveKind) {
       return 'Flywheels store spin, so feed them from a motor or gear train first.';
     case 'gearbox':
       return 'Gearboxes work best with rotating parts on both sides of the box.';
+    case 'chassis':
+      return 'Chassis parts come alive once wheels or a motor are mounted onto them.';
+    case 'crane-arm':
+      return 'Crane arms are strongest when they pick up a bucket or counterweight through Quick Connect.';
+    case 'cargo-block':
+      return 'Cargo can be dropped loose or hooked directly to a lifting tool.';
     case 'conveyor':
       return 'Conveyors are easiest to read when cargo moves into a hopper.';
     case 'winch':
@@ -474,6 +480,8 @@ function taglineForPart(kind: PrimitiveKind) {
       return 'Makes a covered passage';
     case 'wheel':
       return 'Shows spinning clearly';
+    case 'chassis':
+      return 'Base frame for rolling builds';
     case 'ramp':
       return 'Turns falling into rolling';
     case 'platform':
@@ -509,6 +517,8 @@ function iconForPart(kind: PrimitiveKind): string {
       return 'O';
     case 'wheel':
       return 'o';
+    case 'chassis':
+      return 'U';
     case 'axle':
       return '=';
     case 'ramp':
