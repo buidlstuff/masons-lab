@@ -2,7 +2,7 @@ import { db } from './db';
 import { getFeaturedMachines, getStarterBlueprints, getStarterJobs } from './seed-data';
 
 export async function ensureSeedData() {
-  const contentEpoch = 'relaunch-3-projects-v1';
+  const contentEpoch = 'relaunch-3-projects-v2';
   const seeded = await db.settings.get('content-epoch');
   if (seeded?.value === contentEpoch) {
     return;

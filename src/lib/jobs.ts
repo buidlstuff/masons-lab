@@ -95,14 +95,16 @@ function finalGoalProgress(
   runtime: RuntimeSnapshot,
 ): GoalProgress {
   switch (job.goalType) {
-    case 'spin-gear-train':
+    case 'spin-gear-train': {
+      const liveLinks = countLiveGearLinks(manifest, runtime);
       return {
         label: 'Live gear train',
-        current: countLiveGearLinks(manifest, runtime) > 0 ? 2 : Math.min(1, countPlaced(manifest, 'gear')),
+        current: liveLinks > 0 ? 2 : Math.min(1, countPlaced(manifest, 'gear')),
         target: 2,
         unit: 'gears',
-        met: countLiveGearLinks(manifest, runtime) > 0,
+        met: liveLinks > 0,
       };
+    }
     case 'feed-the-hopper': {
       const fill = runtime.hopperFill ?? 0;
       return {
@@ -165,7 +167,8 @@ function evaluateSuccessCheck(
       return { label: 'Place a motor', current, target: 1, unit: 'motor', met: current >= 1 };
     }
     case 'first-gear-live': {
-      const hasRunningGear = countPlaced(manifest, 'gear') > 0 && (runtime.telemetry.inputRpm ?? 0) > 0;
+      const gears = manifest.primitives.filter((p) => p.kind === 'gear');
+      const hasRunningGear = gears.some((g) => Math.abs(runtime.rotations[g.id] ?? 0) > 0.01);
       return {
         label: 'Wake up the first gear',
         current: hasRunningGear ? 1 : 0,
@@ -244,7 +247,14 @@ function countPlaced(manifest: ExperimentManifest, kind: PrimitiveKind) {
 
 function countLiveGearLinks(manifest: ExperimentManifest, runtime: RuntimeSnapshot) {
   const gears = manifest.primitives.filter((primitive) => primitive.kind === 'gear');
-  if (gears.length < 2 || (runtime.telemetry.outputRpm ?? 0) <= 0) {
+  if (gears.length < 2) {
+    return 0;
+  }
+
+  // Check via rotations directly — more reliable than telemetry.outputRpm which
+  // takes a tick to populate after a physics world rebuild.
+  const anySpinning = gears.some((g) => Math.abs(runtime.rotations[g.id] ?? 0) > 0.01);
+  if (!anySpinning) {
     return 0;
   }
 

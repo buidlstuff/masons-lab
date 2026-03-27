@@ -4,7 +4,7 @@ interface InspectorPanelProps {
   primitive?: PrimitiveInstance;
   manifest: ExperimentManifest;
   onDelete: (primitiveId: string) => void;
-  onUpdateValue: (primitiveId: string, key: string, value: number | string) => void;
+  onUpdateValue: (primitiveId: string, key: string, value: number | string | boolean) => void;
 }
 
 const SAFE_NUMBER_FIELDS = ['x', 'y', 'rpm', 'teeth', 'speed', 'ropeLength', 'capacity', 'releaseRate', 'fill', 'radius', 'traction'];
@@ -23,6 +23,20 @@ export function InspectorPanel({ primitive, manifest, onDelete, onUpdateValue }:
       {primitive ? (
         <div className="inspector-content">
           <p className="muted">{primitive.kind}</p>
+
+          {/* Motor power toggle — the most important boolean in the whole lab */}
+          {primitive.kind === 'motor' && (
+            <div className="motor-power-row">
+              <span>Power</span>
+              <button
+                type="button"
+                className={`motor-power-btn ${(primitive.config as { powerState?: boolean }).powerState ? 'on' : 'off'}`}
+                onClick={() => onUpdateValue(primitive.id, 'powerState', !(primitive.config as { powerState?: boolean }).powerState)}
+              >
+                {(primitive.config as { powerState?: boolean }).powerState ? 'ON' : 'OFF'}
+              </button>
+            </div>
+          )}
           {Object.entries(primitive.config)
             .filter(([, value]) => typeof value === 'number')
             .filter(([key]) => SAFE_NUMBER_FIELDS.includes(key))

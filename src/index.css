@@ -75,6 +75,35 @@ button:disabled {
   background: transparent;
 }
 
+.motor-power-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+}
+
+.motor-power-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 5px 14px;
+  border-radius: 999px;
+  transition: background 150ms, border-color 150ms, color 150ms;
+}
+
+.motor-power-btn.on {
+  background: rgba(71, 197, 165, 0.22);
+  border-color: rgba(71, 197, 165, 0.7);
+  color: #47c5a5;
+}
+
+.motor-power-btn.off {
+  background: rgba(100, 116, 139, 0.12);
+  border-color: rgba(100, 116, 139, 0.3);
+  color: var(--muted);
+}
+
 .danger-button {
   background: rgba(248, 113, 113, 0.12);
   border-color: rgba(248, 113, 113, 0.3);
@@ -600,6 +629,39 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* ── Step complete toast ────────────────────────────────────── */
+@keyframes stepToastPop {
+  0%   { opacity: 0; transform: translateX(-50%) scale(0.7); }
+  22%  { opacity: 1; transform: translateX(-50%) scale(1.12); }
+  42%  { transform: translateX(-50%) scale(0.97); }
+  60%  { transform: translateX(-50%) scale(1.04); }
+  80%  { transform: translateX(-50%) scale(1); }
+  100% { opacity: 1; transform: translateX(-50%) scale(1); }
+}
+
+.step-complete-toast {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  background: linear-gradient(135deg, #47c5a5, #3bb592);
+  color: #041a12;
+  font-weight: 700;
+  font-size: 1.05rem;
+  padding: 10px 26px;
+  border-radius: 999px;
+  pointer-events: none;
+  animation: stepToastPop 0.55s cubic-bezier(0.34,1.56,0.64,1) forwards;
+  white-space: nowrap;
+  box-shadow: 0 4px 24px rgba(71,197,165,0.5), 0 0 0 2px rgba(71,197,165,0.3);
+}
+
+.step-complete-star {
+  margin-right: 7px;
+  font-size: 1.1rem;
+}
+
 /* ── HUD overlay ────────────────────────────────────────────── */
 .hud-overlay {
   position: absolute;
@@ -660,6 +722,19 @@ button:disabled {
 .job-banner.complete {
   background: rgba(74,222,128,0.08);
   border-color: rgba(74,222,128,0.35);
+}
+
+@keyframes stepCelebrate {
+  0%   { transform: scale(1);    border-color: rgba(71,197,165,0.2);  box-shadow: none; }
+  18%  { transform: scale(1.025); border-color: rgba(71,197,165,0.9);  box-shadow: 0 0 0 4px rgba(71,197,165,0.25); }
+  40%  { transform: scale(1.018); border-color: rgba(71,197,165,0.7);  box-shadow: 0 0 0 8px rgba(71,197,165,0.12); }
+  70%  { transform: scale(1.005); border-color: rgba(71,197,165,0.4);  box-shadow: 0 0 0 12px rgba(71,197,165,0.04); }
+  100% { transform: scale(1);    border-color: rgba(71,197,165,0.2);  box-shadow: none; }
+}
+
+.job-banner.step-celebrating {
+  animation: stepCelebrate 1.8s ease-out forwards;
+  background: rgba(71,197,165,0.12);
 }
 
 .job-banner-info {

@@ -72,6 +72,9 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
   const engine = Matter.Engine.create({ gravity: { x: 0, y: 1.2 } });
   const bodyMap = new Map<string, Matter.Body>();
   const ropeConstraints: Matter.Constraint[] = [];
+  // Cargo that has entered the hopper zone is marked collected so it doesn't
+  // bounce back out and drop the fill counter.
+  const collectedCargoIds = new Set<string>();
 
   // Ground + boundary walls
   Matter.World.add(engine.world, [
@@ -394,39 +397,67 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
           const blendX = body.velocity.x + (targetVx - body.velocity.x) * 0.15;
           const blendY = body.velocity.y + (targetVy - body.velocity.y) * 0.08;
           Matter.Body.setVelocity(body, { x: blendX, y: blendY });
+
+          // Anti-gravity surface force: counteract ~85% of gravity while cargo is
+          // on the belt so it doesn't fall through the conveyor path.
+          const gravityCompensation = engine.gravity.y * body.mass * 0.85;
+          Matter.Body.applyForce(body, body.position, { x: 0, y: -gravityCompensation });
         }
       }
     }
   }
 
   // ── tickHopper ────────────────────────────────────────────────────────────
-  // Apply a gentle inward + downward force on cargo blocks that are above
-  // and near the hopper mouth. This funnels dropped blocks into the collector.
+  // Apply a gentle inward + downward force on cargo blocks near the hopper.
+  // Once a block enters the collection zone it is marked collected and frozen
+  // so it cannot bounce out and drop the fill counter.
   function tickHopper() {
     const hopperPrim = manifest.primitives.find((p) => p.kind === 'hopper');
     if (!hopperPrim) return;
     const hCfg = hopperPrim.config as { x: number; y: number };
     const mouthX = hCfg.x;
-    const mouthTop = hCfg.y - 10; // top lip of the trapezoid
-    const mouthBot = hCfg.y + 60; // bottom of the hopper
+    const mouthTop = hCfg.y - 10;
+    const mouthBot = hCfg.y + 70;
+    // Collection zone (inside the funnel body)
+    const collectTop = hCfg.y + 10;
+    const collectBot = hCfg.y + 80;
+    const collectHalfW = 36;
 
     for (const prim of manifest.primitives) {
       if (prim.kind !== 'cargo-block') continue;
       const body = bodyMap.get(prim.id);
       if (!body) continue;
-      const dx = mouthX - body.position.x;
-      const dy = body.position.y;
-      // Only affect blocks above the hopper and within 60px horizontally
-      if (Math.abs(dx) > 60 || dy > mouthBot || dy < mouthTop - 80) continue;
 
-      // Inward force: pull toward center, stronger the closer to mouth
-      const inward = dx * 0.00012;
-      // Downward nudge when in the funnel zone
-      const downward = 0.0006;
-      Matter.Body.applyForce(body, body.position, {
-        x: inward,
-        y: downward,
-      });
+      // Already collected — keep frozen below hopper so it doesn't interfere
+      if (collectedCargoIds.has(prim.id)) {
+        const slotIndex = [...collectedCargoIds].indexOf(prim.id);
+        const targetX = mouthX + (slotIndex % 3 - 1) * 18;
+        const targetY = collectBot + Math.floor(slotIndex / 3) * 20;
+        Matter.Body.setPosition(body, { x: targetX, y: targetY });
+        Matter.Body.setVelocity(body, { x: 0, y: 0 });
+        continue;
+      }
+
+      // Check if cargo just entered the collection zone
+      if (
+        body.position.x > mouthX - collectHalfW &&
+        body.position.x < mouthX + collectHalfW &&
+        body.position.y > collectTop &&
+        body.position.y < collectBot
+      ) {
+        collectedCargoIds.add(prim.id);
+        Matter.Body.setStatic(body, true);
+        continue;
+      }
+
+      const dx = mouthX - body.position.x;
+      // Only apply funnel force to blocks within 90px horizontally and above mouth bottom
+      if (Math.abs(dx) > 90 || body.position.y > mouthBot || body.position.y < mouthTop - 120) continue;
+
+      // Inward pull + downward nudge toward funnel center
+      const inward = dx * 0.00018;
+      const downward = 0.0008;
+      Matter.Body.applyForce(body, body.position, { x: inward, y: downward });
     }
   }
 
@@ -495,26 +526,11 @@ export function buildMatterWorld(manifest: ExperimentManifest): PhysicsWorld {
       hookY = hookBody ? hookBody.position.y : prevHookY;
     }
 
-    // Hopper fill: count cargo blocks in the collector zone
+    // Hopper fill: use the stable collectedCargoIds set so the counter never drops
     let hopperFill: number | null = null;
     const hopperPrim = manifest.primitives.find((p) => p.kind === 'hopper');
     if (hopperPrim) {
-      const hCfg = hopperPrim.config as { x: number; y: number };
-      let count = 0;
-      for (const prim of manifest.primitives) {
-        if (prim.kind !== 'cargo-block') continue;
-        const body = bodyMap.get(prim.id);
-        if (!body) continue;
-        if (
-          body.position.x > hCfg.x - 45 &&
-          body.position.x < hCfg.x + 45 &&
-          body.position.y > hCfg.y - 20 &&
-          body.position.y < hCfg.y + 75
-        ) {
-          count++;
-        }
-      }
-      hopperFill = count;
+      hopperFill = collectedCargoIds.size;
     }
 
     // Build overlay maps for the canvas

@@ -63,6 +63,7 @@ export function BuildPage() {
   const [saveModal, setSaveModal] = useState<{ title: string; learned: string } | null>(null);
   const [xpToast, setXpToast] = useState<{ gained: number; newXp: number; tierName?: string } | null>(null);
   const [flashToast, setFlashToast] = useState(false);
+  const [stepCelebrating, setStepCelebrating] = useState(false);
   const [assistantPromptSeed, setAssistantPromptSeed] = useState<string | null>(null);
   const flashCountRef = useRef(0);
   const jobCompletedRef = useRef(false);
@@ -211,6 +212,10 @@ export function BuildPage() {
     const latestStep = newlyCompleted[newlyCompleted.length - 1];
 
     if (latestStep) {
+      // Trigger celebration pulse on every step completion
+      setStepCelebrating(true);
+      setTimeout(() => setStepCelebrating(false), 1800);
+
       if (projectState.complete) {
         setPlacingKind(null);
         showStatus(latestStep.successCopy, 'success');
@@ -513,25 +518,34 @@ export function BuildPage() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') {
+      // Don't intercept when typing in inputs/textareas
+      const tag = (event.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      if (event.key === 'Escape') {
+        if (placingKind) {
+          setPlacingKind(null);
+          showStatus('Placement cancelled. You are back in select mode.', 'info');
+          return;
+        }
+        if (selectedPrimitiveId) {
+          setSelectedPrimitiveId(undefined);
+          showStatus('Selection cleared.', 'info');
+        }
         return;
       }
 
-      if (placingKind) {
-        setPlacingKind(null);
-        showStatus('Placement cancelled. You are back in select mode.', 'info');
-        return;
-      }
-
-      if (selectedPrimitiveId) {
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedPrimitiveId && manifest) {
+        event.preventDefault();
+        void persistDraft(deletePrimitive(manifest, selectedPrimitiveId));
         setSelectedPrimitiveId(undefined);
-        showStatus('Selection cleared.', 'info');
+        showStatus('Part removed.', 'info');
       }
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [placingKind, selectedPrimitiveId, showStatus]);
+  }, [manifest, persistDraft, placingKind, selectedPrimitiveId, showStatus]);
 
   if (!manifest) {
     return (
@@ -654,7 +668,7 @@ export function BuildPage() {
         const gp = getGoalProgress(job, manifest, runtime);
         const pct = Math.min(100, gp.target > 0 ? (gp.current / gp.target) * 100 : 0);
         return (
-          <section className={`job-banner ${jobComplete ? 'complete' : ''}`}>
+          <section className={`job-banner ${jobComplete ? 'complete' : ''} ${stepCelebrating ? 'step-celebrating' : ''}`}>
             <div className="job-banner-info">
               <p className="eyebrow">Active Project — Tier {job.tier}</p>
               <strong>{job.title}</strong>
@@ -767,6 +781,12 @@ export function BuildPage() {
           {flashToast && (
             <div className="connection-toast">The machine is responding.</div>
           )}
+          {stepCelebrating && !jobComplete && (
+            <div className="step-complete-toast">
+              <span className="step-complete-star">★</span>
+              Step complete!
+            </div>
+          )}
           <MachineCanvas
             manifest={manifest}
             runtime={runtime}
@@ -785,6 +805,13 @@ export function BuildPage() {
               flashCountRef.current += 1;
               setFlashToast(true);
               setTimeout(() => setFlashToast(false), 2000);
+            }}
+            onTogglePower={(primitiveId) => {
+              const prim = manifest.primitives.find((p) => p.id === primitiveId);
+              if (!prim || prim.kind !== 'motor') return;
+              const current = (prim.config as { powerState?: boolean }).powerState ?? true;
+              void persistDraft(updatePrimitive(manifest, primitiveId, { ...prim.config, powerState: !current }));
+              showStatus(!current ? 'Motor ON.' : 'Motor OFF.', 'info');
             }}
           />
         </div>
@@ -825,6 +852,9 @@ export function BuildPage() {
                 return;
               }
               void persistDraft(updatePrimitive(manifest, primitiveId, { ...primitive.config, [key]: value }));
+              if (key === 'powerState') {
+                showStatus(value ? 'Motor powered ON.' : 'Motor powered OFF.', 'info');
+              }
             }}
           />
 
@@ -1262,8 +1292,10 @@ function placeMeshedGear(gear: PrimitiveInstance): GuidedPlacement | null {
 }
 
 function placeStarterConveyor(x: number, _y: number, title: string): GuidedPlacement {
-  const centerX = clamp(x || 450, 260, 700);
-  const centerY = 420;
+  const centerX = clamp(x || 420, 240, 660);
+  // Belt at y=300 — high enough that cargo falling off the right end will drop
+  // naturally into a hopper placed below it.
+  const centerY = 300;
   const path = [
     { x: centerX - 180, y: centerY },
     { x: centerX + 180, y: centerY },
@@ -1279,12 +1311,12 @@ function placeStarterConveyor(x: number, _y: number, title: string): GuidedPlace
     },
     guide: {
       title,
-      detail: 'Click anywhere. The conveyor will snap into a clear horizontal lane so the rest of the project lines up.',
+      detail: 'Click anywhere. The belt snaps to a lane where cargo will fall cleanly into a hopper at the output.',
       line: path,
       marker: { x: centerX, y: centerY - 26, label: 'Belt lane' },
     },
     feedback: {
-      message: 'Conveyor placed in the starter lane. Now add cargo so you can read the motion.',
+      message: 'Conveyor placed. Now add cargo — it will ride the belt and drop into the hopper at the end.',
       tone: 'success',
     },
   };
@@ -1294,21 +1326,24 @@ function placeCargoOnStarterConveyor(conveyor: PrimitiveInstance, existingCargoC
   const path = (conveyor.config as { path: Array<{ x: number; y: number }> }).path;
   const start = path[0];
   const end = path[path.length - 1];
-  const t = Math.min(0.48, 0.18 + existingCargoCount * 0.1);
+  // Space blocks evenly from 15% to 65% along the belt, leaving the right end clear
+  // for the hopper. Place exactly ON the belt (y = belt y) so the anti-gravity
+  // surface force catches them immediately.
+  const t = Math.min(0.62, 0.15 + existingCargoCount * 0.15);
   const beltX = start.x + (end.x - start.x) * t;
-  const beltY = start.y + (end.y - start.y) * t - 14;
+  const beltY = start.y + (end.y - start.y) * t; // on the belt, not above
 
   return {
     x: beltX,
     y: beltY,
     guide: {
       title: 'Put cargo on the belt',
-      detail: 'Click anywhere. The cargo will snap onto the conveyor so the step cannot fail from a tiny miss.',
+      detail: 'Click anywhere. The cargo snaps onto the belt and the surface force keeps it there.',
       line: path,
-      marker: { x: beltX, y: beltY - 12, label: 'Cargo snap point' },
+      marker: { x: beltX, y: beltY - 18, label: 'Cargo here' },
     },
     feedback: {
-      message: 'Cargo snapped onto the belt. Watch it ride the conveyor, then place the hopper at the output.',
+      message: 'Cargo on the belt. Watch it ride to the end and drop into the hopper.',
       tone: 'success',
     },
   };
@@ -1317,21 +1352,25 @@ function placeCargoOnStarterConveyor(conveyor: PrimitiveInstance, existingCargoC
 function placeHopperAtConveyorOutput(conveyor: PrimitiveInstance): GuidedPlacement {
   const path = (conveyor.config as { path: Array<{ x: number; y: number }> }).path;
   const output = path[path.length - 1];
-  const x = output.x + 82;
-  const y = output.y - 58;
+  // Place hopper BELOW and just past the belt end so gravity carries cargo into it.
+  // output.y is the belt level; hopper mouth opens ~10px above its y position,
+  // so placing at output.y + 90 means the mouth is at output.y + 80 — well below
+  // the belt level (output.y) so falling cargo enters cleanly.
+  const x = output.x + 20;
+  const y = output.y + 90;
 
   return {
     x,
     y,
     guide: {
-      title: 'Place the hopper at the output',
-      detail: 'Click anywhere. The hopper will snap beside the conveyor exit so the cargo has a real target.',
+      title: 'Place the hopper below the belt end',
+      detail: 'Click anywhere. The hopper snaps under the conveyor output — cargo falls off the belt and drops right in.',
       line: path,
-      rect: { x: output.x + 18, y: output.y - 56, w: 122, h: 120 },
-      marker: { x, y: y - 18, label: 'Hopper target' },
+      rect: { x: output.x - 20, y: output.y + 10, w: 100, h: 140 },
+      marker: { x, y: y - 20, label: 'Hopper here' },
     },
     feedback: {
-      message: 'Hopper snapped onto the conveyor output. The next cargo that arrives should count for real.',
+      message: 'Hopper placed below the belt end. Watch cargo slide off the conveyor and fall in.',
       tone: 'success',
     },
   };
@@ -1340,8 +1379,8 @@ function placeHopperAtConveyorOutput(conveyor: PrimitiveInstance): GuidedPlaceme
 function placeMotorNearConveyor(conveyor: PrimitiveInstance): GuidedPlacement {
   const path = (conveyor.config as { path: Array<{ x: number; y: number }> }).path;
   const start = path[0];
-  const x = start.x - 82;
-  const y = start.y - 8;
+  const x = start.x - 100;
+  const y = start.y - 18; // slightly above belt so motor ring visibly overlaps it
 
   return {
     x,

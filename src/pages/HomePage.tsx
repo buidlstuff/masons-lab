@@ -29,17 +29,18 @@ export function HomePage() {
 
   const primaryAction = latestDraft
     ? {
-        label: 'Continue Your Draft',
+        label: 'Continue Building',
         to: `/build/${latestDraft.draftId}`,
         title: latestDraft.manifest.metadata.title,
-        detail: 'Pick up where you left off in the honest sandbox.',
+        detail: 'Pick up where you left off.',
       }
     : nextProject
       ? {
-          label: 'Start Project 1',
-          to: `/jobs/${nextProject.jobId}`,
+          label: 'Start Building',
+          // Go directly into the builder — skip the detail page
+          to: `/build?job=${nextProject.jobId}`,
           title: nextProject.title,
-          detail: 'The fastest path to a satisfying first machine is one guided starter project.',
+          detail: nextProject.summary,
         }
       : {
           label: 'Open Empty Yard',
@@ -76,7 +77,7 @@ export function HomePage() {
               </div>
             </Link>
             {projects.slice(0, 2).map((project, index) => (
-              <Link key={project.jobId} to={`/jobs/${project.jobId}`} className="yard-start-card">
+              <Link key={project.jobId} to={`/build?job=${project.jobId}`} className="yard-start-card">
                 <span className="yard-start-index">{index + 2}</span>
                 <div>
                   <strong>{project.title}</strong>

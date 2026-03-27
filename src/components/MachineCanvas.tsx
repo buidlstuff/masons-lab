@@ -28,6 +28,7 @@ interface MachineCanvasProps {
   onMovePrimitive: (primitiveId: string, x: number, y: number) => void;
   onTelemetry: (telemetry: BuildTelemetry) => void;
   onConnectionFlash?: (ids: string[]) => void;
+  onTogglePower?: (primitiveId: string) => void;
 }
 
 export function MachineCanvas({
@@ -42,6 +43,7 @@ export function MachineCanvas({
   onMovePrimitive,
   onTelemetry,
   onConnectionFlash,
+  onTogglePower,
 }: MachineCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
@@ -56,9 +58,15 @@ export function MachineCanvas({
   const onMoveRef = useRef(onMovePrimitive);
   const onTelemetryRef = useRef(onTelemetry);
   const onConnectionFlashRef = useRef(onConnectionFlash);
+  const onTogglePowerRef = useRef(onTogglePower);
   const draggingIdRef = useRef<string | undefined>(undefined);
   const hoveredIdRef = useRef<string | undefined>(undefined);
   const dragOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  // Buffer drag moves — only fire onMovePrimitive on mouse release to prevent
+  // per-frame physics world rebuilds that reset all simulation state mid-drag.
+  const dragBufferRef = useRef<{ id: string; x: number; y: number } | null>(null);
+  // Track press position to distinguish click (no move) from drag
+  const pressPositionRef = useRef<{ x: number; y: number } | null>(null);
 
   // Flash state: partId → timestamp when connection was first detected
   const flashTimesRef = useRef<Record<string, number>>({});
@@ -76,6 +84,7 @@ export function MachineCanvas({
     onMoveRef.current = onMovePrimitive;
     onTelemetryRef.current = onTelemetry;
     onConnectionFlashRef.current = onConnectionFlash;
+    onTogglePowerRef.current = onTogglePower;
   }, [
     manifest,
     onConnectionFlash,
@@ -83,6 +92,7 @@ export function MachineCanvas({
     onPlacePrimitive,
     onSelectPrimitive,
     onTelemetry,
+    onTogglePower,
     placingKind,
     projectGuide,
     runtime,
@@ -115,9 +125,16 @@ export function MachineCanvas({
         }
         prevDrivesRef.current = curDrives;
 
+        // During drag, apply buffered position to the manifest for rendering
+        // so the part follows the cursor without triggering a physics rebuild.
+        const dragBuf = dragBufferRef.current;
+        const displayManifest = dragBuf
+          ? applyDragToManifest(manifestRef.current, dragBuf)
+          : manifestRef.current;
+
         drawScene(
           instance,
-          manifestRef.current,
+          displayManifest,
           runtimeRef.current,
           selectedRef.current,
           hoveredIdRef.current,
@@ -165,20 +182,46 @@ export function MachineCanvas({
           ? { x: anchor.x - x, y: anchor.y - y }
           : { x: 0, y: 0 };
         draggingIdRef.current = hit && isDraggablePrimitive(hit) ? hit.id : undefined;
+        dragBufferRef.current = null;
+        pressPositionRef.current = { x, y };
         onSelectRef.current(hit?.id);
       };
 
       instance.mouseDragged = () => {
-        if (!draggingIdRef.current) return;
-        onMoveRef.current(
-          draggingIdRef.current,
-          instance.mouseX + dragOffsetRef.current.x,
-          instance.mouseY + dragOffsetRef.current.y,
-        );
+        const id = draggingIdRef.current;
+        if (!id) return;
+        const nx = instance.mouseX + dragOffsetRef.current.x;
+        const ny = instance.mouseY + dragOffsetRef.current.y;
+        // Buffer position locally — don't call onMove yet (avoids per-frame physics rebuild)
+        dragBufferRef.current = { id, x: nx, y: ny };
       };
 
       instance.mouseReleased = () => {
+        const pressPos = pressPositionRef.current;
+        const releaseX = instance.mouseX;
+        const releaseY = instance.mouseY;
+        const moved = pressPos
+          ? Math.hypot(releaseX - pressPos.x, releaseY - pressPos.y) > 5
+          : false;
+
+        if (draggingIdRef.current && dragBufferRef.current && moved) {
+          // Commit drag — one physics rebuild per drag operation
+          onMoveRef.current(
+            dragBufferRef.current.id,
+            dragBufferRef.current.x,
+            dragBufferRef.current.y,
+          );
+        } else if (!moved && draggingIdRef.current && onTogglePowerRef.current) {
+          // Click without drag: toggle motor power
+          const prim = manifestRef.current.primitives.find((p) => p.id === draggingIdRef.current);
+          if (prim?.kind === 'motor') {
+            onTogglePowerRef.current(prim.id);
+          }
+        }
+
         draggingIdRef.current = undefined;
+        dragBufferRef.current = null;
+        pressPositionRef.current = null;
       };
 
       instance.mouseMoved = () => {
@@ -362,6 +405,16 @@ function drawConnectionOverlay(
         instance.textSize(11);
         instance.textAlign(instance.CENTER, instance.TOP);
         instance.text('Place a Gear or Wheel in this ring', x, y + 26);
+      }
+
+      // Show power-off hint when motor is off and selected
+      const motorOff = !(prim.config as { powerState?: boolean }).powerState;
+      if (motorOff && isSelected) {
+        instance.noStroke();
+        instance.fill(251, 191, 36, 200);
+        instance.textSize(11);
+        instance.textAlign(instance.CENTER, instance.BOTTOM);
+        instance.text('Motor is OFF — click to power on', x, y - 24);
       }
     }
 
@@ -908,27 +961,45 @@ function drawPrimitive(
     }
     case 'conveyor': {
       const { path, speed } = primitive.config as { path: Array<{ x: number; y: number }>; speed: number };
+      // Belt track
       instance.stroke(selected ? '#fbbf24' : '#3dd5a1');
       instance.strokeWeight(selected ? 10 : 8);
       for (let i = 0; i < path.length - 1; i += 1) {
         instance.line(path[i].x, path[i].y, path[i + 1].x, path[i + 1].y);
       }
-      // Arrow showing direction
+      // Animated chevrons showing belt motion — spacing and offset driven by time
       if (path.length >= 2) {
-        const mx = (path[0].x + path[1].x) / 2;
-        const my = (path[0].y + path[1].y) / 2;
-        const dx = path[1].x - path[0].x;
-        const dy = path[1].y - path[0].y;
-        const len = Math.hypot(dx, dy);
-        if (len > 0) {
-          instance.stroke('#1a3a32');
-          instance.strokeWeight(2);
-          const nx = (dx / len) * 10;
-          const ny = (dy / len) * 10;
-          instance.line(mx - nx, my - ny, mx + nx, my + ny);
-          instance.line(mx + nx, my + ny, mx + nx - ny * 0.5, my + ny + nx * 0.5);
-          instance.line(mx + nx, my + ny, mx + nx + ny * 0.5, my + ny - nx * 0.5);
+        const ctx2 = instance.drawingContext as CanvasRenderingContext2D;
+        const effectiveSpeed = Math.max(0, speed);
+        const chevronSpacing = 38;
+        const animOffset = ((Date.now() * effectiveSpeed * 0.0015) % chevronSpacing);
+        instance.push();
+        for (let i = 0; i < path.length - 1; i += 1) {
+          const ax = path[i].x;
+          const ay = path[i].y;
+          const bx = path[i + 1].x;
+          const by = path[i + 1].y;
+          const segLen = Math.hypot(bx - ax, by - ay);
+          const ux = (bx - ax) / segLen;
+          const uy = (by - ay) / segLen;
+          // perpendicular
+          const px2 = -uy;
+          const py2 = ux;
+          let along = animOffset;
+          while (along < segLen) {
+            const cx2 = ax + ux * along;
+            const cy2 = ay + uy * along;
+            // chevron: two short lines meeting at a point
+            const size = 5;
+            ctx2.setLineDash([]);
+            instance.stroke(selected ? '#b45309' : '#1a4a3c');
+            instance.strokeWeight(2);
+            instance.line(cx2 - ux * size - px2 * size, cy2 - uy * size - py2 * size, cx2, cy2);
+            instance.line(cx2, cy2, cx2 - ux * size + px2 * size, cy2 - uy * size + py2 * size);
+            along += chevronSpacing;
+          }
         }
+        instance.pop();
       }
       // Speed label when selected
       if (selected) {
@@ -1241,6 +1312,40 @@ function distanceToSegment(
   const px = start.x + dx * t;
   const py = start.y + dy * t;
   return Math.hypot(px - x, py - y);
+}
+
+// ─── Drag shadow manifest ─────────────────────────────────────────────────────
+// Creates a lightweight clone of the manifest with the dragging part's position
+// updated to the buffered cursor position. All drawing uses this so the part
+// tracks the cursor without triggering a physics world rebuild per frame.
+function applyDragToManifest(
+  manifest: ExperimentManifest,
+  drag: { id: string; x: number; y: number },
+): ExperimentManifest {
+  return {
+    ...manifest,
+    primitives: manifest.primitives.map((p) => {
+      if (p.id !== drag.id) return p;
+      if ('x' in p.config && 'y' in p.config) {
+        return { ...p, config: { ...p.config, x: drag.x, y: drag.y } };
+      }
+      if ('path' in p.config) {
+        const path = (p.config as { path: Array<{ x: number; y: number }> }).path;
+        const anchor = averagePoint(path);
+        const dx = drag.x - anchor.x;
+        const dy = drag.y - anchor.y;
+        return { ...p, config: { ...p.config, path: path.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })) } };
+      }
+      if ('points' in p.config) {
+        const points = (p.config as { points: Array<{ x: number; y: number }> }).points;
+        const anchor = averagePoint(points);
+        const dx = drag.x - anchor.x;
+        const dy = drag.y - anchor.y;
+        return { ...p, config: { ...p.config, points: points.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })) } };
+      }
+      return p;
+    }),
+  };
 }
 
 function averagePoint(points: Array<{ x: number; y: number }>) {
