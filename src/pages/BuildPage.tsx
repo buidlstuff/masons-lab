@@ -1736,11 +1736,13 @@ export function BuildPage() {
           </div>
         ) : null}
 
-        {toolbarNotice ? (
-          <p className={`builder-status builder-status-${toolbarNotice.tone}`} role="status" aria-live="polite">
-            {toolbarNotice.message}
-          </p>
-        ) : null}
+        <div className="builder-status-slot">
+          {toolbarNotice ? (
+            <p className={`builder-status builder-status-${toolbarNotice.tone}`} role="status" aria-live="polite">
+              {toolbarNotice.message}
+            </p>
+          ) : null}
+        </div>
 
         {jobComplete && job ? (
           <div className="builder-stage-complete">
