@@ -373,6 +373,10 @@ This means future Codex should not treat scenes/challenges as side experiments. 
 
 ## Local Workflow Notes For Future Codex
 
+### Read this too
+
+For deferred-work status from the old expansion/fun plan docs, also read [tasks.md](/Users/kyledavis/Documents/Claude/Projects/Build%20with%20AI/masons-lab/tasks.md).
+
 ### Scratch files that should not be shipped
 
 These are intentionally local-only in this workspace:
