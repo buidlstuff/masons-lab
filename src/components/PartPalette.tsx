@@ -1,7 +1,18 @@
 import { useMemo, useState } from 'react';
 import { PART_CATEGORIES, type ExperimentManifest, type PrimitiveInstance, type PrimitiveKind } from '../lib/types';
 
-const BEGINNER_PARTS: PrimitiveKind[] = ['motor', 'gear', 'wheel', 'conveyor', 'hopper'];
+const QUICK_PARTS: PrimitiveKind[] = [
+  'motor',
+  'gear',
+  'wheel',
+  'conveyor',
+  'hopper',
+  'winch',
+  'hook',
+  'node',
+  'pulley',
+  'crane-arm',
+];
 
 interface PartPaletteProps {
   manifest: ExperimentManifest;
@@ -50,6 +61,10 @@ export function PartPalette({
     () => guidedKinds ? suggestions.filter((suggestion) => guidedKinds.includes(suggestion.kind)) : suggestions,
     [guidedKinds, suggestions],
   );
+  const quickPartKinds = useMemo(
+    () => (guidedKinds ? guidedKinds : QUICK_PARTS),
+    [guidedKinds],
+  );
   const canvasKinds = useMemo(
     () => Object.entries(counts)
       .filter(([, count]) => count > 0)
@@ -67,6 +82,20 @@ export function PartPalette({
       // Ignore storage failures.
     }
   }
+
+  const renderPartTile = (kind: PrimitiveKind) => (
+    <button
+      key={kind}
+      type="button"
+      className={`palette-item palette-item-quick ${selectedKind === kind ? 'active' : ''}`}
+      title={labelForPart(kind)}
+      onClick={() => onSelectKind(selectedKind === kind ? null : kind)}
+    >
+      <span className="palette-icon">{iconForPart(kind)}</span>
+      <span className="palette-label">{labelForPart(kind)}</span>
+      {counts[kind] ? <span className="palette-item-count">x{counts[kind]}</span> : null}
+    </button>
+  );
 
   return (
     <section className="panel palette-panel">
@@ -88,7 +117,50 @@ export function PartPalette({
         ) : null}
       </div>
 
-      <div className="palette-context-card">
+      {!guidedKinds ? (
+        <div className="palette-mode-toggle">
+          <button
+            type="button"
+            className={`palette-mode-btn ${beginner ? 'active' : ''}`}
+            onClick={() => {
+              if (!beginner) {
+                toggleBeginner();
+              }
+            }}
+          >
+            Starter
+          </button>
+          <button
+            type="button"
+            className={`palette-mode-btn ${!beginner ? 'active' : ''}`}
+            onClick={() => {
+              if (beginner) {
+                toggleBeginner();
+              }
+            }}
+          >
+            All Parts
+          </button>
+        </div>
+      ) : null}
+
+      <div className="palette-quick-section">
+        <div className="mini-head">
+          <p className="palette-category-label">{guidedKinds ? 'This Step' : 'Quick Parts'}</p>
+          <span className="palette-inline-hint">
+            {guidedKinds
+              ? 'Only the useful parts for this step are shown here.'
+              : beginner
+                ? 'Smaller core parts stay visible. Expand below for the full shelf.'
+                : 'Open a category below when you want the full catalog.'}
+          </span>
+        </div>
+        <div className="palette-grid palette-grid-quick">
+          {quickPartKinds.map(renderPartTile)}
+        </div>
+      </div>
+
+      <div className="palette-context-card compact">
         <p className="palette-context-label">{guidedKinds ? 'Project step' : 'Right now'}</p>
         <strong>
           {guidedKinds
@@ -109,12 +181,12 @@ export function PartPalette({
       </div>
 
       {visibleSuggestions.length > 0 ? (
-        <div className="palette-suggestion-list">
-          {visibleSuggestions.map((suggestion) => (
+        <div className="palette-suggestion-list compact">
+          {visibleSuggestions.slice(0, 3).map((suggestion) => (
             <button
               key={suggestion.kind}
               type="button"
-              className={`palette-suggestion-card ${selectedKind === suggestion.kind ? 'active' : ''}`}
+              className={`palette-suggestion-card compact ${selectedKind === suggestion.kind ? 'active' : ''}`}
               onClick={() => onSelectKind(selectedKind === suggestion.kind ? null : suggestion.kind)}
             >
               <span className="palette-suggestion-icon">{iconForPart(suggestion.kind)}</span>
@@ -141,126 +213,55 @@ export function PartPalette({
       ) : null}
 
       {guidedKinds ? (
-        <div className="palette-beginner-list">
-          {guidedKinds.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              className={`palette-beginner-item ${selectedKind === kind ? 'active' : ''}`}
-              onClick={() => onSelectKind(selectedKind === kind ? null : kind)}
-            >
-              <span className="palette-beginner-icon">{iconForPart(kind)}</span>
-              <div className="palette-beginner-info">
-                <span className="palette-beginner-label">{labelForPart(kind)}</span>
-                <span className="palette-beginner-tagline">{taglineForPart(kind)}</span>
-              </div>
-              {counts[kind] ? <span className="palette-beginner-check">x{counts[kind]}</span> : null}
-            </button>
-          ))}
-          <p className="palette-hint muted">More parts unlock after this step works.</p>
-        </div>
-      ) : (
-        <>
-      <div className="palette-mode-toggle">
-        <button
-          type="button"
-          className={`palette-mode-btn ${beginner ? 'active' : ''}`}
-          onClick={() => {
-            if (!beginner) {
-              toggleBeginner();
-            }
-          }}
-        >
-          Starter
-        </button>
-        <button
-          type="button"
-          className={`palette-mode-btn ${!beginner ? 'active' : ''}`}
-          onClick={() => {
-            if (beginner) {
-              toggleBeginner();
-            }
-          }}
-        >
-          All Parts
-        </button>
-      </div>
-
-      {beginner ? (
-        <div className="palette-beginner-list">
-          {BEGINNER_PARTS.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              className={`palette-beginner-item ${selectedKind === kind ? 'active' : ''}`}
-              onClick={() => onSelectKind(selectedKind === kind ? null : kind)}
-            >
-              <span className="palette-beginner-icon">{iconForPart(kind)}</span>
-              <div className="palette-beginner-info">
-                <span className="palette-beginner-label">{labelForPart(kind)}</span>
-                <span className="palette-beginner-tagline">{taglineForPart(kind)}</span>
-              </div>
-              {counts[kind] ? <span className="palette-beginner-check">x{counts[kind]}</span> : null}
-            </button>
-          ))}
-
-          <details className="palette-more-details">
-            <summary className="palette-more-summary">More parts for structures, rail, and lifting</summary>
-            <div className="palette-categories">
-              {PART_CATEGORIES.map((category) => {
-                const hiddenKinds = category.kinds.filter((kind) => !BEGINNER_PARTS.includes(kind));
-                if (hiddenKinds.length === 0) {
-                  return null;
-                }
-                return (
-                  <div key={category.label} className="palette-category">
-                    <p className="palette-category-label">{category.label}</p>
-                    <div className="palette-grid">
-                      {hiddenKinds.map((kind) => (
-                        <button
-                          key={kind}
-                          type="button"
-                          className={`palette-item ${selectedKind === kind ? 'active' : ''}`}
-                          title={labelForPart(kind)}
-                          onClick={() => onSelectKind(selectedKind === kind ? null : kind)}
-                        >
-                          <span className="palette-icon">{iconForPart(kind)}</span>
-                          <span className="palette-label">{labelForPart(kind)}</span>
-                          {counts[kind] ? <span className="palette-item-count">x{counts[kind]}</span> : null}
-                        </button>
-                      ))}
-                    </div>
+        <p className="palette-hint muted">More parts unlock after this step works.</p>
+      ) : beginner ? (
+        <details className="palette-category-panel palette-more-details">
+          <summary className="palette-category-summary">
+            <span>More Parts</span>
+            <span className="palette-category-summary-count">Expand the full shelf</span>
+          </summary>
+          <div className="palette-category-panels">
+            {PART_CATEGORIES.map((category) => {
+              const extraKinds = category.kinds.filter((kind) => !quickPartKinds.includes(kind));
+              if (extraKinds.length === 0) {
+                return null;
+              }
+              const presentCount = extraKinds.reduce((total, kind) => total + counts[kind], 0);
+              return (
+                <details key={category.label} className="palette-category-panel">
+                  <summary className="palette-category-summary">
+                    <span>{category.label}</span>
+                    <span className="palette-category-summary-count">
+                      {presentCount > 0 ? `${presentCount} on canvas` : `${extraKinds.length} parts`}
+                    </span>
+                  </summary>
+                  <div className="palette-grid palette-grid-tight">
+                    {extraKinds.map(renderPartTile)}
                   </div>
-                );
-              })}
-            </div>
-          </details>
-        </div>
+                </details>
+              );
+            })}
+          </div>
+        </details>
       ) : (
-        <div className="palette-categories">
-          {PART_CATEGORIES.map((category) => (
-            <div key={category.label} className="palette-category">
-              <p className="palette-category-label">{category.label}</p>
-              <div className="palette-grid">
-                {category.kinds.map((kind) => (
-                  <button
-                    key={kind}
-                    type="button"
-                    className={`palette-item ${selectedKind === kind ? 'active' : ''}`}
-                    title={labelForPart(kind)}
-                    onClick={() => onSelectKind(selectedKind === kind ? null : kind)}
-                  >
-                    <span className="palette-icon">{iconForPart(kind)}</span>
-                    <span className="palette-label">{labelForPart(kind)}</span>
-                    {counts[kind] ? <span className="palette-item-count">x{counts[kind]}</span> : null}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
+        <div className="palette-category-panels">
+          {PART_CATEGORIES.map((category) => {
+            const presentCount = category.kinds.reduce((total, kind) => total + counts[kind], 0);
+            return (
+              <details key={category.label} className="palette-category-panel">
+                <summary className="palette-category-summary">
+                  <span>{category.label}</span>
+                  <span className="palette-category-summary-count">
+                    {presentCount > 0 ? `${presentCount} on canvas` : `${category.kinds.length} parts`}
+                  </span>
+                </summary>
+                <div className="palette-grid palette-grid-tight">
+                  {category.kinds.map(renderPartTile)}
+                </div>
+              </details>
+            );
+          })}
         </div>
-      )}
-        </>
       )}
 
       {selectedKind ? (
@@ -465,81 +466,6 @@ function connectionHintForKind(kind: PrimitiveKind) {
       return 'Trampolines bounce falling cargo, balls, and rocks back into the rest of the machine.';
     default:
       return 'Pick a matching part below if you want a clearer reaction from the canvas.';
-  }
-}
-
-function taglineForPart(kind: PrimitiveKind) {
-  switch (kind) {
-    case 'motor':
-      return 'Starts the motion';
-    case 'gear':
-      return 'Transfers and changes speed';
-    case 'piston':
-      return 'Pushes in a straight line';
-    case 'rack':
-      return 'Turns spin into sliding';
-    case 'spring-linear':
-      return 'Stores stretch and squeeze';
-    case 'crane-arm':
-      return 'Pivots to sweep a tool';
-    case 'counterweight':
-      return 'Adds balancing mass';
-    case 'bucket':
-      return 'Scoops and dumps material';
-    case 'pulley':
-      return 'Smooth rotating transfer';
-    case 'chain-sprocket':
-      return 'Toothed rotary transfer';
-    case 'flywheel':
-      return 'Stores motion and momentum';
-    case 'gearbox':
-      return 'Changes ratio across the box';
-    case 'water':
-      return 'Applies drag and buoyancy';
-    case 'hinge':
-      return 'Anchors a fixed pivot';
-    case 'chute':
-      return 'Guides loose material downhill';
-    case 'silo-bin':
-      return 'Stores material behind a gate';
-    case 'tunnel':
-      return 'Makes a covered passage';
-    case 'wheel':
-      return 'Shows spinning clearly';
-    case 'chassis':
-      return 'Base frame for rolling builds';
-    case 'ramp':
-      return 'Turns falling into rolling';
-    case 'platform':
-      return 'Flat support surface';
-    case 'wall':
-      return 'Stops or redirects motion';
-    case 'conveyor':
-      return 'Moves cargo across the floor';
-    case 'hopper':
-      return 'Collects what the conveyor feeds';
-    case 'ball':
-      return 'Rolls through machines';
-    case 'rock':
-      return 'Heavy piece that drops hard';
-    case 'node':
-      return 'Anchor point for beams';
-    case 'winch':
-      return 'Raises and lowers a hook';
-    case 'hook':
-      return 'The lifting end of a hoist';
-    case 'rail-segment':
-      return 'Track for locomotives and wagons';
-    case 'locomotive':
-      return 'Pulls the rail setup forward';
-    case 'wagon':
-      return 'Carries material along the rail';
-    case 'station-zone':
-      return 'Loads or unloads a wagon';
-    case 'trampoline':
-      return 'Bounces falling parts back up';
-    default:
-      return 'Adds another building behavior';
   }
 }
 

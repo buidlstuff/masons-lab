@@ -18,7 +18,7 @@
  */
 
 import Matter from 'matter-js';
-import { getPrimitiveAnchor as getConnectorAnchor } from './connectors';
+import { getJointIsland, getPrimitiveAnchor as getConnectorAnchor } from './connectors';
 import type { CargoLifecycleState, ExperimentManifest, PrimitiveInstance, PrimitiveKind } from './types';
 
 // Must match MachineCanvas createCanvas(960, 560)
@@ -264,6 +264,10 @@ export function buildMatterWorld(
     return next;
   }
 
+  function clampNumber(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, value));
+  }
+
   function placeBodyAtPivot(
     body: Matter.Body,
     localPoint: { x: number; y: number },
@@ -429,6 +433,25 @@ export function buildMatterWorld(
     if (body) {
       bodyMap.set(prim.id, body);
       Matter.World.add(engine.world, body);
+    }
+  }
+
+  // Mechanical islands should not fight themselves through contact collisions.
+  // Bolted and hinged assemblies read much better when the joint defines motion.
+  const groupedBodies = new Set<string>();
+  let nextCollisionGroup = -1;
+  for (const prim of manifest.primitives) {
+    if (!bodyMap.has(prim.id) || groupedBodies.has(prim.id)) continue;
+    const islandBodyIds = [...getJointIsland(manifest, prim.id)].filter((id) => bodyMap.has(id));
+    islandBodyIds.forEach((id) => groupedBodies.add(id));
+    if (islandBodyIds.length < 2) continue;
+    const collisionGroup = nextCollisionGroup;
+    nextCollisionGroup -= 1;
+    for (const bodyId of islandBodyIds) {
+      const body = bodyMap.get(bodyId);
+      if (body) {
+        body.collisionFilter.group = collisionGroup;
+      }
     }
   }
 
@@ -1452,7 +1475,13 @@ export function buildMatterWorld(
       if (!fromBody || !toBody) continue;
 
       const pivot = worldPointFromBody(fromBody, { x: link.fromLocalX, y: link.fromLocalY });
-      let nextAngle = toBody.angle;
+      const minAngle = (link.minAngle * Math.PI) / 180;
+      const maxAngle = (link.maxAngle * Math.PI) / 180;
+      const currentRelativeAngle = normalizeAngle(toBody.angle - fromBody.angle);
+      const currentRelativeVelocity = toBody.angularVelocity - fromBody.angularVelocity;
+      let nextRelativeAngle = currentRelativeAngle;
+      let commandedRelativeVelocity = currentRelativeVelocity * 0.82;
+      let maxRelativeVelocity = 1.4;
 
       if (link.motorId) {
         const motor = primitiveMap.get(link.motorId);
@@ -1472,26 +1501,42 @@ export function buildMatterWorld(
         if (enabled && motor?.kind === 'motor') {
           const motorState = readMotorState(motor);
           if (motorState.powered) {
-            const clampedTarget = Math.max(link.minAngle, Math.min(link.maxAngle, targetAngle));
-            const desiredAngle = fromBody.angle + (clampedTarget * Math.PI) / 180;
-            const deltaAngle = normalizeAngle(desiredAngle - toBody.angle);
-            const step = Math.min(Math.abs(deltaAngle), Math.max(0.08, Math.abs(motorState.angVel) * dt * 0.65));
-            nextAngle = toBody.angle + Math.sign(deltaAngle || 1) * step;
+            const clampedTarget = clampNumber(targetAngle, link.minAngle, link.maxAngle);
+            const targetRelativeAngle = (clampedTarget * Math.PI) / 180;
+            const deltaAngle = normalizeAngle(targetRelativeAngle - currentRelativeAngle);
+            maxRelativeVelocity = clampNumber(Math.abs(motorState.angVel) * 0.12, 0.45, 1.35);
+            const desiredRelativeVelocity = clampNumber(deltaAngle * 4.2, -maxRelativeVelocity, maxRelativeVelocity);
+            commandedRelativeVelocity = clampNumber(
+              currentRelativeVelocity + (desiredRelativeVelocity - currentRelativeVelocity) * 0.22,
+              -maxRelativeVelocity,
+              maxRelativeVelocity,
+            );
+            if (Math.abs(deltaAngle) < 0.015 && Math.abs(currentRelativeVelocity) < 0.08) {
+              nextRelativeAngle = targetRelativeAngle;
+              commandedRelativeVelocity = 0;
+            }
           }
         }
       }
 
-      const relativeAngle = normalizeAngle(nextAngle - fromBody.angle);
-      const minAngle = (link.minAngle * Math.PI) / 180;
-      const maxAngle = (link.maxAngle * Math.PI) / 180;
-      const clampedRelative = Math.max(minAngle, Math.min(maxAngle, relativeAngle));
-      const clampedAngle = fromBody.angle + clampedRelative;
-      const previousAngle = toBody.angle;
-      if (Math.abs(clampedAngle - toBody.angle) > 0.0001) {
-        Matter.Body.setAngle(toBody, clampedAngle);
+      if (nextRelativeAngle === currentRelativeAngle) {
+        nextRelativeAngle = currentRelativeAngle + commandedRelativeVelocity * Math.max(dt, 0.016);
       }
-      placeBodyAtPivot(toBody, { x: link.toLocalX, y: link.toLocalY }, pivot, clampedAngle);
-      Matter.Body.setAngularVelocity(toBody, normalizeAngle(clampedAngle - previousAngle) / Math.max(dt, 0.016));
+
+      const clampedRelative = clampNumber(nextRelativeAngle, minAngle, maxAngle);
+      if (clampedRelative !== nextRelativeAngle) {
+        commandedRelativeVelocity = 0;
+      }
+
+      const nextWorldAngle = fromBody.angle + clampedRelative;
+      if (Math.abs(nextWorldAngle - toBody.angle) > 0.0001) {
+        Matter.Body.setAngle(toBody, nextWorldAngle);
+      }
+      placeBodyAtPivot(toBody, { x: link.toLocalX, y: link.toLocalY }, pivot, nextWorldAngle);
+      Matter.Body.setAngularVelocity(
+        toBody,
+        fromBody.angularVelocity + clampNumber(commandedRelativeVelocity, -maxRelativeVelocity, maxRelativeVelocity),
+      );
     }
   }
 

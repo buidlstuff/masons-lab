@@ -554,10 +554,11 @@ button:disabled {
   inset: 0;
   z-index: 20;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(248, 250, 245, 0.58);
-  backdrop-filter: blur(4px);
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 1rem;
+  background: linear-gradient(180deg, rgba(248, 250, 245, 0.26), rgba(248, 250, 245, 0.06));
+  backdrop-filter: blur(2px);
   pointer-events: none; /* card itself has pointer-events */
 }
 
@@ -566,14 +567,14 @@ button:disabled {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 250, 245, 0.94));
   border: 1px solid rgba(61, 120, 132, 0.2);
   border-radius: 22px;
-  padding: 30px 34px;
-  max-width: 480px;
+  padding: 20px 22px;
+  max-width: 430px;
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   animation: fade-in 0.25s ease, slide-up 0.25s ease;
-  box-shadow: 0 28px 52px rgba(75, 90, 102, 0.16);
+  box-shadow: 0 22px 44px rgba(75, 90, 102, 0.14);
 }
 
 .starter-card h2 { font-size: 1.35rem; margin: 0; }
@@ -1583,7 +1584,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
-  padding: 0.95rem 1.05rem;
+  padding: 0.85rem 1rem;
   border-radius: 26px;
   background:
     radial-gradient(circle at top right, rgba(255, 225, 140, 0.18), transparent 26%),
@@ -1644,30 +1645,45 @@ button:disabled {
   color: #8a5a0a;
 }
 
-.builder-connect-menu {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 0.65rem;
-}
-
-.builder-connect-option {
+.builder-connect-chooser {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 0.22rem;
-  padding: 0.9rem 0.95rem;
-  border-radius: 20px;
-  text-align: left;
-  background: rgba(255, 255, 255, 0.8);
+  gap: 0.55rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 18px;
+  border: 1px solid rgba(61, 120, 132, 0.12);
+  background: rgba(255, 255, 255, 0.82);
 }
 
-.builder-connect-option strong {
-  font-size: 0.95rem;
+.builder-connect-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
 }
 
-.builder-connect-option span {
-  font-size: 0.8rem;
-  line-height: 1.4;
+.builder-connect-field span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.builder-connect-select {
+  min-width: min(100%, 15rem);
+  padding: 0.68rem 0.82rem;
+  border-radius: 999px;
+  border: 1px solid rgba(61, 120, 132, 0.2);
+  background: rgba(255, 255, 255, 0.94);
+  font: inherit;
+  color: var(--text-primary);
+}
+
+.builder-connect-caption {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
   color: var(--muted);
 }
 
@@ -1935,6 +1951,11 @@ button:disabled {
   background: linear-gradient(180deg, rgba(96, 165, 250, 0.08), rgba(7, 15, 22, 0.32));
 }
 
+.palette-context-card.compact {
+  margin-bottom: 0.7rem;
+  padding: 0.8rem 0.9rem;
+}
+
 .palette-context-card strong {
   display: block;
   margin-bottom: 0.25rem;
@@ -1959,6 +1980,13 @@ button:disabled {
   margin-bottom: 0.9rem;
 }
 
+.palette-suggestion-list.compact {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+}
+
 .palette-suggestion-card {
   display: flex;
   align-items: center;
@@ -1968,6 +1996,14 @@ button:disabled {
   text-align: left;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.palette-suggestion-card.compact {
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(61, 120, 132, 0.12);
 }
 
 .palette-suggestion-card.active {
@@ -2001,6 +2037,36 @@ button:disabled {
   font-size: 0.76rem;
   color: var(--muted);
   line-height: 1.4;
+}
+
+.palette-inline-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.palette-quick-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.15rem;
+  margin-bottom: 0.8rem;
+}
+
+.palette-quick-section .mini-head {
+  margin-bottom: 0.45rem;
+}
+
+.palette-context-card.compact {
+  margin-top: 0.35rem;
+}
+
+.palette-context-card.compact strong {
+  display: block;
+  margin-bottom: 0.18rem;
+}
+
+.palette-context-card.compact .muted {
+  margin: 0;
 }
 
 .palette-suggestion-count,
@@ -2081,6 +2147,15 @@ button:disabled {
   gap: 0.4rem;
 }
 
+.palette-grid-quick {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.palette-grid-tight {
+  margin-top: 0.65rem;
+}
+
 .palette-item {
   border-radius: 10px;
   padding: 0.45rem 0.3rem;
@@ -2089,6 +2164,13 @@ button:disabled {
   flex-direction: column;
   align-items: center;
   gap: 0.2rem;
+}
+
+.palette-item-quick {
+  min-height: 4.6rem;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(61, 120, 132, 0.12);
 }
 
 .palette-icon {
@@ -2110,6 +2192,44 @@ button:disabled {
 
 .palette-item.active .palette-label {
   color: var(--accent-yellow, #fec84b);
+}
+
+.palette-category-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.palette-category-panel {
+  border: 1px solid rgba(61, 120, 132, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 0.2rem;
+}
+
+.palette-category-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.72rem 0.8rem;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+}
+
+.palette-category-summary::-webkit-details-marker {
+  display: none;
+}
+
+.palette-category-summary-count {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.palette-more-details {
+  margin-top: 0.1rem;
 }
 
 /* Job completion celebration */
@@ -2159,6 +2279,13 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+}
+
+.control-panel-body,
+.inspector-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
 }
 
 .field {
@@ -2510,7 +2637,8 @@ button:disabled {
 }
 
 .page-build .palette-beginner-list,
-.page-build .palette-categories {
+.page-build .palette-categories,
+.page-build .palette-category-panels {
   max-height: min(48vh, 34rem);
   overflow: auto;
   padding-right: 0.25rem;
@@ -3209,8 +3337,13 @@ button:disabled {
     flex: 1 1 12rem;
   }
 
-  .builder-connect-menu {
-    grid-template-columns: 1fr;
+  .builder-connect-field {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .palette-grid-quick {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .site-header {

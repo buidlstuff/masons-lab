@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { ExperimentManifest, PrimitiveInstance, PrimitiveKind } from '../lib/types';
 
 interface InspectorPanelProps {
@@ -65,6 +66,12 @@ function getCustomNumberFieldValue(primitive: PrimitiveInstance, key: string): n
 }
 
 export function InspectorPanel({ primitive, manifest, onDelete, onUpdateValue }: InspectorPanelProps) {
+  const [open, setOpen] = useState(Boolean(primitive));
+
+  useEffect(() => {
+    setOpen(Boolean(primitive));
+  }, [primitive?.id]);
+
   const customFields = primitive ? (CUSTOM_NUMBER_FIELDS[primitive.kind] ?? []) : [];
   const hiddenKeys = new Set<string>(customFields.map((field) => field.key));
   const positionOnly = primitive ? POSITION_ONLY_KINDS.includes(primitive.kind) : false;
@@ -95,106 +102,113 @@ export function InspectorPanel({ primitive, manifest, onDelete, onUpdateValue }:
     : [];
 
   return (
-    <section className="panel inspector-panel">
-      <div className="panel-header compact">
+    <details
+      className="panel small-panel disclosure-panel inspector-panel"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="disclosure-summary">
         <div>
           <p className="eyebrow">Inspector</p>
           <h3>{primitive ? primitive.label ?? primitive.kind : 'Select a part'}</h3>
         </div>
-      </div>
+        <span className="muted">{primitive ? primitive.kind : 'No part selected'}</span>
+      </summary>
 
-      {primitive ? (
-        <div className="inspector-content">
-          <p className="muted">{primitive.kind}</p>
+      <div className="disclosure-content inspector-panel-body">
+        {primitive ? (
+          <div className="inspector-content">
+            <p className="muted">{primitive.kind}</p>
 
-          {/* Motor power toggle — the most important boolean in the whole lab */}
-          {primitive.kind === 'motor' && (
-            <div className="motor-power-row">
-              <span>Power</span>
-              <button
-                type="button"
-                className={`motor-power-btn ${(primitive.config as { powerState?: boolean }).powerState ? 'on' : 'off'}`}
-                onClick={() => onUpdateValue(primitive.id, 'powerState', !(primitive.config as { powerState?: boolean }).powerState)}
-              >
-                {(primitive.config as { powerState?: boolean }).powerState ? 'ON' : 'OFF'}
-              </button>
-            </div>
-          )}
-          {customFields.map((field) => (
-            <label key={field.key} className="field">
-              <span>{field.label}</span>
-              <input
-                type="number"
-                min={field.min}
-                max={field.max}
-                step={field.step}
-                value={getCustomNumberFieldValue(primitive, field.key)}
-                onChange={(event) => onUpdateValue(primitive.id, field.key, Number(event.target.value))}
-              />
-            </label>
-          ))}
-
-          {positionOnly && 'x' in primitive.config && 'y' in primitive.config ? (
-            <p className="muted">
-              Position: {Math.round((primitive.config as { x: number; y: number }).x)}, {Math.round((primitive.config as { x: number; y: number }).y)}
-            </p>
-          ) : null}
-
-          {genericNumberFields
-            .map(([key, value]) => (
-              <label key={key} className="field">
-                <span>{key}</span>
+            {/* Motor power toggle — the most important boolean in the whole lab */}
+            {primitive.kind === 'motor' && (
+              <div className="motor-power-row">
+                <span>Power</span>
+                <button
+                  type="button"
+                  className={`motor-power-btn ${(primitive.config as { powerState?: boolean }).powerState ? 'on' : 'off'}`}
+                  onClick={() => onUpdateValue(primitive.id, 'powerState', !(primitive.config as { powerState?: boolean }).powerState)}
+                >
+                  {(primitive.config as { powerState?: boolean }).powerState ? 'ON' : 'OFF'}
+                </button>
+              </div>
+            )}
+            {customFields.map((field) => (
+              <label key={field.key} className="field">
+                <span>{field.label}</span>
                 <input
                   type="number"
-                  value={value as number}
-                  onChange={(event) => onUpdateValue(primitive.id, key, Number(event.target.value))}
+                  min={field.min}
+                  max={field.max}
+                  step={field.step}
+                  value={getCustomNumberFieldValue(primitive, field.key)}
+                  onChange={(event) => onUpdateValue(primitive.id, field.key, Number(event.target.value))}
                 />
               </label>
             ))}
 
-          {genericTextFields
-            .map(([key, value]) => (
-              <label key={key} className="field">
-                <span>{key}</span>
-                <input
-                  type="text"
-                  value={value as string}
-                  onChange={(event) => onUpdateValue(primitive.id, key, event.target.value)}
-                />
-              </label>
-            ))}
+            {positionOnly && 'x' in primitive.config && 'y' in primitive.config ? (
+              <p className="muted">
+                Position: {Math.round((primitive.config as { x: number; y: number }).x)}, {Math.round((primitive.config as { x: number; y: number }).y)}
+              </p>
+            ) : null}
 
-          {genericBooleanFields
-            .map(([key, value]) => (
-              <label key={key} className="field checkbox-field">
-                <span>{key}</span>
-                <input
-                  type="checkbox"
-                  checked={value as boolean}
-                  onChange={(event) => onUpdateValue(primitive.id, key, event.target.checked)}
-                />
-              </label>
-            ))}
+            {genericNumberFields
+              .map(([key, value]) => (
+                <label key={key} className="field">
+                  <span>{key}</span>
+                  <input
+                    type="number"
+                    value={value as number}
+                    onChange={(event) => onUpdateValue(primitive.id, key, Number(event.target.value))}
+                  />
+                </label>
+              ))}
 
-          {customFields.length === 0 && genericNumberFields.length === 0 && genericTextFields.length === 0 && !positionOnly ? (
-            <p className="muted">This part is mostly positioned directly on the canvas. Drag it to move it.</p>
-          ) : null}
+            {genericTextFields
+              .map(([key, value]) => (
+                <label key={key} className="field">
+                  <span>{key}</span>
+                  <input
+                    type="text"
+                    value={value as string}
+                    onChange={(event) => onUpdateValue(primitive.id, key, event.target.value)}
+                  />
+                </label>
+              ))}
 
-          <button type="button" className="danger-button" onClick={() => onDelete(primitive.id)}>
-            Delete Part
-          </button>
+            {genericBooleanFields
+              .map(([key, value]) => (
+                <label key={key} className="field checkbox-field">
+                  <span>{key}</span>
+                  <input
+                    type="checkbox"
+                    checked={value as boolean}
+                    onChange={(event) => onUpdateValue(primitive.id, key, event.target.checked)}
+                  />
+                </label>
+              ))}
+
+            {customFields.length === 0 && genericNumberFields.length === 0 && genericTextFields.length === 0 && !positionOnly ? (
+              <p className="muted">This part is mostly positioned directly on the canvas. Drag it to move it.</p>
+            ) : null}
+
+            <button type="button" className="danger-button" onClick={() => onDelete(primitive.id)}>
+              Delete Part
+            </button>
+          </div>
+        ) : (
+          <div className="inspector-empty">
+            <p>Pick a machine part on the canvas to tweak its safe parameters.</p>
+          </div>
+        )}
+
+        <div className="inspector-footer">
+          <p className="eyebrow">Machine</p>
+          <strong>{manifest.metadata.title}</strong>
+          <p className="muted">{manifest.metadata.shortDescription}</p>
         </div>
-      ) : (
-        <div className="inspector-empty">
-          <p>Pick a machine part on the canvas to tweak its safe parameters.</p>
-        </div>
-      )}
-
-      <div className="inspector-footer">
-        <p className="eyebrow">Machine</p>
-        <strong>{manifest.metadata.title}</strong>
-        <p className="muted">{manifest.metadata.shortDescription}</p>
       </div>
-    </section>
+    </details>
   );
 }

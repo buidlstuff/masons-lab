@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { ControlSpec } from '../lib/types';
 
 interface ControlPanelProps {
@@ -7,57 +8,72 @@ interface ControlPanelProps {
 }
 
 export function ControlPanel({ controls, values, onChange }: ControlPanelProps) {
+  const [open, setOpen] = useState(controls.length > 0);
+
+  useEffect(() => {
+    if (controls.length > 0) {
+      setOpen(true);
+    }
+  }, [controls.length]);
+
   return (
-    <section className="panel control-panel">
-      <div className="panel-header compact">
+    <details
+      className="panel small-panel disclosure-panel control-panel"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="disclosure-summary">
         <div>
           <p className="eyebrow">Machine Controls</p>
           <h3>Live tuning</h3>
         </div>
-      </div>
+        <span className="muted">{controls.length} control{controls.length === 1 ? '' : 's'}</span>
+      </summary>
 
-      <div className="control-stack">
-        {controls.map((control) => {
-          const value = values[control.id] ?? control.defaultValue;
-          if (control.kind === 'slider') {
+      <div className="disclosure-content control-panel-body">
+        <div className="control-stack">
+          {controls.map((control) => {
+            const value = values[control.id] ?? control.defaultValue;
+            if (control.kind === 'slider') {
+              return (
+                <label key={control.id} className="field">
+                  <span>
+                    {control.label}: <strong>{String(value)}</strong>
+                  </span>
+                  <input
+                    type="range"
+                    min={control.min}
+                    max={control.max}
+                    step={control.step}
+                    value={Number(value)}
+                    onChange={(event) => onChange(control.id, Number(event.target.value))}
+                  />
+                  {control.description ? <small>{control.description}</small> : null}
+                </label>
+              );
+            }
+
+            if (control.kind === 'toggle') {
+              return (
+                <label key={control.id} className="toggle-row">
+                  <span>{control.label}</span>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(value)}
+                    onChange={(event) => onChange(control.id, event.target.checked)}
+                  />
+                </label>
+              );
+            }
+
             return (
-              <label key={control.id} className="field">
-                <span>
-                  {control.label}: <strong>{String(value)}</strong>
-                </span>
-                <input
-                  type="range"
-                  min={control.min}
-                  max={control.max}
-                  step={control.step}
-                  value={Number(value)}
-                  onChange={(event) => onChange(control.id, Number(event.target.value))}
-                />
-                {control.description ? <small>{control.description}</small> : null}
-              </label>
+              <button key={control.id} type="button" onClick={() => onChange(control.id, true)}>
+                {control.label}
+              </button>
             );
-          }
-
-          if (control.kind === 'toggle') {
-            return (
-              <label key={control.id} className="toggle-row">
-                <span>{control.label}</span>
-                <input
-                  type="checkbox"
-                  checked={Boolean(value)}
-                  onChange={(event) => onChange(control.id, event.target.checked)}
-                />
-              </label>
-            );
-          }
-
-          return (
-            <button key={control.id} type="button" onClick={() => onChange(control.id, true)}>
-              {control.label}
-            </button>
-          );
-        })}
+          })}
+        </div>
       </div>
-    </section>
+    </details>
   );
 }

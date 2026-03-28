@@ -1118,32 +1118,18 @@ export function BuildPage() {
 
   return (
     <div className="page page-build">
-      <div className="build-header">
-        <div className="build-header-copy">
-          <p className="eyebrow">{job ? `Guided Play · ${job.tier}` : 'Free Build'}</p>
-          <h1>{manifest.metadata.title}</h1>
-          <p className="build-header-subtitle">{manifest.metadata.shortDescription}</p>
-        </div>
-        <div className="hero-actions build-header-actions">
-          <button type="button" className="primary-link" onClick={handleSaveMachine}>
-            Save to Shelf
-          </button>
-          <button type="button" onClick={() => setAssistantOpen((current) => !current)}>
-            {assistantOpen ? 'Hide Help' : 'Help'}
-          </button>
-          <Link to="/">Back to Yard</Link>
-        </div>
-      </div>
-
       <section className="panel builder-toolbar">
         <div className="builder-toolbar-main">
           <div className="builder-toolbar-copy">
-            <p className="eyebrow">{job ? `Project ${job.tier}` : 'Free Build'}</p>
-            <strong>{activeProjectStep?.title ?? builderFocus.title}</strong>
+            <p className="eyebrow">{manifest.metadata.title}</p>
+            <strong>{connectionKind ? `Connect ${labelForBuilderConnection(connectionKind)}` : activeProjectStep?.title ?? builderFocus.title}</strong>
             <p>{builderToolbarHint}</p>
           </div>
 
           <div className="builder-toolbar-actions">
+            <button type="button" onClick={handleSaveMachine}>
+              Save
+            </button>
             {connectionKind ? (
               <button type="button" className="primary-link" onClick={() => cancelConnectionMode()}>
                 Cancel {labelForBuilderConnection(connectionKind)}
@@ -1210,23 +1196,38 @@ export function BuildPage() {
         </div>
 
         {connectMenuOpen && !connectionKind ? (
-          <div className="builder-connect-menu">
-            {BUILDER_CONNECTION_OPTIONS.map((option) => (
-              <button
-                key={option.kind}
-                type="button"
-                className="builder-connect-option"
-                onClick={() => startConnectionMode(option.kind)}
+          <div className="builder-connect-chooser">
+            <label className="builder-connect-field">
+              <span>Which connector?</span>
+              <select
+                className="builder-connect-select"
+                defaultValue=""
+                onChange={(event) => {
+                  const nextKind = event.target.value as BuilderConnectionKind | '';
+                  if (!nextKind) {
+                    return;
+                  }
+                  startConnectionMode(nextKind);
+                }}
               >
-                <strong>{option.label}</strong>
-                <span>{option.hint}</span>
-              </button>
-            ))}
+                <option value="" disabled>Choose one</option>
+                {BUILDER_CONNECTION_OPTIONS.map((option) => (
+                  <option key={option.kind} value={option.kind}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="builder-connect-caption">
+              Pick the connector first, then click the first part and the second part on the canvas.
+            </p>
           </div>
         ) : null}
 
         {toolbarNotice ? (
-          <p className={`builder-status builder-status-${toolbarNotice.tone}`}>{toolbarNotice.message}</p>
+          <p className={`builder-status builder-status-${toolbarNotice.tone}`} role="status" aria-live="polite">
+            {toolbarNotice.message}
+          </p>
         ) : null}
       </section>
 
@@ -1370,7 +1371,7 @@ export function BuildPage() {
             onSelectKind={handleSelectKind}
           />
           {flashToast && (
-            <div className="connection-toast">The machine is responding.</div>
+            <div className="connection-toast" role="status" aria-live="polite">The machine is responding.</div>
           )}
           <ChallengeToast challenge={challengeToast} onDismiss={() => setChallengeToast(null)} />
           {stepCelebrating && !jobComplete && (

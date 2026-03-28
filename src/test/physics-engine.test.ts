@@ -415,13 +415,14 @@ describe('physics engine conveyor flow', () => {
     ];
 
     const world = buildMatterWorld(manifest);
+    const armBody = Matter.Composite.allBodies(world.engine.world).find((body) => body.label === 'arm-1');
     const frame = stepWorld(world, 180);
     const relativeAngle = normalizeAngle(
       (frame.bodyPositions['arm-1']?.angle ?? 0) - (frame.bodyPositions['base-1']?.angle ?? 0),
     );
 
-    expect(Math.abs(relativeAngle)).toBeGreaterThan(0.1);
-    expect(Math.abs(relativeAngle)).toBeLessThan(1.5);
+    expect(relativeAngle).toBeCloseTo((35 * Math.PI) / 180, 1);
+    expect(Math.abs(armBody?.angularVelocity ?? 0)).toBeLessThan(0.15);
     world.cleanup();
   });
 
