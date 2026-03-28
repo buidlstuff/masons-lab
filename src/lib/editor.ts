@@ -452,6 +452,10 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
       return { id: `loco-${nanoid(6)}`, kind, label: 'Locomotive', config: { trackId: 'track-main', progress: 0, speed: 0.18 } };
     case 'wagon':
       return { id: `wagon-${nanoid(6)}`, kind, label: 'Wagon', config: { trackId: 'track-main', offset: -0.12, capacity: 6 } };
+    case 'station-zone':
+      return { id: `station-${nanoid(6)}`, kind, label: 'Station Zone', config: { x, y, width: 120, height: 120, action: 'load' } };
+    case 'trampoline':
+      return { id: `trampoline-${nanoid(6)}`, kind, label: 'Trampoline', config: { x, y, width: 160 } };
     default:
       return { id: `node-${nanoid(6)}`, kind: 'node', label: 'Node', config: { x, y } };
   }

@@ -28,6 +28,7 @@ const ALLOWED_AI_PRIMITIVES = new Set<PrimitiveKind>([
   'rail-switch',
   'locomotive',
   'wagon',
+  'station-zone',
   'conveyor',
   'hopper',
   'cargo-block',
@@ -45,6 +46,7 @@ const ALLOWED_AI_PRIMITIVES = new Set<PrimitiveKind>([
   'water',
   'hinge',
   'tunnel',
+  'trampoline',
 ]);
 
 export interface ValidationResult {

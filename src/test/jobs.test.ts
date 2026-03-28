@@ -21,6 +21,7 @@ function createRuntimeSnapshot(overrides: Partial<RuntimeSnapshot> = {}): Runtim
     lostCargoCount: 0,
     stableCargoSpawns: {},
     wagonLoads: {},
+    wagonCargo: {},
     pistonExtensions: {},
     bucketContents: {},
     bucketStates: {},

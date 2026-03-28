@@ -75,6 +75,7 @@ export interface PhysicsFrame {
   lostCargoCount: number;
   stableCargoSpawns: Record<string, { x: number; y: number }>;
   wagonLoads: Record<string, number>;
+  wagonCargo: Record<string, string[]>;
   pistonExtensions: Record<string, number>;
   bucketContents: Record<string, number>;
   bucketStates: Record<string, 'collecting' | 'dumping'>;
@@ -128,6 +129,7 @@ export function buildMatterWorld(
   let throughput = 0;
   const motorPistonMap = new Map<string, string[]>();
   const motorWinchMap = new Map<string, string[]>();
+  const motorLocoMap = new Map<string, string[]>();
   const gearRackMap = new Map<string, string>();
   const pistonExtensionsState: Record<string, number> = {};
   const springCompressionsState: Record<string, number> = {};
@@ -267,6 +269,29 @@ export function buildMatterWorld(
     }
 
     return best;
+  }
+
+  function pointInsideStation(
+    point: { x: number; y: number },
+    action?: 'load' | 'unload',
+  ): { primitive: PrimitiveInstance; config: { x: number; y: number; width?: number; height?: number; action: 'load' | 'unload' } } | null {
+    for (const primitive of manifest.primitives) {
+      if (primitive.kind !== 'station-zone') continue;
+      const config = primitive.config as {
+        x: number;
+        y: number;
+        width?: number;
+        height?: number;
+        action: 'load' | 'unload';
+      };
+      if (action && config.action !== action) continue;
+      const width = config.width ?? 120;
+      const height = config.height ?? 80;
+      if (Math.abs(point.x - config.x) <= width / 2 && Math.abs(point.y - config.y) <= height / 2) {
+        return { primitive, config };
+      }
+    }
+    return null;
   }
 
   // Ground + boundary walls
@@ -784,6 +809,25 @@ export function buildMatterWorld(
     motorWinchMap.set(motor.id, winchIds);
   }
 
+  // Motor → locomotive proximity map
+  for (const motor of manifest.primitives.filter((p) => p.kind === 'motor')) {
+    const mCfg = motor.config as { x: number; y: number };
+    const locoIds = manifest.primitives
+      .filter((p) => p.kind === 'locomotive')
+      .filter((p) => {
+        const lCfg = p.config as { trackId?: string };
+        const track = lCfg.trackId ? primitiveMap.get(lCfg.trackId) : null;
+        if (!track || track.kind !== 'rail-segment') return false;
+        return distToPolyline(
+          (track.config as { points: Array<{ x: number; y: number }> }).points,
+          mCfg.x,
+          mCfg.y,
+        ) < 300;
+      })
+      .map((p) => p.id);
+    motorLocoMap.set(motor.id, locoIds);
+  }
+
   // Gear → rack proximity map
   for (const rack of manifest.primitives.filter((p) => p.kind === 'rack')) {
     const rCfg = rack.config as { x: number; y: number; width?: number; orientation?: string };
@@ -1109,6 +1153,7 @@ export function buildMatterWorld(
   function recoverLostCargo(dt: number, supportedCargoIds: Set<string>) {
     const conveyors = manifest.primitives.filter((primitive) => primitive.kind === 'conveyor');
     const hoppers = manifest.primitives.filter((primitive) => primitive.kind === 'hopper');
+    const stations = manifest.primitives.filter((primitive) => primitive.kind === 'station-zone');
     const sceneKeepsLooseCargo = manifest.metadata.tags.includes('silly-scene');
 
     for (const cargo of manifest.primitives.filter((primitive) => MATERIAL_KINDS.includes(primitive.kind))) {
@@ -1128,6 +1173,11 @@ export function buildMatterWorld(
         const cfg = hopper.config as { x: number; y: number };
         return Math.hypot(cfg.x - body.position.x, cfg.y - body.position.y) <= 120;
       });
+      const nearStation = stations.some((station) => {
+        const cfg = station.config as { x: number; y: number; width?: number; height?: number };
+        return Math.abs(cfg.x - body.position.x) <= (cfg.width ?? 120) / 2 + 24
+          && Math.abs(cfg.y - body.position.y) <= (cfg.height ?? 80) / 2 + 24;
+      });
 
       if (supportedCargoIds.has(cargo.id)) {
         cargoIdleTimers.set(cargo.id, 0);
@@ -1135,7 +1185,7 @@ export function buildMatterWorld(
         continue;
       }
 
-      const groundedAwayFromFlow = body.position.y > CANVAS_H - 24 && !nearConveyor && !nearHopper;
+      const groundedAwayFromFlow = body.position.y > CANVAS_H - 24 && !nearConveyor && !nearHopper && !nearStation;
       const idle = groundedAwayFromFlow && body.speed < 0.18
         ? (cargoIdleTimers.get(cargo.id) ?? 0) + dt
         : 0;
@@ -1262,10 +1312,37 @@ export function buildMatterWorld(
     }
   }
 
+  function tickTrampolines() {
+    const trampolines = manifest.primitives.filter((p) => p.kind === 'trampoline');
+    if (trampolines.length === 0) return;
+
+    for (const prim of manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind))) {
+      if (collectedCargoIds.has(prim.id) || wagonCargoAssignments.has(prim.id)) continue;
+      const body = bodyMap.get(prim.id);
+      if (!body) continue;
+
+      for (const trampoline of trampolines) {
+        const cfg = trampoline.config as { x: number; y: number; width?: number };
+        const halfWidth = (cfg.width ?? 160) / 2;
+        if (Math.abs(body.position.x - cfg.x) > halfWidth) continue;
+        if (Math.abs(body.position.y - cfg.y) > 24) continue;
+        if (body.velocity.y < 0.6) continue;
+
+        const bounceVelocity = -Math.max(8, Math.min(14, body.velocity.y * 1.15));
+        Matter.Body.setVelocity(body, {
+          x: body.velocity.x * 0.98,
+          y: bounceVelocity,
+        });
+        break;
+      }
+    }
+  }
+
   function tickWagons(dt: number) {
     const wagonLoads: Record<string, number> = {};
+    const wagonCargo: Record<string, string[]> = {};
     const wagons = manifest.primitives.filter((p) => p.kind === 'wagon');
-    if (wagons.length === 0) return wagonLoads;
+    if (wagons.length === 0) return { wagonLoads, wagonCargo };
 
     for (const [cargoId, cooldown] of [...wagonCargoCooldowns.entries()]) {
       const nextCooldown = cooldown - dt;
@@ -1289,21 +1366,34 @@ export function buildMatterWorld(
       const wagonProgress = wrapUnitProgress(locoProgress + cfg.offset);
       const wagonPos = trackPoint(trackPrim, wagonProgress);
       const capacity = cfg.capacity ?? 6;
+      const loadStation = pointInsideStation(wagonPos, 'load');
+      const unloadStation = pointInsideStation(wagonPos, 'unload');
 
       let assignedCargo = compactWagonAssignments(wagon.id);
-      const unloadTarget = findWagonUnloadTarget(wagonPos);
-      if (assignedCargo.length > 0 && unloadTarget) {
-        const target = unloadTarget;
+      const fallbackUnloadTarget = unloadStation ? null : findWagonUnloadTarget(wagonPos);
+      if (assignedCargo.length > 0 && (unloadStation || fallbackUnloadTarget)) {
         const nextTimer = Math.max(0, (wagonUnloadTimers.get(wagon.id) ?? 0) - dt);
         if (nextTimer <= 0) {
-          const [cargoId] = assignedCargo[0];
+          const [cargoId, entry] = assignedCargo[0];
           const body = bodyMap.get(cargoId);
           if (body) {
             wagonCargoAssignments.delete(cargoId);
             wagonCargoCooldowns.set(cargoId, 0.7);
             Matter.Body.setStatic(body, false);
-            Matter.Body.setPosition(body, { x: target.x, y: target.y });
-            Matter.Body.setVelocity(body, { x: target.vx, y: target.vy });
+            if (unloadStation) {
+              const width = unloadStation.config.width ?? 120;
+              const height = unloadStation.config.height ?? 80;
+              const column = (entry.slot % 3) - 1;
+              const row = Math.floor(entry.slot / 3);
+              Matter.Body.setPosition(body, {
+                x: unloadStation.config.x + column * Math.min(18, Math.max(12, width / 8)),
+                y: unloadStation.config.y + height / 2 - 18 - row * 18,
+              });
+              Matter.Body.setVelocity(body, { x: 0, y: 1.2 });
+            } else if (fallbackUnloadTarget) {
+              Matter.Body.setPosition(body, { x: fallbackUnloadTarget.x, y: fallbackUnloadTarget.y });
+              Matter.Body.setVelocity(body, { x: fallbackUnloadTarget.vx, y: fallbackUnloadTarget.vy });
+            }
             Matter.Body.setAngle(body, 0);
             Matter.Body.setAngularVelocity(body, 0);
             cargoStates.set(cargoId, 'airborne');
@@ -1318,15 +1408,22 @@ export function buildMatterWorld(
 
       assignedCargo = compactWagonAssignments(wagon.id);
       let loadedCount = assignedCargo.length;
-      if (loadedCount < capacity && !unloadTarget) {
+      if (loadedCount < capacity && !unloadStation && !fallbackUnloadTarget) {
         for (const material of manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind))) {
           const body = bodyMap.get(material.id);
           if (!body || collectedCargoIds.has(material.id) || wagonCargoAssignments.has(material.id)) continue;
           if ((wagonCargoCooldowns.get(material.id) ?? 0) > 0) continue;
           if ((material.config as { attachedToId?: string }).attachedToId) continue;
-          if (Math.abs(body.position.x - wagonPos.x) > 24 || Math.abs(body.position.y - wagonPos.y) > 20) continue;
+
+          const inLoadZone = loadStation
+            ? Math.abs(body.position.x - loadStation.config.x) <= (loadStation.config.width ?? 120) / 2
+              && Math.abs(body.position.y - loadStation.config.y) <= (loadStation.config.height ?? 80) / 2
+            : Math.abs(body.position.x - wagonPos.x) <= 24 && Math.abs(body.position.y - wagonPos.y) <= 20;
+          if (!inLoadZone) continue;
+
           wagonCargoAssignments.set(material.id, { wagonId: wagon.id, slot: loadedCount });
           Matter.Body.setStatic(body, true);
+          Matter.Body.setVelocity(body, { x: 0, y: 0 });
           cargoStates.set(material.id, 'supported');
           loadedCount += 1;
           if (loadedCount >= capacity) break;
@@ -1335,6 +1432,7 @@ export function buildMatterWorld(
 
       assignedCargo = compactWagonAssignments(wagon.id);
       wagonLoads[wagon.id] = assignedCargo.length;
+      wagonCargo[wagon.id] = assignedCargo.map(([cargoId]) => cargoId);
 
       for (const [cargoId, entry] of assignedCargo) {
         const body = bodyMap.get(cargoId);
@@ -1352,7 +1450,7 @@ export function buildMatterWorld(
       }
     }
 
-    return wagonLoads;
+    return { wagonLoads, wagonCargo };
   }
 
   // ── tickLocomotive ────────────────────────────────────────────────────────
@@ -1371,13 +1469,27 @@ export function buildMatterWorld(
         return wrapUnitProgress(prevProgress + delta);
       }
     }
+
+    let motorRpm = 0;
+    for (const [motorId, locoIds] of motorLocoMap) {
+      if (!locoIds.includes(locoPrim.id) || !activeMotorIds.has(motorId)) continue;
+      const motorPrim = primitiveMap.get(motorId);
+      if (!motorPrim || motorPrim.kind !== 'motor') continue;
+      motorRpm = Math.max(
+        motorRpm,
+        Number((motorPrim.config as { rpm?: number }).rpm ?? 0),
+      );
+    }
     const speedControl = manifest.controls.find(
       (c) => c.bind?.targetId === locoPrim.id && c.bind?.path === 'speed',
     );
     const speed = speedControl
       ? Number(currentControls[speedControl.id] ?? cfg.speed)
       : cfg.speed;
-    return wrapUnitProgress(prevProgress + dt * Math.abs(speed) * 0.35);
+    const effectiveSpeed = motorRpm > 0
+      ? Math.max(Math.abs(speed), motorRpm * 0.005)
+      : Math.abs(speed);
+    return wrapUnitProgress(prevProgress + dt * effectiveSpeed * 0.35);
   }
 
   // ── tick ──────────────────────────────────────────────────────────────────
@@ -1452,7 +1564,8 @@ export function buildMatterWorld(
     tickSprings();
     const conveyorFrame = tickConveyors();
     tickWaterZones(conveyorFrame.supportedCargoIds);
-    const wagonLoads = tickWagons(_dt);
+    tickTrampolines();
+    const wagonFrame = tickWagons(_dt);
     const collectedThisTick = tickHopper();
     tickBuckets();
     recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
@@ -1566,7 +1679,8 @@ export function buildMatterWorld(
       beltPowered: conveyorFrame.beltPowered,
       lostCargoCount,
       stableCargoSpawns: Object.fromEntries(cargoSpawnMap.entries()),
-      wagonLoads,
+      wagonLoads: wagonFrame.wagonLoads,
+      wagonCargo: wagonFrame.wagonCargo,
       pistonExtensions: { ...pistonExtensionsState },
       bucketContents: { ...bucketContentsState },
       bucketStates: { ...bucketStateMap },
@@ -1964,6 +2078,16 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
       });
     }
 
+    case 'trampoline': {
+      const cfg = prim.config as { x: number; y: number; width?: number };
+      return Matter.Bodies.rectangle(cfg.x, cfg.y, cfg.width ?? 160, 16, {
+        isStatic: true,
+        label: prim.id,
+        friction: 0.08,
+        restitution: 0.92,
+      });
+    }
+
     case 'beam':
     case 'rope':
     case 'belt-link':
@@ -1977,6 +2101,7 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
     case 'rail-switch':
     case 'locomotive':
     case 'wagon':
+    case 'station-zone':
       return null;
 
     default: {

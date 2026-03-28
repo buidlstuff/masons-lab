@@ -340,6 +340,10 @@ export function MachineCanvas({
         return 'Bucket — it collects nearby material and dumps when it tips far enough';
       case 'water':
         return 'Water — bodies inside the pool slow down and get a buoyancy lift';
+      case 'station-zone':
+        return 'Station zone — wagons load or unload when they pass through this highlighted area';
+      case 'trampoline':
+        return 'Trampoline — drop a ball, cargo block, or rock onto it for a visible bounce';
       case 'hinge':
         return 'Hinge — a fixed pivot point for future structural connections';
       case 'chute':
@@ -758,6 +762,13 @@ function drawPlacingPreview(
       instance.line(mx - 50, my - 20, mx + 50, my - 20);
       instance.line(mx - 50, my + 20, mx + 50, my + 20);
       break;
+    case 'trampoline':
+      instance.rect(mx - 60, my - 8, 120, 16, 8);
+      instance.line(mx - 36, my + 8, mx - 24, my + 24);
+      instance.line(mx - 12, my + 8, mx, my + 24);
+      instance.line(mx + 12, my + 8, mx + 24, my + 24);
+      instance.line(mx + 36, my + 8, mx + 48, my + 24);
+      break;
     case 'motor':
       instance.rect(mx - 28, my - 18, 56, 36, 10);
       instance.noFill();
@@ -818,6 +829,10 @@ function drawPlacingPreview(
       break;
     case 'wagon':
       instance.rect(mx - 18, my - 16, 36, 20, 6);
+      break;
+    case 'station-zone':
+      instance.rect(mx - 60, my - 40, 120, 80, 10);
+      instance.line(mx - 36, my, mx + 36, my);
       break;
     default:
       instance.circle(mx, my, 18);
@@ -1074,6 +1089,12 @@ function getPlacementAssessment(
         title: 'Covered route',
         detail: 'Tunnels help when you want material to keep moving between two openings.',
       };
+    case 'trampoline':
+      return {
+        tone: 'good',
+        title: 'Bounce lane',
+        detail: 'Drop a ball, rock, or cargo block onto the springy strip for quick visible motion.',
+      };
     case 'conveyor':
       return hasNearbyMotor(manifest, x, y)
         ? {
@@ -1110,6 +1131,18 @@ function getPlacementAssessment(
             tone: 'warn',
             title: 'No rail yet',
             detail: 'Place rail first. Then set trackId in the Inspector so this can move.',
+          };
+    case 'station-zone':
+      return hasKind(manifest, 'wagon')
+        ? {
+            tone: 'good',
+            title: 'Ready for transfers',
+            detail: 'Set this zone to load or unload so wagons have a clear reason to pass through.',
+          }
+        : {
+            tone: 'info',
+            title: 'Rail helper',
+            detail: 'Stations matter once a wagon is running on the nearby rail.',
           };
     default:
       return {
@@ -1729,14 +1762,43 @@ function drawPrimitive(
       instance.fill(selected ? '#fbbf24' : '#94a3b8');
       instance.stroke(selected ? '#fbbf24' : highlight);
       instance.rect(point.x - 18, point.y - 16, 36, 20, 6);
-      const wagonLoad = runtime.wagonLoads?.[primitive.id] ?? 0;
-      if (wagonLoad > 0) {
+      const wagonCargo = runtime.wagonCargo?.[primitive.id] ?? [];
+      if (wagonCargo.length > 0) {
+        const visibleCargo = Math.min(4, wagonCargo.length);
         instance.noStroke();
         instance.fill('#f8fafc');
-        instance.textSize(10);
-        instance.textAlign(instance.CENTER, instance.BOTTOM);
-        instance.text(`${wagonLoad}`, point.x, point.y - 18);
+        for (let index = 0; index < visibleCargo; index += 1) {
+          instance.rect(point.x - 12 + index * 8, point.y - 18, 6, 6, 2);
+        }
+        if (wagonCargo.length > visibleCargo) {
+          instance.textSize(10);
+          instance.textAlign(instance.CENTER, instance.BOTTOM);
+          instance.text(`${wagonCargo.length}`, point.x, point.y - 22);
+        }
       }
+      break;
+    }
+    case 'station-zone': {
+      const { x, y, width = 120, height = 80, action } = primitive.config as {
+        x: number;
+        y: number;
+        width?: number;
+        height?: number;
+        action: 'load' | 'unload';
+      };
+      instance.rectMode(instance.CENTER);
+      instance.noStroke();
+      instance.fill(action === 'load' ? 'rgba(56, 189, 248, 0.18)' : 'rgba(251, 146, 60, 0.18)');
+      instance.rect(x, y, width, height, 14);
+      instance.stroke(selected ? '#fbbf24' : (action === 'load' ? '#38bdf8' : '#fb923c'));
+      instance.strokeWeight(selected ? 3 : 2);
+      instance.noFill();
+      instance.rect(x, y, width, height, 14);
+      instance.noStroke();
+      instance.fill('#0f172a');
+      instance.textSize(10);
+      instance.textAlign(instance.CENTER, instance.CENTER);
+      instance.text(action === 'load' ? 'LOAD' : 'UNLOAD', x, y);
       break;
     }
     case 'material-pile': {
@@ -1770,6 +1832,19 @@ function drawPrimitive(
       instance.stroke(selected ? '#fbbf24' : '#7dd3fc');
       instance.line(x - width / 2 + 10, y - height * 0.2, x + width / 2 - 10, y - height * 0.2);
       instance.line(x - width / 2 + 16, y + height * 0.05, x + width / 2 - 16, y + height * 0.05);
+      break;
+    }
+    case 'trampoline': {
+      const { x, y, width = 160 } = primitive.config as { x: number; y: number; width?: number };
+      instance.rectMode(instance.CENTER);
+      instance.stroke(selected ? '#fbbf24' : highlight);
+      instance.strokeWeight(selected ? 3 : 2);
+      instance.fill(selected ? '#fbbf24' : '#ef7b45');
+      instance.rect(x, y, width, 16, 10);
+      instance.stroke(selected ? '#fbbf24' : '#475569');
+      instance.line(x - width / 2 + 20, y + 8, x - width / 2 + 32, y + 26);
+      instance.line(x - 8, y + 8, x + 4, y + 26);
+      instance.line(x + width / 2 - 32, y + 8, x + width / 2 - 20, y + 26);
       break;
     }
     case 'hinge': {
@@ -1934,9 +2009,19 @@ function hitTest(
         const height = cfg.height ?? 80;
         return Math.abs(cfg.x - x) <= width / 2 && Math.abs(cfg.y - y) <= height / 2;
       }
+      case 'station-zone': {
+        const cfg = primitive.config as { x: number; y: number; width?: number; height?: number };
+        const width = cfg.width ?? 120;
+        const height = cfg.height ?? 80;
+        return Math.abs(cfg.x - x) <= width / 2 && Math.abs(cfg.y - y) <= height / 2;
+      }
       case 'chassis': {
         const cfg = primitive.config as { x: number; y: number; width?: number; height?: number };
         return Math.abs(cfg.x - x) <= (cfg.width ?? 140) / 2 && Math.abs(cfg.y - y) <= (cfg.height ?? 20) / 2 + 12;
+      }
+      case 'trampoline': {
+        const cfg = primitive.config as { x: number; y: number; width?: number };
+        return Math.abs(cfg.x - x) <= (cfg.width ?? 160) / 2 && Math.abs(cfg.y - y) <= 30;
       }
       case 'hinge': {
         const cfg = primitive.config as { x: number; y: number };
@@ -2156,6 +2241,7 @@ function labelFor(kind: PrimitiveKind): string {
   switch (kind) {
     case 'rail-segment': return 'Rail';
     case 'rail-switch':  return 'Switch';
+    case 'station-zone': return 'Station';
     case 'cargo-block':  return 'Cargo Block';
     case 'material-pile': return 'Material Pile';
     default: return kind.split('-').map((s) => s[0].toUpperCase() + s.slice(1)).join(' ');

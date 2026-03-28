@@ -342,10 +342,17 @@ function deriveSuggestions(
       case 'rail-segment':
         push('locomotive', 'Locomotives make the track meaningful.');
         push('wagon', 'Wagons show delivery progress once the train is moving.');
+        push('station-zone', 'Stations make trains load and unload on purpose instead of feeling disconnected.');
         break;
       case 'locomotive':
       case 'wagon':
         push('rail-segment', 'Train parts still need a real rail segment underneath them.');
+        push('station-zone', 'Stations give the rail system clear pickup and drop-off moments.');
+        break;
+      case 'ball':
+      case 'rock':
+      case 'cargo-block':
+        push('trampoline', 'A trampoline is a fast way to turn a falling part into a visible bounce.');
         break;
       default:
         break;
@@ -371,6 +378,9 @@ function deriveSuggestions(
     }
     if (counts['rail-segment'] > 0 && counts.locomotive === 0) {
       push('locomotive', 'Add a locomotive once the track exists.');
+    }
+    if ((counts.locomotive > 0 || counts.wagon > 0) && counts['station-zone'] === 0) {
+      push('station-zone', 'Station zones make trains feel like they belong in the rest of the machine.');
     }
     if (counts.node === 1) {
       push('node', 'One more node is enough to create a beam.');
@@ -399,6 +409,7 @@ function countKinds(manifest: ExperimentManifest) {
     'rail-switch': 0,
     locomotive: 0,
     wagon: 0,
+    'station-zone': 0,
     conveyor: 0,
     hopper: 0,
     'cargo-block': 0,
@@ -427,6 +438,7 @@ function countKinds(manifest: ExperimentManifest) {
     water: 0,
     hinge: 0,
     tunnel: 0,
+    trampoline: 0,
   };
 
   manifest.primitives.forEach((primitive) => {
@@ -467,6 +479,10 @@ function connectionHintForKind(kind: PrimitiveKind) {
       return 'Locomotives need rail plus a linked rotating driver if you want them to feel part of the machine.';
     case 'wagon':
       return 'Wagons now load loose material near the rail and can unload it into hoppers, chutes, silos, or conveyors.';
+    case 'station-zone':
+      return 'Station zones give wagons a deliberate place to load or unload instead of relying on lucky proximity.';
+    case 'trampoline':
+      return 'Trampolines bounce falling cargo, balls, and rocks back into the rest of the machine.';
     default:
       return 'Pick a matching part below if you want a clearer reaction from the canvas.';
   }
@@ -538,6 +554,10 @@ function taglineForPart(kind: PrimitiveKind) {
       return 'Pulls the rail setup forward';
     case 'wagon':
       return 'Carries material along the rail';
+    case 'station-zone':
+      return 'Loads or unloads a wagon';
+    case 'trampoline':
+      return 'Bounces falling parts back up';
     default:
       return 'Adds another building behavior';
   }
@@ -595,6 +615,8 @@ function iconForPart(kind: PrimitiveKind): string {
       return 'L';
     case 'wagon':
       return 'U';
+    case 'station-zone':
+      return 'Z';
     case 'conveyor':
       return '>';
     case 'hopper':
@@ -617,6 +639,8 @@ function iconForPart(kind: PrimitiveKind): string {
       return '0';
     case 'rock':
       return '@';
+    case 'trampoline':
+      return 'T';
     default:
       return '+';
   }
@@ -628,6 +652,8 @@ function labelForPart(kind: PrimitiveKind): string {
       return 'Rail';
     case 'rail-switch':
       return 'Switch';
+    case 'station-zone':
+      return 'Station';
     case 'cargo-block':
       return 'Cargo';
     case 'material-pile':

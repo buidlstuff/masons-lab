@@ -8,7 +8,7 @@ interface InspectorPanelProps {
 }
 
 const SAFE_NUMBER_FIELDS = ['x', 'y', 'rpm', 'teeth', 'speed', 'ropeLength', 'capacity', 'releaseRate', 'fill', 'radius', 'traction', 'mass', 'inputTeeth', 'outputTeeth', 'width', 'height', 'length', 'depth', 'stroke', 'restLength', 'stiffness', 'quantity', 'density', 'angle'];
-const SAFE_TEXT_FIELDS = ['trackId', 'drivePartId', 'orientation'];
+const SAFE_TEXT_FIELDS = ['trackId', 'drivePartId', 'orientation', 'action'];
 const SAFE_BOOLEAN_FIELDS = ['gateOpen'];
 const POSITION_ONLY_KINDS: PrimitiveKind[] = ['ball', 'rock'];
 const CUSTOM_NUMBER_FIELDS: Partial<Record<PrimitiveKind, Array<{
@@ -28,6 +28,13 @@ const CUSTOM_NUMBER_FIELDS: Partial<Record<PrimitiveKind, Array<{
   wall: [
     { key: 'height', label: 'height', min: 20, max: 200, step: 10 },
   ],
+  'station-zone': [
+    { key: 'width', label: 'width', min: 40, max: 260, step: 20 },
+    { key: 'height', label: 'height', min: 40, max: 220, step: 20 },
+  ],
+  trampoline: [
+    { key: 'width', label: 'width', min: 60, max: 260, step: 20 },
+  ],
 };
 
 function getCustomNumberFieldValue(primitive: PrimitiveInstance, key: string): number {
@@ -43,6 +50,14 @@ function getCustomNumberFieldValue(primitive: PrimitiveInstance, key: string): n
     case 'wall': {
       const config = primitive.config as { height: number };
       return config.height;
+    }
+    case 'station-zone': {
+      const config = primitive.config as { width: number; height: number };
+      return key === 'width' ? config.width : config.height;
+    }
+    case 'trampoline': {
+      const config = primitive.config as { width: number };
+      return config.width;
     }
     default:
       return 0;

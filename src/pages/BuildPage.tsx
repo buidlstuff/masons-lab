@@ -202,6 +202,7 @@ function createInitialRuntimeSnapshot(): RuntimeSnapshot {
     lostCargoCount: 0,
     stableCargoSpawns: {},
     wagonLoads: {},
+    wagonCargo: {},
     pistonExtensions: {},
     bucketContents: {},
     bucketStates: {},
@@ -2503,6 +2504,11 @@ function describePlacedPrimitive(
         message: 'Rail placed. Add a locomotive, then set its trackId in the Inspector so it matches this rail.',
         tone: 'info',
       };
+    case 'station-zone':
+      return {
+        message: 'Station zone placed. Set it to load or unload in the Inspector, then run a wagon through it.',
+        tone: 'info',
+      };
     case 'locomotive':
     case 'wagon':
       return hasPart(manifest, 'rail-segment')
@@ -2514,6 +2520,11 @@ function describePlacedPrimitive(
             message: `${labelForPrimitive(kind)} placed. Add rail first, then set its trackId in the Inspector.`,
             tone: 'warning',
           };
+    case 'trampoline':
+      return {
+        message: 'Trampoline placed. Drop a ball, rock, or cargo block onto it to see the bounce.',
+        tone: 'success',
+      };
     default:
       return {
         message: `${labelForPrimitive(kind)} placed. Drag it to reposition or use the Inspector for safe edits.`,
@@ -2532,6 +2543,10 @@ function placementInstructionForKind(kind: PrimitiveKind) {
       return 'Conveyors come alive once cargo, a hopper, and a nearby motor join the setup.';
     case 'rail-segment':
       return 'Rails are the track. Locomotives still need their trackId set, and can later be linked to a rotating driver.';
+    case 'station-zone':
+      return 'Stations turn passing wagons into deliberate load or unload moments.';
+    case 'trampoline':
+      return 'Trampolines are clearest when something can fall straight onto them.';
     case 'hook':
       return 'Hooks are most useful when they sit below a winch so Quick Connect can rope them together.';
     default:
@@ -2554,6 +2569,10 @@ function selectedInstructionForKind(kind: PrimitiveKind) {
     case 'locomotive':
     case 'wagon':
       return 'Point this at a real rail segment first. Locomotives can also be driven by a wheel, gear, pulley, sprocket, or flywheel.';
+    case 'station-zone':
+      return 'Set the station to load or unload, then run a wagon through its rectangle to see the transfer.';
+    case 'trampoline':
+      return 'Trampolines bounce loose parts best when something can drop onto the springy strip from above.';
     default:
       return 'Drag it to reposition it, or change its safe numeric fields in the Inspector.';
   }
@@ -2617,8 +2636,12 @@ function labelForPrimitive(kind: PrimitiveKind) {
       return 'Rail';
     case 'rail-switch':
       return 'Switch';
+    case 'station-zone':
+      return 'Station';
     case 'cargo-block':
       return 'Cargo';
+    case 'trampoline':
+      return 'Trampoline';
     case 'material-pile':
       return 'Material Pile';
     default:

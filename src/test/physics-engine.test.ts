@@ -225,11 +225,93 @@ describe('physics engine conveyor flow', () => {
     const world = buildMatterWorld(manifest, {
       stableCargoSpawns: { 'cargo-1': { x: 180, y: 250 } },
     });
-    const frame = stepWorld(world, 360);
+    const frame = stepWorld(world, 300);
 
     expect(frame.hopperFill ?? 0).toBeGreaterThanOrEqual(1);
     expect(frame.wagonLoads['wagon-1'] ?? 0).toBe(0);
     expect(frame.cargoStates['cargo-1']).toBe('collected');
+    world.cleanup();
+  });
+
+  it('lets a nearby powered motor boost locomotive speed on the track', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'track-1',
+        kind: 'rail-segment',
+        label: 'Rail',
+        config: { points: [{ x: 180, y: 260 }, { x: 780, y: 260 }], segmentType: 'straight' },
+      },
+      {
+        id: 'loco-1',
+        kind: 'locomotive',
+        label: 'Locomotive',
+        config: { trackId: 'track-1', progress: 0, speed: 0 },
+      },
+      {
+        id: 'motor-1',
+        kind: 'motor',
+        label: 'Motor',
+        config: { x: 220, y: 210, rpm: 90, torque: 1, powerState: true },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 180);
+
+    expect(frame.trainProgress).toBeGreaterThan(0.2);
+    world.cleanup();
+  });
+
+  it('loads wagon cargo at a station zone and unloads it at a later station', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'track-1',
+        kind: 'rail-segment',
+        label: 'Rail',
+        config: { points: [{ x: 180, y: 280 }, { x: 780, y: 280 }], segmentType: 'straight' },
+      },
+      {
+        id: 'loco-1',
+        kind: 'locomotive',
+        label: 'Locomotive',
+        config: { trackId: 'track-1', progress: 0, speed: 0.55 },
+      },
+      {
+        id: 'wagon-1',
+        kind: 'wagon',
+        label: 'Wagon',
+        config: { trackId: 'track-1', offset: 0, capacity: 4 },
+      },
+      {
+        id: 'station-load',
+        kind: 'station-zone',
+        label: 'Load Station',
+        config: { x: 230, y: 320, width: 140, height: 130, action: 'load' },
+      },
+      {
+        id: 'station-unload',
+        kind: 'station-zone',
+        label: 'Unload Station',
+        config: { x: 720, y: 340, width: 150, height: 180, action: 'unload' },
+      },
+      {
+        id: 'cargo-1',
+        kind: 'cargo-block',
+        label: 'Cargo',
+        config: { x: 230, y: 316, weight: 1 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest, {
+      stableCargoSpawns: { 'cargo-1': { x: 230, y: 316 } },
+    });
+    const frame = stepWorld(world, 300);
+
+    expect(frame.wagonLoads['wagon-1'] ?? 0).toBe(0);
+    expect(frame.wagonCargo['wagon-1'] ?? []).toHaveLength(0);
+    expect(frame.bodyPositions['cargo-1']?.x).toBeGreaterThan(650);
     world.cleanup();
   });
 });

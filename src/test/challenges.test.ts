@@ -23,6 +23,7 @@ function createRuntimeSnapshot(overrides: Partial<RuntimeSnapshot> = {}): Runtim
     lostCargoCount: 0,
     stableCargoSpawns: {},
     wagonLoads: {},
+    wagonCargo: {},
     pistonExtensions: {},
     bucketContents: {},
     bucketStates: {},
@@ -93,4 +94,3 @@ describe('challenge evaluation', () => {
     expect(evaluateChallengeCompletion(challenge!, manifest, runtime, scratch, 0.5)).toBe(true);
   });
 });
-

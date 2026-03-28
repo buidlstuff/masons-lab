@@ -26,6 +26,7 @@ export interface RuntimeSnapshot {
   lostCargoCount: number;
   stableCargoSpawns: Record<string, { x: number; y: number }>;
   wagonLoads: Record<string, number>;
+  wagonCargo: Record<string, string[]>;
   pistonExtensions: Record<string, number>;
   bucketContents: Record<string, number>;
   bucketStates: Record<string, 'collecting' | 'dumping'>;
@@ -173,6 +174,7 @@ export function useMachineSimulation(
           lostCargoCount: frame.lostCargoCount,
           stableCargoSpawns: frame.stableCargoSpawns,
           wagonLoads: frame.wagonLoads,
+          wagonCargo: frame.wagonCargo,
           pistonExtensions: frame.pistonExtensions,
           bucketContents: frame.bucketContents,
           bucketStates: frame.bucketStates,
@@ -247,6 +249,7 @@ function createInitialSnapshot(manifest: ExperimentManifest | null): RuntimeSnap
     lostCargoCount: 0,
     stableCargoSpawns: {},
     wagonLoads: {},
+    wagonCargo: {},
     pistonExtensions: {},
     bucketContents: {},
     bucketStates: {},
