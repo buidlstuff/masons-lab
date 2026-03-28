@@ -3216,6 +3216,11 @@ button:disabled {
 
 .machine-canvas canvas {
   align-self: flex-start;
+  display: block;
+  width: auto !important;
+  height: auto !important;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .utility-summary {
