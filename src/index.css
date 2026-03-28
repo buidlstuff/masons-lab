@@ -1801,11 +1801,21 @@ button:disabled {
   margin: 0;
 }
 
+.palette-connector-status {
+  margin-top: 0.45rem !important;
+}
+
 .palette-connector-row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.8rem;
+}
+
+.palette-connector-row button[disabled] {
+  cursor: not-allowed;
+  opacity: 0.48;
+  box-shadow: none;
 }
 
 .palette-presence-chip {

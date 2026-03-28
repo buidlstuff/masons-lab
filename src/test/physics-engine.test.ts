@@ -115,6 +115,50 @@ describe('physics engine conveyor flow', () => {
     world.cleanup();
   });
 
+  it('launches a ball upward when it lands on a trampoline', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'trampoline-1',
+        kind: 'trampoline',
+        label: 'Trampoline',
+        config: { x: 360, y: 430, width: 180 },
+      },
+      {
+        id: 'ball-1',
+        kind: 'ball',
+        label: 'Ball',
+        config: { x: 360, y: 320, radius: 14 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const ballBody = Matter.Composite.allBodies(world.engine.world).find((body) => body.label === 'ball-1');
+    expect(ballBody).toBeTruthy();
+
+    let rotations: Record<string, number> = {};
+    let hookY = 0;
+    let hopperFill = 0;
+    let trainProgress = 0;
+    let sawBounce = false;
+
+    for (let index = 0; index < 180; index += 1) {
+      Matter.Engine.update(world.engine, 1000 / 60);
+      const frame = world.tick(1 / 60, rotations, hookY, hopperFill, trainProgress);
+      rotations = frame.rotations;
+      hookY = frame.hookY ?? hookY;
+      hopperFill = frame.hopperFill ?? hopperFill;
+      trainProgress = frame.trainProgress;
+      if ((ballBody?.velocity.y ?? 0) < -6) {
+        sawBounce = true;
+        break;
+      }
+    }
+
+    expect(sawBounce).toBe(true);
+    world.cleanup();
+  });
+
   it('respawns cargo that falls irrecoverably out of bounds', () => {
     const manifest = createEmptyManifest();
     manifest.primitives = [

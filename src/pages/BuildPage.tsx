@@ -817,6 +817,29 @@ export function BuildPage() {
     [activeProjectStep, projectUnlocked, showStatus],
   );
 
+  const finalizeConnectorShortcut = useCallback(
+    async (sourceId: string, targetId: string, successMessage: string) => {
+      if (!manifest) {
+        return;
+      }
+
+      const nextManifest = connectPrimitives(manifest, sourceId, targetId);
+      const newConnector = nextManifest.primitives.find(
+        (primitive) => !manifest.primitives.some((existing) => existing.id === primitive.id),
+      );
+
+      if (!newConnector) {
+        showStatus('Those parts are already linked, so there is nothing new to show.', 'warning');
+        return;
+      }
+
+      await persistDraft(nextManifest, undefined, { recordHistory: true });
+      setSelectedPrimitiveId(newConnector.id);
+      showStatus(`${successMessage} It is selected now so the line is easy to spot.`, 'success');
+    },
+    [manifest, persistDraft, showStatus],
+  );
+
   const handleConnectWinch = useCallback(() => {
     if (!manifest) {
       return;
@@ -839,9 +862,8 @@ export function BuildPage() {
       return;
     }
 
-    void persistDraft(connectPrimitives(manifest, source.id, target.id), undefined, { recordHistory: true });
-    showStatus('Connected the winch to the hook.', 'success');
-  }, [manifest, persistDraft, selectedPrimitiveId, showStatus]);
+    void finalizeConnectorShortcut(source.id, target.id, 'Connected the winch to the hook.');
+  }, [finalizeConnectorShortcut, manifest, selectedPrimitiveId, showStatus]);
 
   const handleCreateConnectorShortcut = useCallback((kind: 'rope' | 'belt-link' | 'chain-link') => {
     if (!manifest) {
@@ -861,8 +883,7 @@ export function BuildPage() {
         showStatus('Place both a winch and a hook first, then Rope can link them.', 'warning');
         return;
       }
-      void persistDraft(connectPrimitives(manifest, pair.left.id, pair.right.id), undefined, { recordHistory: true });
-      showStatus('Created a rope between the nearest winch and hook.', 'success');
+      void finalizeConnectorShortcut(pair.left.id, pair.right.id, 'Created a rope between the nearest winch and hook.');
       return;
     }
 
@@ -879,8 +900,7 @@ export function BuildPage() {
         showStatus('Place two wheels, pulleys, or flywheels first, then Belt can link them.', 'warning');
         return;
       }
-      void persistDraft(connectPrimitives(manifest, pair.left.id, pair.right.id), undefined, { recordHistory: true });
-      showStatus('Created a drive belt between the nearest matching parts.', 'success');
+      void finalizeConnectorShortcut(pair.left.id, pair.right.id, 'Created a drive belt between the nearest matching parts.');
       return;
     }
 
@@ -895,9 +915,8 @@ export function BuildPage() {
       showStatus('Place two chain sprockets first, then Chain can link them.', 'warning');
       return;
     }
-    void persistDraft(connectPrimitives(manifest, pair.left.id, pair.right.id), undefined, { recordHistory: true });
-    showStatus('Created a chain link between the nearest sprockets.', 'success');
-  }, [manifest, persistDraft, showStatus]);
+    void finalizeConnectorShortcut(pair.left.id, pair.right.id, 'Created a chain link between the nearest sprockets.');
+  }, [finalizeConnectorShortcut, manifest, showStatus]);
 
   const handleConnectNodes = useCallback(() => {
     if (!manifest) {

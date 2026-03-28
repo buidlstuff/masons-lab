@@ -125,6 +125,7 @@ export function buildMatterWorld(
   const wagonCargoAssignments = new Map<string, { wagonId: string; slot: number }>();
   const wagonCargoCooldowns = new Map<string, number>();
   const wagonUnloadTimers = new Map<string, number>();
+  const trampolineCooldowns = new Map<string, number>();
   let lostCargoCount = 0;
   let throughput = 0;
   const motorPistonMap = new Map<string, string[]>();
@@ -1312,27 +1313,47 @@ export function buildMatterWorld(
     }
   }
 
-  function tickTrampolines() {
+  function tickTrampolines(dt: number) {
     const trampolines = manifest.primitives.filter((p) => p.kind === 'trampoline');
     if (trampolines.length === 0) return;
+
+    for (const [primitiveId, cooldown] of [...trampolineCooldowns.entries()]) {
+      const nextCooldown = cooldown - dt;
+      if (nextCooldown <= 0) {
+        trampolineCooldowns.delete(primitiveId);
+      } else {
+        trampolineCooldowns.set(primitiveId, nextCooldown);
+      }
+    }
 
     for (const prim of manifest.primitives.filter((p) => MATERIAL_KINDS.includes(p.kind))) {
       if (collectedCargoIds.has(prim.id) || wagonCargoAssignments.has(prim.id)) continue;
       const body = bodyMap.get(prim.id);
       if (!body) continue;
+      if ((trampolineCooldowns.get(prim.id) ?? 0) > 0) continue;
 
       for (const trampoline of trampolines) {
         const cfg = trampoline.config as { x: number; y: number; width?: number };
         const halfWidth = (cfg.width ?? 160) / 2;
-        if (Math.abs(body.position.x - cfg.x) > halfWidth) continue;
-        if (Math.abs(body.position.y - cfg.y) > 24) continue;
-        if (body.velocity.y < 0.6) continue;
+        const trampolineTop = cfg.y - 8;
+        const bodyHalfHeight = body.bounds.max.y - body.position.y;
+        const bodyBottom = body.bounds.max.y;
+        if (Math.abs(body.position.x - cfg.x) > halfWidth + 16) continue;
+        if (body.position.y > cfg.y + 18) continue;
+        if (bodyBottom < trampolineTop - 8 || bodyBottom > trampolineTop + 18) continue;
+        if (body.velocity.y < -0.35) continue;
 
-        const bounceVelocity = -Math.max(8, Math.min(14, body.velocity.y * 1.15));
+        const downwardSpeed = Math.max(1.6, body.velocity.y + engine.gravity.y * 2.2);
+        const bounceVelocity = -Math.max(10, Math.min(16, downwardSpeed * 1.9));
+        Matter.Body.setPosition(body, {
+          x: body.position.x,
+          y: trampolineTop - bodyHalfHeight - 1,
+        });
         Matter.Body.setVelocity(body, {
-          x: body.velocity.x * 0.98,
+          x: body.velocity.x * 1.02,
           y: bounceVelocity,
         });
+        trampolineCooldowns.set(prim.id, 0.18);
         break;
       }
     }
@@ -1564,7 +1585,7 @@ export function buildMatterWorld(
     tickSprings();
     const conveyorFrame = tickConveyors();
     tickWaterZones(conveyorFrame.supportedCargoIds);
-    tickTrampolines();
+    tickTrampolines(_dt);
     const wagonFrame = tickWagons(_dt);
     const collectedThisTick = tickHopper();
     tickBuckets();

@@ -57,6 +57,19 @@ function connectorPathPoints(
     .filter((point): point is { x: number; y: number } => Boolean(point));
 }
 
+function connectorLabelPoint(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) {
+    return null;
+  }
+  const middleIndex = Math.floor((points.length - 1) / 2);
+  const start = points[middleIndex];
+  const end = points[Math.min(points.length - 1, middleIndex + 1)];
+  return {
+    x: (start.x + end.x) / 2,
+    y: (start.y + end.y) / 2,
+  };
+}
+
 interface MachineCanvasProps {
   manifest: ExperimentManifest;
   runtime: RuntimeSnapshot;
@@ -1680,10 +1693,21 @@ function drawPrimitive(
       const config = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
       const points = connectorPathPoints(config, primitives, runtime);
       if (points.length >= 2) {
-        instance.stroke(selected ? '#fbbf24' : '#f8fafc');
-        instance.strokeWeight(selected ? 3 : 1.5);
+        const labelPoint = connectorLabelPoint(points);
+        instance.stroke(selected ? '#fbbf24' : '#b45309');
+        instance.strokeWeight(selected ? 4 : 2.5);
         for (let i = 0; i < points.length - 1; i += 1) {
           instance.line(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y);
+        }
+        instance.noStroke();
+        instance.fill(selected ? '#fbbf24' : '#d97706');
+        instance.circle(points[0].x, points[0].y, selected ? 12 : 8);
+        instance.circle(points[points.length - 1].x, points[points.length - 1].y, selected ? 12 : 8);
+        if (selected && labelPoint) {
+          instance.fill('#0f172a');
+          instance.textSize(10);
+          instance.textAlign(instance.CENTER, instance.CENTER);
+          instance.text('ROPE', labelPoint.x, labelPoint.y - 10);
         }
       }
       break;
@@ -1693,9 +1717,10 @@ function drawPrimitive(
       const config = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
       const points = connectorPathPoints(config, primitives, runtime);
       if (points.length >= 2) {
+        const labelPoint = connectorLabelPoint(points);
         const ctx = instance.drawingContext as CanvasRenderingContext2D;
-        instance.stroke(selected ? '#fbbf24' : (primitive.kind === 'chain-link' ? '#f59e0b' : '#3dd5a1'));
-        instance.strokeWeight(selected ? 3 : 2);
+        instance.stroke(selected ? '#fbbf24' : (primitive.kind === 'chain-link' ? '#f59e0b' : '#16a34a'));
+        instance.strokeWeight(selected ? 4 : 3);
         if (primitive.kind === 'chain-link') {
           ctx.setLineDash([10, 6]);
         }
@@ -1703,6 +1728,16 @@ function drawPrimitive(
           instance.line(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y);
         }
         ctx.setLineDash([]);
+        instance.noStroke();
+        instance.fill(selected ? '#fbbf24' : (primitive.kind === 'chain-link' ? '#f59e0b' : '#16a34a'));
+        instance.circle(points[0].x, points[0].y, selected ? 12 : 8);
+        instance.circle(points[points.length - 1].x, points[points.length - 1].y, selected ? 12 : 8);
+        if (selected && labelPoint) {
+          instance.fill('#0f172a');
+          instance.textSize(10);
+          instance.textAlign(instance.CENTER, instance.CENTER);
+          instance.text(primitive.kind === 'chain-link' ? 'CHAIN' : 'BELT', labelPoint.x, labelPoint.y - 10);
+        }
       }
       break;
     }

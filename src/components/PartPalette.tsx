@@ -59,6 +59,19 @@ export function PartPalette({
       .map(([kind]) => kind as PrimitiveKind),
     [counts],
   );
+  const connectorReadiness = useMemo(() => ({
+    rope: counts.winch > 0 && counts.hook > 0,
+    'belt-link': counts.wheel + counts.pulley + counts.flywheel >= 2,
+    'chain-link': counts['chain-sprocket'] >= 2,
+  }), [counts]);
+  const readyConnectorLabels = useMemo(
+    () => [
+      connectorReadiness.rope ? 'Rope' : null,
+      connectorReadiness['belt-link'] ? 'Belt' : null,
+      connectorReadiness['chain-link'] ? 'Chain' : null,
+    ].filter((label): label is string => Boolean(label)),
+    [connectorReadiness],
+  );
 
   function toggleBeginner() {
     const next = !beginner;
@@ -149,14 +162,31 @@ export function PartPalette({
           <p className="muted">
             Use these shortcuts for the first connector, then Quick Connect can route them through pulleys and idlers.
           </p>
+          <p className="palette-connector-status muted">
+            {readyConnectorLabels.length > 0
+              ? `Ready now: ${readyConnectorLabels.join(', ')}.`
+              : 'Add a winch + hook, two belt wheels/pulleys/flywheels, or two chain sprockets first.'}
+          </p>
           <div className="palette-connector-row">
-            <button type="button" onClick={() => onCreateConnector('rope')}>
+            <button
+              type="button"
+              disabled={!connectorReadiness.rope}
+              onClick={() => onCreateConnector('rope')}
+            >
               Rope{counts.rope ? ` x${counts.rope}` : ''}
             </button>
-            <button type="button" onClick={() => onCreateConnector('belt-link')}>
+            <button
+              type="button"
+              disabled={!connectorReadiness['belt-link']}
+              onClick={() => onCreateConnector('belt-link')}
+            >
               Belt{counts['belt-link'] ? ` x${counts['belt-link']}` : ''}
             </button>
-            <button type="button" onClick={() => onCreateConnector('chain-link')}>
+            <button
+              type="button"
+              disabled={!connectorReadiness['chain-link']}
+              onClick={() => onCreateConnector('chain-link')}
+            >
               Chain{counts['chain-link'] ? ` x${counts['chain-link']}` : ''}
             </button>
           </div>
