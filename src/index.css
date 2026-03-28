@@ -3040,6 +3040,39 @@ button:disabled {
   overflow: hidden;
 }
 
+.builder-canvas-mobile-tools,
+.builder-mobile-overlay {
+  display: none;
+}
+
+.builder-mobile-tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.85rem;
+  padding: 0 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(33, 81, 109, 0.16);
+  background: rgba(255, 255, 255, 0.94);
+  color: #1b4667;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(55, 86, 116, 0.14);
+}
+
+.builder-mobile-tool-button.is-active {
+  background: rgba(255, 248, 214, 0.98);
+  border-color: rgba(216, 151, 28, 0.26);
+  color: #885b10;
+}
+
+.builder-mobile-connect-button {
+  margin-left: auto;
+}
+
+.builder-mobile-parts-overlay .parts-dock-panel {
+  width: 100%;
+}
+
 .page-build .builder-parts-rail {
   position: relative;
   top: auto;
@@ -4365,6 +4398,7 @@ button:disabled {
   flex-direction: column;
   gap: 1rem;
   min-height: 470px;
+  scroll-margin-top: 6.5rem;
   padding: 1.15rem;
   border-radius: 36px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 251, 255, 0.88));
@@ -4972,6 +5006,7 @@ button:disabled {
     height: auto;
     max-height: none;
     min-height: auto;
+    overflow: visible;
   }
 
   .builder-stage-topbar,
@@ -4982,11 +5017,74 @@ button:disabled {
 
   .builder-workbench {
     grid-template-columns: 1fr;
+    overflow: visible;
   }
 
-  .page-build .builder-parts-rail {
-    max-height: none;
+  .builder-canvas-panel {
     overflow: visible;
+  }
+
+  .builder-canvas-mobile-tools {
+    position: relative;
+    z-index: 12;
+    display: flex;
+    gap: 0.65rem;
+    align-items: center;
+    margin-bottom: 0.7rem;
+  }
+
+  .builder-mobile-tool-button {
+    min-width: 6.2rem;
+  }
+
+  .builder-mobile-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 3.65rem;
+    z-index: 13;
+    display: block;
+  }
+
+  .builder-mobile-parts-overlay .parts-dock-panel,
+  .builder-mobile-connect-overlay {
+    max-height: min(60svh, 34rem);
+    overflow: hidden;
+    box-shadow: 0 28px 48px rgba(44, 74, 96, 0.22);
+  }
+
+  .builder-mobile-parts-overlay .parts-dock-panel {
+    min-height: 0;
+  }
+
+  .builder-mobile-parts-overlay .palette-panel-body {
+    min-height: 0;
+    overflow: auto;
+    padding-right: 0.15rem;
+  }
+
+  .builder-mobile-connect-overlay {
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.98);
+  }
+
+  .builder-connect-chooser-inline,
+  .page-build .builder-parts-rail {
+    display: none;
+  }
+
+  .machine-canvas-toolbar {
+    gap: 0.45rem;
+  }
+
+  .canvas-hint {
+    min-width: 0;
+    max-width: none;
+    text-align: left;
+  }
+
+  .machine-canvas {
+    min-height: clamp(360px, 56svh, 500px);
   }
 
   .home-launcher-hero,
@@ -5013,6 +5111,24 @@ button:disabled {
   .parts-dock-panel .palette-grid,
   .parts-dock-panel .palette-grid-quick {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .builder-canvas-mobile-tools {
+    flex-wrap: wrap;
+  }
+
+  .builder-mobile-tool-button,
+  .builder-mobile-connect-button {
+    flex: 1 1 0;
+    width: 100%;
+  }
+
+  .builder-mobile-overlay {
+    top: 6.85rem;
+  }
+
+  .machine-canvas {
+    min-height: clamp(310px, 48svh, 420px);
   }
 
   .home-launcher-screen {

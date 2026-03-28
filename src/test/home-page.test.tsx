@@ -3,6 +3,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AppBootProvider } from '../lib/app-boot';
 import { db } from '../lib/db';
+import { ENGINEERING_HANDBOOK_ENTRIES } from '../lib/engineering-handbook';
+import { SILLY_SCENE_LAUNCHER_CARDS } from '../lib/silly-scene-launcher';
 import { HomePage } from '../pages/HomePage';
 import type { SiteJobDefinition } from '../lib/types';
 
@@ -63,5 +65,19 @@ describe('HomePage launcher', () => {
     expect(screen.getByRole('heading', { name: /Ten puzzle levels to solve right now/i })).toBeInTheDocument();
     expect(screen.getByText('Hook and Drop')).toBeInTheDocument();
     expect(screen.getByText('Trampoline Bank Shot')).toBeInTheDocument();
+
+    const workbookButton = modeButtons.find((button) => button.textContent?.includes('Engineering Workbook'));
+    expect(workbookButton).toBeTruthy();
+    fireEvent.click(workbookButton!);
+    expect(
+      screen.getAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith('/build?blueprint=')),
+    ).toHaveLength(ENGINEERING_HANDBOOK_ENTRIES.length);
+
+    const scenesButton = modeButtons.find((button) => button.textContent?.includes('Silly Scenes'));
+    expect(scenesButton).toBeTruthy();
+    fireEvent.click(scenesButton!);
+    expect(
+      screen.getAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith('/build?scene=')),
+    ).toHaveLength(SILLY_SCENE_LAUNCHER_CARDS.length);
   });
 });

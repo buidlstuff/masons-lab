@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { WinkyDog } from '../components/WinkyDog';
 import { useAppBoot } from '../lib/app-boot';
@@ -51,6 +51,7 @@ const WINKY_HINTS: Record<HomeMode, string> = {
 export function HomePage() {
   const boot = useAppBoot();
   const summaryMeasuredRef = useRef(false);
+  const previewRef = useRef<HTMLElement | null>(null);
   const [selectedMode, setSelectedMode] = useState<HomeMode>('guided');
   const [homeSnapshot, setHomeSnapshot] = useState<HomeSnapshot | null>(null);
 
@@ -154,8 +155,6 @@ export function HomePage() {
   const tier = tierForXp(xp);
   const tierName = TIER_NAMES[tier];
   const completedProjects = projects.filter((project) => project.completed).length;
-  const featuredRecipes = ENGINEERING_HANDBOOK_ENTRIES.slice(0, 4);
-  const featuredScenes = SILLY_SCENE_LAUNCHER_CARDS.slice(0, 4);
   const homeLoading = boot.status === 'pending' || homeSnapshot === null;
   const homeDegraded = boot.status === 'degraded';
   const freeBuildTarget = latestDraft ? `/build/${latestDraft.draftId}` : '/build';
@@ -198,7 +197,32 @@ export function HomePage() {
           to: '/build',
           title: 'Open the workyard',
           detail: 'Start building directly in the sandbox.',
-        };
+      };
+
+  const handleModeSelect = useCallback((mode: HomeMode) => {
+    setSelectedMode(mode);
+
+    if (
+      typeof window === 'undefined'
+      || typeof window.matchMedia !== 'function'
+      || !window.matchMedia('(max-width: 1200px)').matches
+    ) {
+      return;
+    }
+
+    const behavior: ScrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? 'auto'
+      : 'smooth';
+    const scheduleScroll = typeof window.requestAnimationFrame === 'function'
+      ? window.requestAnimationFrame.bind(window)
+      : (callback: FrameRequestCallback) => window.setTimeout(callback, 0);
+
+    scheduleScroll(() => {
+      if (typeof previewRef.current?.scrollIntoView === 'function') {
+        previewRef.current.scrollIntoView({ behavior, block: 'start' });
+      }
+    });
+  }, []);
 
   const modeButtons: Array<{
     id: HomeMode;
@@ -282,7 +306,7 @@ export function HomePage() {
               <p>These are real buildable contraptions, not fake examples. Mount one, run it, then remix it.</p>
             </div>
             <div className="home-preview-grid home-preview-grid-recipes">
-              {featuredRecipes.map((recipe) => (
+              {ENGINEERING_HANDBOOK_ENTRIES.map((recipe) => (
                 <Link key={recipe.id} to={`/build?blueprint=${recipe.blueprintId}`} className="home-preview-card">
                   <div className="home-preview-card-top">
                     <span className="home-preview-badge home-preview-badge-blue">Recipe</span>
@@ -346,7 +370,7 @@ export function HomePage() {
               <p>These load as fresh drafts so Mason can experiment immediately instead of building from zero.</p>
             </div>
             <div className="home-preview-grid home-preview-grid-scenes">
-              {featuredScenes.map((scene) => (
+              {SILLY_SCENE_LAUNCHER_CARDS.map((scene) => (
                 <Link key={scene.id} to={`/build?scene=${scene.id}`} className="home-preview-card">
                   <div className="home-preview-card-top">
                     <span className="home-preview-scene-emoji" aria-hidden="true">{scene.emoji}</span>
@@ -454,7 +478,7 @@ export function HomePage() {
                 key={mode.id}
                 type="button"
                 className={`home-mode-button${selectedMode === mode.id ? ' is-selected' : ''}`}
-                onClick={() => setSelectedMode(mode.id)}
+                onClick={() => handleModeSelect(mode.id)}
               >
                 <span className="home-mode-icon" aria-hidden="true">{MODE_ICONS[mode.id]}</span>
                 <span className="home-mode-copy">
@@ -466,7 +490,7 @@ export function HomePage() {
             ))}
           </aside>
 
-          <section className="home-mode-preview" data-mode={selectedMode}>
+          <section ref={previewRef} className="home-mode-preview" data-mode={selectedMode}>
             {renderModePreview()}
           </section>
         </div>

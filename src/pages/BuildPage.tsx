@@ -297,6 +297,7 @@ export function BuildPage() {
   const [recipeShelfOpen, setRecipeShelfOpen] = useState(false);
   const [handbookOpen, setHandbookOpen] = useState(false);
   const [connectMenuOpen, setConnectMenuOpen] = useState(false);
+  const [tabletPartsOpen, setTabletPartsOpen] = useState(false);
   const [connectionKind, setConnectionKind] = useState<BuilderConnectionKind | null>(null);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
   const [connectionViaIds, setConnectionViaIds] = useState<string[]>([]);
@@ -1268,6 +1269,7 @@ export function BuildPage() {
       }
 
       setPlacingKind(kind);
+      setTabletPartsOpen(false);
       setConnectionKind(null);
       setConnectionSourceId(null);
       setConnectionViaIds([]);
@@ -1283,6 +1285,7 @@ export function BuildPage() {
 
   const startConnectionMode = useCallback((kind: BuilderConnectionKind) => {
     setConnectMenuOpen(false);
+    setTabletPartsOpen(false);
     setHandbookOpen(false);
     setOpenUtilityPanel(null);
     setPlacingKind(null);
@@ -1305,8 +1308,28 @@ export function BuildPage() {
 
   const toggleUtilityPanel = useCallback((panel: BuildUtilityPanel) => {
     setConnectMenuOpen(false);
+    setTabletPartsOpen(false);
     setOpenUtilityPanel((current) => (current === panel ? null : panel));
   }, []);
+
+  const toggleConnectChooser = useCallback(() => {
+    setHandbookOpen(false);
+    setOpenUtilityPanel(null);
+    setTabletPartsOpen(false);
+    setConnectMenuOpen((current) => !current);
+    setPlacingKind(null);
+  }, []);
+
+  const toggleTabletParts = useCallback(() => {
+    if (connectionKind) {
+      cancelConnectionMode('Connect cancelled. Opened the parts shelf.');
+    } else {
+      setConnectMenuOpen(false);
+    }
+    setHandbookOpen(false);
+    setOpenUtilityPanel(null);
+    setTabletPartsOpen((current) => !current);
+  }, [cancelConnectionMode, connectionKind]);
 
   const handleConnectPick = useCallback((primitiveId: string) => {
     if (!manifest || !connectionKind) {
@@ -1581,6 +1604,31 @@ export function BuildPage() {
   const toolbarNotice = buildReadiness === 'loading-engine'
     ? { tone: 'info' as const, message: 'Loading the live engine and stage renderer.' }
     : statusNotice;
+  const mobileConnectOverlayOpen = connectMenuOpen && !connectionKind;
+  const renderConnectChooser = (className: string, id?: string) => (
+    <div id={id} className={className}>
+      <div className="builder-connect-field">
+        <span>Pick a connector</span>
+        <div className="builder-connect-option-row">
+          {BUILDER_CONNECTION_OPTIONS.map((option) => (
+            <button
+              key={option.kind}
+              type="button"
+              className="builder-connect-option"
+              onClick={() => startConnectionMode(option.kind)}
+              title={option.hint}
+            >
+              <strong>{option.label}</strong>
+              <small>{option.hint}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="builder-connect-caption">
+        Pick the connector first, then click the first part and the second part on the canvas.
+      </p>
+    </div>
+  );
 
   return (
     <div className="page page-build">
@@ -1601,12 +1649,7 @@ export function BuildPage() {
               <button
                 type="button"
                 className="builder-connect-cta"
-                onClick={() => {
-                  setHandbookOpen(false);
-                  setOpenUtilityPanel(null);
-                  setConnectMenuOpen((current) => !current);
-                  setPlacingKind(null);
-                }}
+                onClick={toggleConnectChooser}
               >
                 Connect Parts
               </button>
@@ -1614,6 +1657,7 @@ export function BuildPage() {
             <button
               type="button"
               onClick={() => {
+                setTabletPartsOpen(false);
                 setConnectMenuOpen(false);
                 setOpenUtilityPanel(null);
                 setHandbookOpen((current) => !current);
@@ -1670,29 +1714,8 @@ export function BuildPage() {
           ) : null}
         </div>
 
-        {connectMenuOpen && !connectionKind ? (
-          <div className="builder-connect-chooser builder-connect-chooser-inline">
-            <div className="builder-connect-field">
-              <span>Pick a connector</span>
-              <div className="builder-connect-option-row">
-                {BUILDER_CONNECTION_OPTIONS.map((option) => (
-                  <button
-                    key={option.kind}
-                    type="button"
-                    className="builder-connect-option"
-                    onClick={() => startConnectionMode(option.kind)}
-                    title={option.hint}
-                  >
-                    <strong>{option.label}</strong>
-                    <small>{option.hint}</small>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <p className="builder-connect-caption">
-              Pick the connector first, then click the first part and the second part on the canvas.
-            </p>
-          </div>
+        {mobileConnectOverlayOpen ? (
+          renderConnectChooser('builder-connect-chooser builder-connect-chooser-inline')
         ) : null}
 
         {openUtilityPanel ? (
@@ -1782,6 +1805,53 @@ export function BuildPage() {
 
         <div className="builder-workbench">
           <div className="canvas-column builder-canvas-panel" style={{ position: 'relative' }}>
+            <div className="builder-canvas-mobile-tools" role="toolbar" aria-label="Canvas build tools">
+              <button
+                type="button"
+                className={`builder-mobile-tool-button${tabletPartsOpen ? ' is-active' : ''}`}
+                aria-expanded={tabletPartsOpen}
+                aria-controls="builder-mobile-parts"
+                onClick={toggleTabletParts}
+              >
+                Parts
+              </button>
+              {connectionKind ? (
+                <button
+                  type="button"
+                  className="builder-connect-cta builder-mobile-tool-button builder-mobile-connect-button is-active"
+                  onClick={() => cancelConnectionMode('Connect cancelled. You are back in select mode.')}
+                >
+                  Cancel {labelForBuilderConnection(connectionKind)}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={`builder-connect-cta builder-mobile-tool-button builder-mobile-connect-button${mobileConnectOverlayOpen ? ' is-open' : ''}`}
+                  aria-expanded={mobileConnectOverlayOpen}
+                  aria-controls="builder-mobile-connect"
+                  onClick={toggleConnectChooser}
+                >
+                  Connect
+                </button>
+              )}
+            </div>
+            {tabletPartsOpen ? (
+              <div id="builder-mobile-parts" className="builder-mobile-overlay builder-mobile-parts-overlay">
+                <PartPalette
+                  manifest={manifest}
+                  selectedPrimitive={selectedPrimitive}
+                  selectedKind={placingKind}
+                  activeJobHint={activeJobHint}
+                  allowedKinds={paletteAllowedKinds}
+                  projectTitle={job?.title}
+                  projectStepTitle={activeProjectStep?.title}
+                  onSelectKind={handleSelectKind}
+                />
+              </div>
+            ) : null}
+            {mobileConnectOverlayOpen ? (
+              renderConnectChooser('builder-connect-chooser builder-mobile-overlay builder-mobile-connect-overlay', 'builder-mobile-connect')
+            ) : null}
             <HudOverlay hud={manifest.hud} telemetry={telemetry} />
             {flashToast && (
               <div className="connection-toast" role="status" aria-live="polite">The machine is responding.</div>
