@@ -51,7 +51,6 @@ import {
   createDraftFromSillyScene,
 } from '../lib/seed-data';
 import { useMachineSimulation, type RuntimeSnapshot } from '../lib/simulation';
-import { getRandomSillyScene, SILLY_SCENES } from '../lib/silly-scenes';
 import { playUiTone } from '../lib/sfx';
 import { awardJobXp, TIER_NAMES } from '../lib/xp';
 import type {
@@ -71,16 +70,6 @@ import type {
 const LazyAssistantPanel = lazy(async () => {
   const module = await import('../components/AssistantPanel');
   return { default: module.AssistantPanel };
-});
-
-const LazyChallengePanel = lazy(async () => {
-  const module = await import('../components/ChallengePanel');
-  return { default: module.ChallengePanel };
-});
-
-const LazySillySceneSelector = lazy(async () => {
-  const module = await import('../components/SillySceneSelector');
-  return { default: module.SillySceneSelector };
 });
 
 async function loadAssistantApi() {
@@ -237,6 +226,7 @@ export function BuildPage() {
   const boot = useAppBoot();
   const sourceMachineId = searchParams.get('machine');
   const sourceBlueprintId = searchParams.get('blueprint');
+  const sourceSceneId = searchParams.get('scene');
   const jobId = searchParams.get('job');
   const shareParam = searchParams.get('share');
   const draft = useLiveQuery(() => (draftId ? db.drafts.get(draftId) : undefined), [draftId]);
@@ -271,11 +261,8 @@ export function BuildPage() {
   const [assistantPromptSeed, setAssistantPromptSeed] = useState<string | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [adultToolsOpen, setAdultToolsOpen] = useState(false);
-  const [challengePanelOpen, setChallengePanelOpen] = useState(false);
-  const [sceneShelfOpen, setSceneShelfOpen] = useState(false);
   const [recipeShelfOpen, setRecipeShelfOpen] = useState(false);
   const [handbookOpen, setHandbookOpen] = useState(false);
-  const [workshopShelfOpen, setWorkshopShelfOpen] = useState(false);
   const [connectMenuOpen, setConnectMenuOpen] = useState(false);
   const [connectionKind, setConnectionKind] = useState<BuilderConnectionKind | null>(null);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
@@ -293,7 +280,7 @@ export function BuildPage() {
   const completedChallengeIdsRef = useRef(new Set<string>());
   const challengeLastEvalAtRef = useRef<number>(Date.now());
   const builderMeasureRef = useRef(false);
-  const shouldLoadBlueprints = assistantOpen || workshopShelfOpen;
+  const shouldLoadBlueprints = assistantOpen;
   const blueprints = useLiveQuery<SavedBlueprintRecord[]>(
     () => (shouldLoadBlueprints
       ? db.blueprints.orderBy('updatedAt').reverse().limit(8).toArray()
@@ -411,6 +398,15 @@ export function BuildPage() {
         return;
       }
 
+      if (sourceSceneId) {
+        const nextDraft = createDraftFromSillyScene(sourceSceneId);
+        if (nextDraft) {
+          await db.drafts.put(nextDraft);
+          applyDraft(nextDraft);
+          return;
+        }
+      }
+
       if (job?.initialDraft === 'empty') {
         const nextDraft = createDraftFromProject(job);
         await db.drafts.put(nextDraft);
@@ -425,7 +421,7 @@ export function BuildPage() {
     }
 
     void bootstrapDraft();
-  }, [blueprintFromQuery, draft, draftId, job, jobId, machineFromQuery, navigate, shareParam, starterBlueprintFromQuery]);
+  }, [blueprintFromQuery, draft, draftId, job, jobId, machineFromQuery, navigate, shareParam, sourceSceneId, starterBlueprintFromQuery]);
 
   const runtime = useMachineSimulation(
     manifest,
@@ -443,13 +439,6 @@ export function BuildPage() {
       .map((record) => record.challengeId),
     [challengeProgress],
   );
-  const activeChallenges = useMemo(
-    () => CHALLENGES
-      .filter((challenge) => !completedChallengeIds.includes(challenge.id))
-      .slice(0, ACTIVE_CHALLENGE_LIMIT),
-    [completedChallengeIds],
-  );
-
   useEffect(() => {
     runtimeSnapshotRef.current = runtimeSnapshot;
   }, [runtimeSnapshot]);
@@ -728,22 +717,6 @@ export function BuildPage() {
     await db.drafts.put(newDraft);
     navigate(`/build/${newDraft.draftId}`);
   }
-
-  const handleLoadSillyScene = useCallback(async (sceneId?: string) => {
-    const scene = sceneId ? SILLY_SCENES.find((candidate) => candidate.id === sceneId) : getRandomSillyScene();
-    if (!scene) {
-      showStatus('Could not find that scene right now.', 'warning');
-      return;
-    }
-    const nextDraft = createDraftFromSillyScene(scene.id);
-    if (!nextDraft) {
-      showStatus('Could not build that scene draft.', 'warning');
-      return;
-    }
-    await db.drafts.put(nextDraft);
-    navigate(`/build/${nextDraft.draftId}`);
-    showStatus(`Loaded ${scene.title}.`, 'success');
-  }, [navigate, showStatus]);
 
   async function applyGenerated(result: GenerateExperimentResult) {
     const nextManifest = result.experiment;
@@ -1127,24 +1100,21 @@ export function BuildPage() {
           </div>
 
           <div className="builder-toolbar-actions">
-            <button type="button" onClick={handleSaveMachine}>
-              Save
-            </button>
             {connectionKind ? (
-              <button type="button" className="primary-link" onClick={() => cancelConnectionMode()}>
+              <button type="button" className="builder-connect-cta is-active" onClick={() => cancelConnectionMode()}>
                 Cancel {labelForBuilderConnection(connectionKind)}
               </button>
             ) : (
               <button
                 type="button"
-                className="primary-link"
+                className="builder-connect-cta"
                 onClick={() => {
                   setHandbookOpen(false);
                   setConnectMenuOpen((current) => !current);
                   setPlacingKind(null);
                 }}
               >
-                Connect
+                Connect Parts
               </button>
             )}
             <button
@@ -1154,7 +1124,7 @@ export function BuildPage() {
                 setHandbookOpen((current) => !current);
               }}
             >
-              {handbookOpen ? 'Hide Handbook' : 'Handbook'}
+              {handbookOpen ? 'Hide Workbook' : 'Workbook'}
             </button>
             {primaryStepKind && !placingKind && !connectionKind ? (
               <button type="button" onClick={() => handleSelectKind(primaryStepKind)}>
@@ -1174,6 +1144,9 @@ export function BuildPage() {
             <button type="button" onClick={handleUndo}>
               Undo
             </button>
+            <button type="button" onClick={handleSaveMachine}>
+              Save
+            </button>
             <button type="button" onClick={() => openAssistantWithPrompt(builderFocus.assistantPrompt)}>
               Help
             </button>
@@ -1183,16 +1156,12 @@ export function BuildPage() {
         <div className="builder-toolbar-status">
           <span className={`builder-chip ${placingKind ? 'is-active' : connectionKind ? 'is-success' : ''}`}>{builderModeLabel}</span>
           <span className={`builder-chip is-${machineActivity.tone}`}>{machineActivity.label}</span>
+          <span className="builder-chip">{manifest.primitives.length} part{manifest.primitives.length === 1 ? '' : 's'} on canvas</span>
           {goalProgress && job ? (
             <span className={`builder-chip ${goalProgress.met ? 'is-success' : ''}`}>
-              {goalProgress.met
-                ? `${goalProgress.label}: done`
-                : `${goalProgress.label}: ${goalProgress.current}${goalProgress.unit ? ` ${goalProgress.unit}` : ''} / ${goalProgress.target}${goalProgress.unit ? ` ${goalProgress.unit}` : ''}`}
+              {goalProgress.met ? `${goalProgress.label}: done` : `${goalProgress.label}: ${goalProgress.current} / ${goalProgress.target}`}
             </span>
           ) : null}
-          <span className="builder-chip">Flow: {Math.round(runtimeSnapshot.throughput ?? 0)}/s</span>
-          <span className="builder-chip">Canvas: {manifest.primitives.length} part{manifest.primitives.length === 1 ? '' : 's'}</span>
-          <span className="builder-chip">Challenges: {completedChallengeIds.length}/{CHALLENGES.length}</span>
         </div>
 
         {connectMenuOpen && !connectionKind ? (
@@ -1359,7 +1328,7 @@ export function BuildPage() {
         <div className="canvas-column" style={{ position: 'relative' }}>
           <HudOverlay hud={manifest.hud} telemetry={telemetry} />
           <StarterOverlay
-            visible={manifest.primitives.length === 0 && !placingKind}
+            visible={Boolean(job) && manifest.primitives.length === 0 && !placingKind}
             title={job?.title}
             summary={job?.summary}
             steps={job?.steps?.map((step) => ({
@@ -1415,58 +1384,6 @@ export function BuildPage() {
         </div>
 
         <div className="right-rail">
-          {handbookOpen ? (
-            <section className="panel handbook-drawer">
-              <div className="panel-header compact">
-                <div>
-                  <p className="eyebrow">Engineering Handbook</p>
-                  <h3>Working recipes you can mount instantly</h3>
-                </div>
-                <div className="button-row">
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    onClick={() => setRecipeShelfOpen((current) => !current)}
-                  >
-                    {recipeShelfOpen ? 'Show Fewer' : 'Show All'}
-                  </button>
-                  <button type="button" onClick={() => setHandbookOpen(false)}>
-                    Close
-                  </button>
-                </div>
-              </div>
-              <div className="blueprint-list handbook-list">
-                {visibleRecipes.map((recipe) => (
-                  <article key={recipe.id} className="blueprint-row handbook-row">
-                    <div>
-                      <strong>{recipe.title}</strong>
-                      <p className="muted">{recipe.summary}</p>
-                      <p className="muted">Parts: {recipe.partList.join(', ')}</p>
-                      <p className="muted">Why it works: {recipe.whyItWorks}</p>
-                    </div>
-                    <div className="button-row vertical">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void persistDraft(mountBlueprintToManifest(manifest, recipe.blueprintRecord.blueprint), undefined, { recordHistory: true });
-                          setHandbookOpen(false);
-                          showStatus(`Mounted ${recipe.title}.`, 'success');
-                        }}
-                      >
-                        Mount
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openAssistantWithPrompt(recipe.assistantPrompt)}
-                      >
-                        Ask
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ) : null}
           <PartPalette
             manifest={manifest}
             selectedPrimitive={selectedPrimitive}
@@ -1477,15 +1394,6 @@ export function BuildPage() {
             projectStepTitle={activeProjectStep?.title}
             onSelectKind={handleSelectKind}
           />
-          {manifest.controls.length > 0 ? (
-            <ControlPanel
-              controls={manifest.controls}
-              values={controlValues}
-              onChange={(controlId, value) => {
-                setControlValues((current) => ({ ...current, [controlId]: value }));
-              }}
-            />
-          ) : null}
           <InspectorPanel
             primitive={selectedPrimitive}
             manifest={manifest}
@@ -1508,95 +1416,72 @@ export function BuildPage() {
               }
             }}
           />
-
-          <details
-            className="panel small-panel disclosure-panel"
-            open={challengePanelOpen}
-            onToggle={(event) => setChallengePanelOpen(event.currentTarget.open)}
-          >
-            <summary className="disclosure-summary">
-              <div>
-                <p className="eyebrow">Challenges</p>
-                <h3>Sandbox medals</h3>
-              </div>
-              <span className="muted">{completedChallengeIds.length}/{CHALLENGES.length}</span>
-            </summary>
-            <div className="disclosure-content">
-              <Suspense fallback={<p className="muted">Loading challenge panel…</p>}>
-                <LazyChallengePanel
-                  challenges={CHALLENGES}
-                  completedChallengeIds={completedChallengeIds}
-                  activeChallengeIds={activeChallenges.map((challenge) => challenge.id)}
-                />
-              </Suspense>
-            </div>
-          </details>
-
-          {(projectUnlocked || !job) ? (
-            <details
-              className="panel small-panel disclosure-panel"
-              open={sceneShelfOpen}
-              onToggle={(event) => setSceneShelfOpen(event.currentTarget.open)}
-            >
-              <summary className="disclosure-summary">
-                <div>
-                  <p className="eyebrow">Silly Scenes</p>
-                  <h3>Load a playful setup</h3>
-                </div>
-                <span className="muted">{sceneShelfOpen ? `${SILLY_SCENES.length} ready` : 'Fresh drafts'}</span>
-              </summary>
-              <div className="disclosure-content">
-                <Suspense fallback={<p className="muted">Loading silly scenes…</p>}>
-                  <LazySillySceneSelector
-                    scenes={SILLY_SCENES}
-                    onLoadScene={(sceneId) => {
-                      void handleLoadSillyScene(sceneId);
-                    }}
-                    onSurprise={() => {
-                      void handleLoadSillyScene();
-                    }}
-                  />
-                </Suspense>
-              </div>
-            </details>
+          {manifest.controls.length > 0 ? (
+            <ControlPanel
+              controls={manifest.controls}
+              values={controlValues}
+              onChange={(controlId, value) => {
+                setControlValues((current) => ({ ...current, [controlId]: value }));
+              }}
+            />
           ) : null}
+        </div>
+      </div>
 
-          {(projectUnlocked || !job) ? (
-            <details
-              className="panel small-panel disclosure-panel"
-              open={workshopShelfOpen}
-              onToggle={(event) => setWorkshopShelfOpen(event.currentTarget.open)}
-            >
-              <summary className="disclosure-summary">
-                <div>
-                  <p className="eyebrow">Workshop Shelf</p>
-                  <h3>Mount a saved blueprint</h3>
-                </div>
-                <span className="muted">{workshopShelfOpen ? `${(blueprints ?? []).length} saved` : 'Load on open'}</span>
-              </summary>
-              <div className="blueprint-list disclosure-content">
-                {(blueprints ?? []).slice(0, 8).map((blueprintRecord) => (
-                  <article key={blueprintRecord.recordId} className="blueprint-row">
-                    <div>
-                      <strong>{blueprintRecord.blueprint.title}</strong>
-                      <p className="muted">{blueprintRecord.blueprint.summary}</p>
-                    </div>
+      {handbookOpen ? (
+        <div className="modal-backdrop handbook-backdrop" onClick={() => setHandbookOpen(false)}>
+          <div className="modal-card handbook-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="panel-header compact">
+              <div>
+                <p className="eyebrow">Engineering Workbook</p>
+                <h3>Working recipes you can study, mount, and remix</h3>
+              </div>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => setRecipeShelfOpen((current) => !current)}
+                >
+                  {recipeShelfOpen ? 'Show Fewer' : 'Show All'}
+                </button>
+                <button type="button" onClick={() => setHandbookOpen(false)}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="blueprint-list handbook-list handbook-modal-list">
+              {visibleRecipes.map((recipe) => (
+                <article key={recipe.id} className="blueprint-row handbook-row">
+                  <div>
+                    <strong>{recipe.title}</strong>
+                    <p className="muted">{recipe.summary}</p>
+                    <p className="muted">Parts: {recipe.partList.join(', ')}</p>
+                    <p className="muted">Why it works: {recipe.whyItWorks}</p>
+                  </div>
+                  <div className="button-row vertical">
                     <button
                       type="button"
                       onClick={() => {
-                        void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint), undefined, { recordHistory: true });
-                        showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
+                        void persistDraft(mountBlueprintToManifest(manifest, recipe.blueprintRecord.blueprint), undefined, { recordHistory: true });
+                        setHandbookOpen(false);
+                        showStatus(`Mounted ${recipe.title}.`, 'success');
                       }}
                     >
                       Mount
                     </button>
-                  </article>
-                ))}
-              </div>
-            </details>
-          ) : null}
+                    <button
+                      type="button"
+                      onClick={() => openAssistantWithPrompt(recipe.assistantPrompt)}
+                    >
+                      Ask
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {xpToast && (
         <div className="xp-toast">

@@ -7,6 +7,7 @@ import { useAppBoot } from '../lib/app-boot';
 import { ENGINEERING_HANDBOOK_ENTRIES } from '../lib/engineering-handbook';
 import { markPerformance, measurePerformance } from '../lib/perf';
 import { scheduleBuildPrefetch } from '../lib/route-preload';
+import { SILLY_SCENE_LAUNCHER_CARDS } from '../lib/silly-scene-launcher';
 import { TIER_NAMES, TIER_THRESHOLDS, tierForXp } from '../lib/xp';
 
 export function HomePage() {
@@ -79,6 +80,8 @@ export function HomePage() {
     detail: 'Open the canvas with the full part drawer and build whatever you want.',
   };
   const handbookRecipes = ENGINEERING_HANDBOOK_ENTRIES;
+  const featuredWorkbookRecipes = handbookRecipes;
+  const featuredScenes = SILLY_SCENE_LAUNCHER_CARDS.slice(0, 4);
   const completedCount = summary?.completedCount ?? 0;
   const homeLoading = boot.status === 'pending' || (boot.status === 'ready' && !summary);
   const homeDegraded = boot.status === 'degraded';
@@ -132,19 +135,33 @@ export function HomePage() {
               <div className="home-entry-grid">
                 {guidedAction.to.startsWith('#') ? (
                   <a href={guidedAction.to} className="home-entry-card home-entry-card-guided">
-                    <p className="eyebrow">Guided Play</p>
+                    <p className="eyebrow">Guided Build</p>
                     <strong>{guidedAction.title}</strong>
                     <p>{guidedAction.detail}</p>
                     <span>{guidedAction.label}</span>
                   </a>
                 ) : (
                   <Link to={guidedAction.to} className="home-entry-card home-entry-card-guided">
-                    <p className="eyebrow">Guided Play</p>
+                    <p className="eyebrow">Guided Build</p>
                     <strong>{guidedAction.title}</strong>
                     <p>{guidedAction.detail}</p>
                     <span>{guidedAction.label}</span>
                   </Link>
                 )}
+
+                <a href="#engineering-workbook" className="home-entry-card home-entry-card-workbook">
+                  <p className="eyebrow">Engineering Workbook</p>
+                  <strong>Study a working machine</strong>
+                  <p>Open a recipe, mount it instantly, and learn by taking it apart.</p>
+                  <span>Browse Recipes</span>
+                </a>
+
+                <a href="#silly-scenes" className="home-entry-card home-entry-card-scenes">
+                  <p className="eyebrow">Silly Scenes</p>
+                  <strong>Start with a playful setup</strong>
+                  <p>Load a strange physics scene and experiment without building from zero.</p>
+                  <span>Open Scenes</span>
+                </a>
 
                 <Link to={freeBuildAction.to} className="home-entry-card home-entry-card-free">
                   <p className="eyebrow">Free Build</p>
@@ -152,19 +169,6 @@ export function HomePage() {
                   <p>{freeBuildAction.detail}</p>
                   <span>{freeBuildAction.label}</span>
                 </Link>
-              </div>
-
-              <div className="home-path-list">
-                <p className="eyebrow">Starter Path</p>
-                {orderedProjects.slice(0, 3).map((project, index) => (
-                  <Link key={project.jobId} to={`/build?job=${project.jobId}`} className="home-path-row">
-                    <span className="home-path-index">{index + 1}</span>
-                    <div>
-                      <strong>{project.title}</strong>
-                      <p>{project.completed ? 'Finished once. Replay anytime.' : project.summary}</p>
-                    </div>
-                  </Link>
-                ))}
               </div>
 
               <div className="xp-bar-block home-tier-block">
@@ -176,7 +180,7 @@ export function HomePage() {
                   <div className="xp-bar-fill" style={{ width: `${tierProgress}%` }} />
                 </div>
                 <p className="xp-bar-caption muted">
-                  Guided play teaches the basics. Free build is where the experiments start.
+                  Finish the starter builds first, then move into harder open-ended experiments.
                 </p>
               </div>
             </>
@@ -184,7 +188,7 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="section-block">
+      <section className="section-block" id="engineering-workbook">
         <div className="section-head">
           <div>
             <p className="eyebrow">Engineering Handbook</p>
@@ -192,7 +196,7 @@ export function HomePage() {
           </div>
         </div>
         <div className="card-grid home-handbook-grid">
-          {handbookRecipes.map((recipe) => (
+          {featuredWorkbookRecipes.map((recipe) => (
             <Link
               key={recipe.id}
               to={`/build?blueprint=${recipe.blueprintId}`}
@@ -211,10 +215,13 @@ export function HomePage() {
       <section className="section-block" id="starter-projects">
         <div className="section-head">
           <div>
-            <p className="eyebrow">Guided Play</p>
+            <p className="eyebrow">Guided Build</p>
             <h2>{allStarterProjectsComplete ? 'Starter path finished' : 'Start with clear cause and effect.'}</h2>
           </div>
         </div>
+        <p className="home-section-note muted">
+          Do these first. Once the basics feel natural, this path can grow into harder challenges.
+        </p>
         {allStarterProjectsComplete ? (
           <div className="card-grid home-mission-grid">
             <article className="yard-start-card mission-card mission-card-map">
@@ -257,6 +264,25 @@ export function HomePage() {
             ))}
           </div>
         )}
+      </section>
+
+      <section className="section-block" id="silly-scenes">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Silly Scenes</p>
+            <h2>Start from a playful setup</h2>
+          </div>
+        </div>
+        <div className="card-grid home-scene-grid">
+          {featuredScenes.map((scene) => (
+            <Link key={scene.id} to={`/build?scene=${scene.id}`} className="yard-start-card home-scene-card">
+              <p className="eyebrow">Silly Scene</p>
+              <strong>{scene.title}</strong>
+              <p>{scene.description}</p>
+              <span>Load Scene</span>
+            </Link>
+          ))}
+        </div>
       </section>
 
       <section className="section-block two-col">

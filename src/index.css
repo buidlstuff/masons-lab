@@ -1624,6 +1624,29 @@ button:disabled {
   gap: 0.6rem;
 }
 
+.builder-connect-cta {
+  min-height: 3rem;
+  padding: 0 1.2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(176, 60, 41, 0.22);
+  background: linear-gradient(180deg, #c74f3d, #a93b2c);
+  color: #fff7f4;
+  font-weight: 800;
+  box-shadow: 0 14px 30px rgba(169, 59, 44, 0.22);
+}
+
+.builder-connect-cta:hover,
+.builder-connect-cta:focus-visible {
+  transform: translateY(-1px);
+  background: linear-gradient(180deg, #d45a47, #b64334);
+}
+
+.builder-connect-cta.is-active {
+  background: linear-gradient(180deg, rgba(255, 246, 240, 0.98), rgba(255, 255, 255, 0.92));
+  color: #9b3a2d;
+  box-shadow: none;
+}
+
 .builder-toolbar-status {
   display: flex;
   flex-wrap: wrap;
@@ -2288,6 +2311,22 @@ button:disabled {
   gap: 0.95rem;
 }
 
+.handbook-backdrop {
+  align-items: flex-start;
+  padding: 5vh 1.5rem 1.5rem;
+}
+
+.handbook-modal {
+  width: min(920px, 94vw);
+  max-height: 86vh;
+  padding: 1.35rem 1.45rem;
+}
+
+.handbook-modal-list {
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -2444,8 +2483,8 @@ button:disabled {
 }
 
 .build-layout-compact {
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 0.9rem;
+  grid-template-columns: minmax(0, 1fr) 388px;
+  gap: 1rem;
 }
 
 .build-help-drawer {
@@ -2965,6 +3004,18 @@ button:disabled {
     linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(250, 254, 247, 0.92));
 }
 
+.home-entry-card-workbook {
+  background:
+    radial-gradient(circle at top right, rgba(106, 169, 216, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 251, 255, 0.92));
+}
+
+.home-entry-card-scenes {
+  background:
+    radial-gradient(circle at top right, rgba(119, 203, 164, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(245, 253, 248, 0.92));
+}
+
 .home-entry-card-free {
   background:
     radial-gradient(circle at top right, rgba(109, 195, 182, 0.16), transparent 34%),
@@ -3129,6 +3180,36 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.home-section-note {
+  margin: -0.2rem 0 1rem;
+  max-width: 46rem;
+}
+
+.home-scene-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.home-scene-card {
+  min-height: 210px;
+  justify-content: flex-start;
+  border: 1px solid rgba(61, 120, 132, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 252, 249, 0.92));
+  box-shadow: 0 16px 44px rgba(91, 107, 108, 0.08);
+}
+
+.home-scene-card strong {
+  display: block;
+  margin: 0.1rem 0 0.35rem;
+  font-size: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.home-scene-card span:last-child {
+  margin-top: auto;
+  font-weight: 700;
+  color: var(--text);
+}
+
 .mission-card {
   min-height: 172px;
   padding: 1.15rem 1.2rem;
@@ -3287,6 +3368,10 @@ button:disabled {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .home-scene-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .page-home .job-card,
   .page-home .job-card.featured {
     grid-column: span 1;
@@ -3359,7 +3444,8 @@ button:disabled {
   }
 
   .home-entry-grid,
-  .home-handbook-grid {
+  .home-handbook-grid,
+  .home-scene-grid {
     grid-template-columns: 1fr;
   }
 

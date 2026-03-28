@@ -12,10 +12,10 @@ describe('PartPalette', () => {
       />,
     );
 
-    expect(screen.getByRole('heading', { name: 'Pick the next part' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Pick, place, and build' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Rope' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Bolt' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Starter' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'All Parts' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Compact' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expanded' })).toBeInTheDocument();
   });
 });
