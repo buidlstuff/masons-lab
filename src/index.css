@@ -3051,6 +3051,24 @@ button:disabled {
   overflow: visible;
 }
 
+.page-build .builder-parts-rail.parts-dock-panel,
+.page-build .builder-parts-rail > .parts-dock-panel {
+  flex: 0 0 auto;
+  min-height: fit-content;
+  overflow: visible;
+}
+
+.page-build .builder-parts-rail .parts-dock-panel {
+  flex: 0 0 auto;
+  min-height: fit-content;
+  overflow: visible;
+}
+
+.page-build .builder-parts-rail .palette-panel-body {
+  flex: 0 0 auto;
+  min-height: auto;
+}
+
 .parts-dock-panel .palette-panel-head {
   margin-bottom: 0;
 }
