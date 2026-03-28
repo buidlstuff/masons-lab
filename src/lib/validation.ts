@@ -23,6 +23,9 @@ const ALLOWED_AI_PRIMITIVES = new Set<PrimitiveKind>([
   'rope',
   'belt-link',
   'chain-link',
+  'bolt-link',
+  'hinge-link',
+  'powered-hinge-link',
   'hook',
   'rail-segment',
   'rail-switch',
@@ -94,7 +97,14 @@ export function validateExperimentManifest(input: unknown): ValidationResult {
         errors.push(`Beam ${primitive.id} has an invalid toNodeId.`);
       }
     }
-    if (primitive.kind === 'rope' || primitive.kind === 'belt-link' || primitive.kind === 'chain-link') {
+    if (
+      primitive.kind === 'rope'
+      || primitive.kind === 'belt-link'
+      || primitive.kind === 'chain-link'
+      || primitive.kind === 'bolt-link'
+      || primitive.kind === 'hinge-link'
+      || primitive.kind === 'powered-hinge-link'
+    ) {
       const config = primitive.config as { fromId?: string; toId?: string; viaIds?: string[] };
       if (!config.fromId || !ids.has(config.fromId)) {
         errors.push(`Connector ${primitive.id} has an invalid fromId.`);
@@ -108,6 +118,13 @@ export function validateExperimentManifest(input: unknown): ValidationResult {
             errors.push(`Connector ${primitive.id} has an invalid viaId.`);
           }
         }
+      }
+      if (
+        primitive.kind === 'powered-hinge-link'
+        && typeof (primitive.config as { motorId?: string }).motorId === 'string'
+        && !ids.has((primitive.config as { motorId: string }).motorId)
+      ) {
+        errors.push(`Connector ${primitive.id} has an invalid motorId.`);
       }
     }
     if (

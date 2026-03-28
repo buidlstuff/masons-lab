@@ -11,7 +11,14 @@ import { PartPalette } from '../components/PartPalette';
 import { RouteSkeleton } from '../components/RouteSkeleton';
 import { createBlueprintFromExperiment, mountBlueprintToManifest } from '../lib/blueprints';
 import { useAppBoot } from '../lib/app-boot';
+import {
+  hasConnectorBetween as hasExistingConnectorBetween,
+  getPrimitiveAnchor as getConnectorAnchor,
+  isMechanicalJointEndpointKind,
+  isRopeEndpointKind,
+} from '../lib/connectors';
 import { db } from '../lib/db';
+import { ENGINEERING_RECIPES, getEngineeringRecipeBlueprints } from '../lib/engineering-recipes';
 import { addPrimitive, connectPrimitives, deletePrimitive, movePrimitive, updatePrimitive } from '../lib/editor';
 import {
   ACTIVE_CHALLENGE_LIMIT,
@@ -101,7 +108,7 @@ function getPrimitiveAnchor(
   }
   const nextVisited = new Set(visited).add(primitive.id);
   if ('x' in primitive.config && 'y' in primitive.config) {
-    return { x: primitive.config.x, y: primitive.config.y };
+    return getConnectorAnchor(primitive, 'general');
   }
   if ('path' in primitive.config) {
     return averagePoint((primitive.config as { path: Array<{ x: number; y: number }> }).path);
@@ -117,7 +124,14 @@ function getPrimitiveAnchor(
       return averagePoint((track.config as { points: Array<{ x: number; y: number }> }).points);
     }
   }
-  if (primitive.kind === 'rope' || primitive.kind === 'belt-link' || primitive.kind === 'chain-link') {
+  if (
+    primitive.kind === 'rope'
+    || primitive.kind === 'belt-link'
+    || primitive.kind === 'chain-link'
+    || primitive.kind === 'bolt-link'
+    || primitive.kind === 'hinge-link'
+    || primitive.kind === 'powered-hinge-link'
+  ) {
     const cfg = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
     const ids = [cfg.fromId, ...(cfg.viaIds ?? []), cfg.toId];
     const points: Array<{ x: number; y: number }> = ids
@@ -154,14 +168,7 @@ function hasConnectorBetween(
   rightId: string,
   connectorKinds: PrimitiveKind[],
 ) {
-  return manifest.primitives.some((primitive) => {
-    if (!connectorKinds.includes(primitive.kind)) return false;
-    const config = primitive.config as { fromId?: string; toId?: string };
-    return (
-      (config.fromId === leftId && config.toId === rightId)
-      || (config.fromId === rightId && config.toId === leftId)
-    );
-  });
+  return hasExistingConnectorBetween(manifest, leftId, rightId, connectorKinds);
 }
 
 function findNearestPrimitivePair(
@@ -231,6 +238,12 @@ export function BuildPage() {
     [sourceBlueprintId],
   );
   const job = useLiveQuery(() => (jobId ? db.jobs.get(jobId) : undefined), [jobId]);
+  const starterBlueprintFromQuery = useMemo(
+    () => (sourceBlueprintId
+      ? getEngineeringRecipeBlueprints().find((record) => record.recordId === sourceBlueprintId)
+      : undefined),
+    [sourceBlueprintId],
+  );
 
   const [manifest, setManifest] = useState<ExperimentManifest | null>(null);
   const [playState, setPlayState] = useState<DraftPlayState | null>(null);
@@ -249,6 +262,7 @@ export function BuildPage() {
   const [adultToolsOpen, setAdultToolsOpen] = useState(false);
   const [challengePanelOpen, setChallengePanelOpen] = useState(false);
   const [sceneShelfOpen, setSceneShelfOpen] = useState(false);
+  const [recipeShelfOpen, setRecipeShelfOpen] = useState(false);
   const [workshopShelfOpen, setWorkshopShelfOpen] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
   const [challengeToast, setChallengeToast] = useState<ChallengeDefinition | null>(null);
@@ -271,6 +285,17 @@ export function BuildPage() {
       : []),
     [shouldLoadBlueprints],
   );
+  const availableBlueprints = useMemo(() => {
+    const merged = [...ENGINEERING_RECIPES.map((recipe) => recipe.blueprintRecord), ...(blueprints ?? [])];
+    const seen = new Set<string>();
+    return merged.filter((record) => {
+      if (seen.has(record.recordId)) {
+        return false;
+      }
+      seen.add(record.recordId);
+      return true;
+    });
+  }, [blueprints]);
   const challengeProgress = useLiveQuery<ChallengeProgressRecord[]>(
     () => db.challengeProgress.toArray(),
     [],
@@ -364,8 +389,8 @@ export function BuildPage() {
         return;
       }
 
-      if (blueprintFromQuery) {
-        const nextDraft = createDraftFromBlueprint(blueprintFromQuery);
+      if (blueprintFromQuery ?? starterBlueprintFromQuery) {
+        const nextDraft = createDraftFromBlueprint(blueprintFromQuery ?? starterBlueprintFromQuery!);
         await db.drafts.put(nextDraft);
         applyDraft(nextDraft);
         return;
@@ -385,7 +410,7 @@ export function BuildPage() {
     }
 
     void bootstrapDraft();
-  }, [blueprintFromQuery, draft, draftId, job, jobId, machineFromQuery, navigate, shareParam]);
+  }, [blueprintFromQuery, draft, draftId, job, jobId, machineFromQuery, navigate, shareParam, starterBlueprintFromQuery]);
 
   const runtime = useMachineSimulation(
     manifest,
@@ -546,6 +571,14 @@ export function BuildPage() {
 
       setManifest(nextManifest);
       setPlayState(nextPlayState);
+      setControlValues((current) => (
+        Object.fromEntries(
+          nextManifest.controls.map((control) => [
+            control.id,
+            current[control.id] ?? control.defaultValue ?? false,
+          ]),
+        )
+      ));
       if (!draftId) {
         return;
       }
@@ -818,23 +851,42 @@ export function BuildPage() {
   );
 
   const finalizeConnectorShortcut = useCallback(
-    async (sourceId: string, targetId: string, successMessage: string) => {
+    async (
+      sourceId: string,
+      targetId: string,
+      successMessage: string,
+      options?: {
+        kind?: 'rope' | 'belt-link' | 'chain-link' | 'bolt-link' | 'hinge-link' | 'powered-hinge-link';
+        motorId?: string;
+      },
+    ) => {
       if (!manifest) {
         return;
       }
 
-      const nextManifest = connectPrimitives(manifest, sourceId, targetId);
+      const nextManifest = connectPrimitives(
+        manifest,
+        sourceId,
+        targetId,
+        options?.kind ? { forceKind: options.kind, motorId: options.motorId } : undefined,
+      );
+      if (nextManifest === manifest) {
+        showStatus('Those parts are already linked, or this connector is not valid for that pair.', 'warning');
+        return;
+      }
       const newConnector = nextManifest.primitives.find(
         (primitive) => !manifest.primitives.some((existing) => existing.id === primitive.id),
       );
 
-      if (!newConnector) {
+      if (!newConnector && nextManifest.primitives.length === manifest.primitives.length) {
         showStatus('Those parts are already linked, so there is nothing new to show.', 'warning');
         return;
       }
 
       await persistDraft(nextManifest, undefined, { recordHistory: true });
-      setSelectedPrimitiveId(newConnector.id);
+      if (newConnector) {
+        setSelectedPrimitiveId(newConnector.id);
+      }
       showStatus(`${successMessage} It is selected now so the line is easy to spot.`, 'success');
     },
     [manifest, persistDraft, showStatus],
@@ -862,61 +914,224 @@ export function BuildPage() {
       return;
     }
 
-    void finalizeConnectorShortcut(source.id, target.id, 'Connected the winch to the hook.');
+    void finalizeConnectorShortcut(source.id, target.id, 'Connected the winch to the hook.', { kind: 'rope' });
   }, [finalizeConnectorShortcut, manifest, selectedPrimitiveId, showStatus]);
 
-  const handleCreateConnectorShortcut = useCallback((kind: 'rope' | 'belt-link' | 'chain-link') => {
+  const handleConnectRopeToEndpoint = useCallback((endpointKind: 'hook' | 'bucket' | 'crane-arm' | 'cargo-block') => {
+    if (!manifest) {
+      return;
+    }
+
+    const selectedIsWinch = selectedPrimitive?.kind === 'winch';
+    const selectedIsEndpoint = selectedPrimitive?.kind === endpointKind;
+    const winches = manifest.primitives.filter((primitive) => primitive.kind === 'winch');
+    const endpoints = manifest.primitives.filter((primitive) => primitive.kind === endpointKind);
+    const pair = selectedIsWinch && selectedPrimitive
+      ? (() => {
+          const target = findNearestPrimitive(
+            manifest,
+            selectedPrimitive,
+            (primitive) => primitive.kind === endpointKind && !hasConnectorBetween(manifest, selectedPrimitive.id, primitive.id, ['rope']),
+          );
+          return target ? { left: selectedPrimitive, right: target } : null;
+        })()
+      : selectedIsEndpoint && selectedPrimitive
+        ? (() => {
+            const source = findNearestPrimitive(
+              manifest,
+              selectedPrimitive,
+              (primitive) => primitive.kind === 'winch' && !hasConnectorBetween(manifest, primitive.id, selectedPrimitive.id, ['rope']),
+            );
+            return source ? { left: source, right: selectedPrimitive } : null;
+          })()
+        : findNearestPrimitivePair(
+            manifest,
+            winches,
+            endpoints,
+            (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['rope']),
+          );
+
+    if (!pair) {
+      showStatus(`Place both a winch and a ${labelForPrimitive(endpointKind).toLowerCase()} first, then connect them with a rope.`, 'warning');
+      return;
+    }
+
+    void finalizeConnectorShortcut(
+      pair.left.id,
+      pair.right.id,
+      `Created a rope between the ${labelForPrimitive(pair.left.kind).toLowerCase()} and the ${labelForPrimitive(pair.right.kind).toLowerCase()}.`,
+      { kind: 'rope' },
+    );
+  }, [finalizeConnectorShortcut, manifest, selectedPrimitive, showStatus]);
+
+  const handleCreateConnectorShortcut = useCallback((
+    kind: 'rope' | 'belt-link' | 'chain-link' | 'bolt-link' | 'hinge-link' | 'powered-hinge-link',
+  ) => {
     if (!manifest) {
       return;
     }
 
     if (kind === 'rope') {
       const winches = manifest.primitives.filter((primitive) => primitive.kind === 'winch');
-      const hooks = manifest.primitives.filter((primitive) => primitive.kind === 'hook');
-      const pair = findNearestPrimitivePair(
-        manifest,
-        winches,
-        hooks,
-        (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['rope']),
-      );
+      const ropeEndpoints = manifest.primitives.filter((primitive) => isRopeEndpointKind(primitive.kind));
+      const pair = selectedPrimitive?.kind === 'winch'
+        ? (() => {
+            const target = findNearestPrimitive(
+              manifest,
+              selectedPrimitive,
+              (primitive) => isRopeEndpointKind(primitive.kind) && !hasConnectorBetween(manifest, selectedPrimitive.id, primitive.id, ['rope']),
+            );
+            return target ? { left: selectedPrimitive, right: target } : null;
+          })()
+        : selectedPrimitive && isRopeEndpointKind(selectedPrimitive.kind)
+          ? (() => {
+              const source = findNearestPrimitive(
+                manifest,
+                selectedPrimitive,
+                (primitive) => primitive.kind === 'winch' && !hasConnectorBetween(manifest, primitive.id, selectedPrimitive.id, ['rope']),
+              );
+              return source ? { left: source, right: selectedPrimitive } : null;
+            })()
+          : findNearestPrimitivePair(
+              manifest,
+              winches,
+              ropeEndpoints,
+              (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['rope']),
+            );
       if (!pair) {
-        showStatus('Place both a winch and a hook first, then Rope can link them.', 'warning');
+        showStatus('Place a winch plus a hook, bucket, crane arm, or cargo block first, then Rope can link them.', 'warning');
         return;
       }
-      void finalizeConnectorShortcut(pair.left.id, pair.right.id, 'Created a rope between the nearest winch and hook.');
+      void finalizeConnectorShortcut(
+        pair.left.id,
+        pair.right.id,
+        `Created a rope between the ${labelForPrimitive(pair.left.kind).toLowerCase()} and the ${labelForPrimitive(pair.right.kind).toLowerCase()}.`,
+        { kind: 'rope' },
+      );
       return;
     }
 
     if (kind === 'belt-link') {
       const beltKinds: PrimitiveKind[] = ['wheel', 'pulley', 'flywheel'];
       const candidates = manifest.primitives.filter((primitive) => beltKinds.includes(primitive.kind));
-      const pair = findNearestPrimitivePair(
-        manifest,
-        candidates,
-        candidates,
-        (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['belt-link', 'chain-link', 'rope']),
-      );
+      const pair = selectedPrimitive && beltKinds.includes(selectedPrimitive.kind)
+        ? (() => {
+            const target = findNearestPrimitive(
+              manifest,
+              selectedPrimitive,
+              (primitive) => beltKinds.includes(primitive.kind)
+                && !hasConnectorBetween(manifest, selectedPrimitive.id, primitive.id, ['belt-link', 'chain-link', 'rope']),
+            );
+            return target ? { left: selectedPrimitive, right: target } : null;
+          })()
+        : findNearestPrimitivePair(
+            manifest,
+            candidates,
+            candidates,
+            (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['belt-link', 'chain-link', 'rope']),
+          );
       if (!pair) {
         showStatus('Place two wheels, pulleys, or flywheels first, then Belt can link them.', 'warning');
         return;
       }
-      void finalizeConnectorShortcut(pair.left.id, pair.right.id, 'Created a drive belt between the nearest matching parts.');
+      void finalizeConnectorShortcut(pair.left.id, pair.right.id, 'Created a drive belt between the nearest matching parts.', { kind: 'belt-link' });
       return;
     }
 
-    const sprockets = manifest.primitives.filter((primitive) => primitive.kind === 'chain-sprocket');
-    const pair = findNearestPrimitivePair(
-      manifest,
-      sprockets,
-      sprockets,
-      (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['belt-link', 'chain-link', 'rope']),
-    );
-    if (!pair) {
-      showStatus('Place two chain sprockets first, then Chain can link them.', 'warning');
+    if (kind === 'chain-link') {
+      const sprockets = manifest.primitives.filter((primitive) => primitive.kind === 'chain-sprocket');
+      const pair = selectedPrimitive?.kind === 'chain-sprocket'
+        ? (() => {
+            const target = findNearestPrimitive(
+              manifest,
+              selectedPrimitive,
+              (primitive) => primitive.kind === 'chain-sprocket'
+                && !hasConnectorBetween(manifest, selectedPrimitive.id, primitive.id, ['belt-link', 'chain-link', 'rope']),
+            );
+            return target ? { left: selectedPrimitive, right: target } : null;
+          })()
+        : findNearestPrimitivePair(
+            manifest,
+            sprockets,
+            sprockets,
+            (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['belt-link', 'chain-link', 'rope']),
+          );
+      if (!pair) {
+        showStatus('Place two chain sprockets first, then Chain can link them.', 'warning');
+        return;
+      }
+      void finalizeConnectorShortcut(pair.left.id, pair.right.id, 'Created a chain link between the nearest sprockets.', { kind: 'chain-link' });
       return;
     }
-    void finalizeConnectorShortcut(pair.left.id, pair.right.id, 'Created a chain link between the nearest sprockets.');
-  }, [finalizeConnectorShortcut, manifest, showStatus]);
+
+    const jointCandidates = manifest.primitives.filter(
+      (primitive) => isMechanicalJointEndpointKind(primitive.kind) && primitive.kind !== 'motor',
+    );
+    const blockedConnectorKinds: PrimitiveKind[] = ['bolt-link', 'hinge-link', 'powered-hinge-link'];
+    const pair = selectedPrimitive && isMechanicalJointEndpointKind(selectedPrimitive.kind) && selectedPrimitive.kind !== 'motor'
+      ? (() => {
+          const target = findNearestPrimitive(
+            manifest,
+            selectedPrimitive,
+            (primitive) => isMechanicalJointEndpointKind(primitive.kind)
+              && primitive.kind !== 'motor'
+              && !hasConnectorBetween(manifest, selectedPrimitive.id, primitive.id, blockedConnectorKinds),
+          );
+          return target ? { left: selectedPrimitive, right: target } : null;
+        })()
+      : findNearestPrimitivePair(
+          manifest,
+          jointCandidates,
+          jointCandidates,
+          (left, right) => hasConnectorBetween(manifest, left.id, right.id, blockedConnectorKinds),
+        );
+
+    if (!pair) {
+      showStatus(
+        kind === 'bolt-link'
+          ? 'Place two body-backed machine parts or base pieces first so Bolt can lock them together.'
+          : kind === 'hinge-link'
+            ? 'Place two compatible parts first so Hinge can give them a shared pivot.'
+            : 'Place two compatible parts plus a motor first so Powered Hinge can swing them.',
+        'warning',
+      );
+      return;
+    }
+
+    let motorId: string | undefined;
+    if (kind === 'powered-hinge-link') {
+      const selectedMotor = selectedPrimitive?.kind === 'motor' ? selectedPrimitive : undefined;
+      const pairAnchor = averagePoint([
+        getPrimitiveAnchor(pair.left, manifest),
+        getPrimitiveAnchor(pair.right, manifest),
+      ]);
+      const nearestMotor = selectedMotor ?? manifest.primitives
+        .filter((primitive) => primitive.kind === 'motor')
+        .sort((left, right) => {
+          const leftAnchor = getPrimitiveAnchor(left, manifest);
+          const rightAnchor = getPrimitiveAnchor(right, manifest);
+          return Math.hypot(leftAnchor.x - pairAnchor.x, leftAnchor.y - pairAnchor.y)
+            - Math.hypot(rightAnchor.x - pairAnchor.x, rightAnchor.y - pairAnchor.y);
+        })[0];
+      if (!nearestMotor) {
+        showStatus('Powered Hinge needs a motor on the canvas first.', 'warning');
+        return;
+      }
+      motorId = nearestMotor.id;
+    }
+
+    const successMessage = kind === 'bolt-link'
+      ? `Bolted the ${labelForPrimitive(pair.left.kind).toLowerCase()} to the ${labelForPrimitive(pair.right.kind).toLowerCase()}.`
+      : kind === 'hinge-link'
+        ? `Added a hinge between the ${labelForPrimitive(pair.left.kind).toLowerCase()} and the ${labelForPrimitive(pair.right.kind).toLowerCase()}.`
+        : `Added a powered hinge between the ${labelForPrimitive(pair.left.kind).toLowerCase()} and the ${labelForPrimitive(pair.right.kind).toLowerCase()}.`;
+
+    void finalizeConnectorShortcut(pair.left.id, pair.right.id, successMessage, { kind, motorId });
+  }, [finalizeConnectorShortcut, manifest, selectedPrimitive, showStatus]);
+
+  const handleConnectWinchToLoad = useCallback((loadKind: 'bucket' | 'crane-arm' | 'cargo-block') => {
+    void handleConnectRopeToEndpoint(loadKind);
+  }, [handleConnectRopeToEndpoint]);
 
   const handleConnectNodes = useCallback(() => {
     if (!manifest) {
@@ -1165,7 +1380,7 @@ export function BuildPage() {
       ? manifest.primitives.find(
           (primitive) => primitive.kind === 'rope' && (primitive.config as { fromId?: string }).fromId === selectedPrimitive.id,
         )
-      : selectedPrimitive.kind === 'hook'
+      : isRopeEndpointKind(selectedPrimitive.kind)
         ? manifest.primitives.find(
             (primitive) => primitive.kind === 'rope' && (primitive.config as { toId?: string }).toId === selectedPrimitive.id,
           )
@@ -1174,7 +1389,7 @@ export function BuildPage() {
           );
 
     if (!pulley || !rope) {
-      showStatus('Place a pulley and a winch rope first, then Quick Connect can route the rope through it.', 'warning');
+      showStatus('Place a pulley and an existing winch rope first. Rope endpoints can now be hooks, buckets, crane arms, or cargo blocks.', 'warning');
       return;
     }
 
@@ -1342,6 +1557,41 @@ export function BuildPage() {
   const buildReadiness: 'loading-engine' | 'ready' = simulationStatus !== 'ready' || !canvasReady
     ? 'loading-engine'
     : 'ready';
+  const showConnectorWorkbench = projectUnlocked || !job;
+  const canRouteRopeWithSelection = Boolean(
+    selectedPrimitive
+    && (
+      selectedPrimitive.kind === 'pulley'
+      || selectedPrimitive.kind === 'winch'
+      || isRopeEndpointKind(selectedPrimitive.kind)
+    ),
+  );
+  const canCreateMechanicalJointFromSelection = Boolean(
+    selectedPrimitive
+    && (
+      selectedPrimitive.kind === 'motor'
+      || isMechanicalJointEndpointKind(selectedPrimitive.kind)
+    ),
+  );
+  const visibleRecipes = recipeShelfOpen ? ENGINEERING_RECIPES : ENGINEERING_RECIPES.slice(0, 3);
+  const selectedPrimitiveLabel = selectedPrimitive
+    ? selectedPrimitive.label ?? labelForPrimitive(selectedPrimitive.kind)
+    : null;
+  const connectorWorkbenchHint = !selectedPrimitive
+    ? 'Click a part on the canvas first. Then pick a connector here and the nearest compatible partner will be linked automatically.'
+    : selectedPrimitive.kind === 'hinge'
+      ? 'This hinge block is only a visible pivot marker. To actually join two parts, select the real machine part and use Add Hinge or Add Powered Hinge here.'
+      : selectedPrimitive.kind === 'node'
+        ? 'Nodes can become beams. Most other parts can bolt, hinge, or rope to the closest compatible match.'
+        : selectedPrimitive.kind === 'winch'
+          ? 'Winches can rope directly to hooks, buckets, crane arms, or cargo blocks. Place the load below the winch for the clearest result.'
+          : selectedPrimitive.kind === 'pulley'
+            ? 'Pulleys can route an existing rope or drive link after the main connection already exists.'
+            : selectedPrimitive.kind === 'crane-arm'
+              ? 'Crane arms can bolt to frames, swing on hinges, or take a rope at the tip.'
+              : selectedPrimitive.kind === 'motor'
+                ? 'Motors can mount to a chassis or power the nearest powered hinge.'
+                : 'Use Bolt for rigid assemblies, Hinge for a free pivot, and Powered Hinge when a motor should drive the joint.';
 
   return (
     <div className="page page-build">
@@ -1516,7 +1766,7 @@ export function BuildPage() {
               } : undefined}
               promptSeed={assistantPromptSeed}
               onPromptSeedConsumed={() => setAssistantPromptSeed(null)}
-              blueprints={blueprints ?? []}
+              blueprints={availableBlueprints}
               onMount={(blueprintRecord) => {
                 void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint), undefined, { recordHistory: true });
                 showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
@@ -1596,6 +1846,223 @@ export function BuildPage() {
             </button>
           </div>
         </section>
+      ) : null}
+
+      {showConnectorWorkbench ? (
+        <div className="builder-utility-grid">
+          <section className="panel small-panel connect-workbench-panel">
+            <div className="panel-header compact">
+              <div>
+                <p className="eyebrow">Connect Parts</p>
+                <h3>Pick one part, then connect it</h3>
+              </div>
+              <span className="muted">{selectedPrimitive ? 'Nearest match auto-picked' : 'Step-by-step'}</span>
+            </div>
+            <div className="connect-workbench-flow" aria-label="How connecting works">
+              <span className="connect-flow-chip">1. Click a part</span>
+              <span className="connect-flow-chip">2. Pick a connector</span>
+              <span className="connect-flow-chip">3. Watch the link appear</span>
+            </div>
+            <div className={`connect-workbench-status ${selectedPrimitive ? 'is-ready' : 'is-waiting'}`}>
+              <strong>{selectedPrimitive ? `${selectedPrimitiveLabel} selected` : 'No part selected yet'}</strong>
+              <p className="muted">{connectorWorkbenchHint}</p>
+            </div>
+
+            <div className="connect-workbench-groups">
+              <div className="connect-workbench-group">
+                <p className="palette-context-label">Ropes and lifting</p>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !selectedPrimitive || !['winch', 'hook'].includes(selectedPrimitive.kind)}
+                    onClick={handleConnectWinch}
+                  >
+                    Connect Winch to Hook
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !selectedPrimitive || !['winch', 'bucket'].includes(selectedPrimitive.kind)}
+                    onClick={() => handleConnectWinchToLoad('bucket')}
+                  >
+                    Rope to Bucket
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !selectedPrimitive || !['winch', 'crane-arm'].includes(selectedPrimitive.kind)}
+                    onClick={() => handleConnectWinchToLoad('crane-arm')}
+                  >
+                    Rope to Arm
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !selectedPrimitive || !['winch', 'cargo-block'].includes(selectedPrimitive.kind)}
+                    onClick={() => handleConnectWinchToLoad('cargo-block')}
+                  >
+                    Rope to Cargo
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !canRouteRopeWithSelection}
+                    onClick={handleRouteRopeThroughPulley}
+                  >
+                    Route Rope Through Pulley
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !['hook', 'cargo-block'].includes(selectedPrimitive?.kind ?? '')}
+                    onClick={handleHookCargo}
+                  >
+                    Hook Cargo Block
+                  </button>
+                </div>
+              </div>
+
+              <div className="connect-workbench-group">
+                <p className="palette-context-label">Bolts and hinges</p>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !canCreateMechanicalJointFromSelection}
+                    onClick={() => handleCreateConnectorShortcut('bolt-link')}
+                  >
+                    Bolt Together
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !canCreateMechanicalJointFromSelection}
+                    onClick={() => handleCreateConnectorShortcut('hinge-link')}
+                  >
+                    Add Hinge
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !canCreateMechanicalJointFromSelection}
+                    onClick={() => handleCreateConnectorShortcut('powered-hinge-link')}
+                  >
+                    Add Powered Hinge
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !['crane-arm', 'bucket'].includes(selectedPrimitive?.kind ?? '')}
+                    onClick={() => handleAttachArmLoad('bucket')}
+                  >
+                    Attach Arm to Bucket
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !['crane-arm', 'counterweight'].includes(selectedPrimitive?.kind ?? '')}
+                    onClick={() => handleAttachArmLoad('counterweight')}
+                  >
+                    Attach Arm to Counterweight
+                  </button>
+                </div>
+              </div>
+
+              <div className="connect-workbench-group">
+                <p className="palette-context-label">Drivetrain and mounting</p>
+                <div className="button-row">
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || selectedPrimitive?.kind !== 'node'}
+                    onClick={handleConnectNodes}
+                  >
+                    Connect Nodes with Beam
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !['wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(selectedPrimitive?.kind ?? '')}
+                    onClick={handleConnectBelt}
+                  >
+                    Connect Rotating Parts with Drive Link
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !['locomotive', 'gear', 'wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(selectedPrimitive?.kind ?? '')}
+                    onClick={handleConnectLocomotiveDrive}
+                  >
+                    Drive Locomotive from Rotating Part
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !['wheel', 'pulley', 'flywheel', 'chain-sprocket'].includes(selectedPrimitive?.kind ?? '')}
+                    onClick={handleRouteDriveLinkThroughIdler}
+                  >
+                    Route Drive Link Through Idler
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !['wheel', 'chassis'].includes(selectedPrimitive?.kind ?? '')}
+                    onClick={handleMountWheelToChassis}
+                  >
+                    Mount Wheel to Chassis
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !['motor', 'chassis'].includes(selectedPrimitive?.kind ?? '')}
+                    onClick={handleMountMotorToChassis}
+                  >
+                    Mount Motor to Chassis
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!selectedPrimitiveId || !['gear', 'pulley', 'chain-sprocket', 'flywheel', 'winch', 'crane-arm', 'chassis'].includes(selectedPrimitive?.kind ?? '')}
+                    onClick={handleMountAssemblyToChassis}
+                  >
+                    Mount Rotary or Tool to Chassis
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel small-panel handbook-panel">
+            <div className="panel-header compact">
+              <div>
+                <p className="eyebrow">Engineering Handbook</p>
+                <h3>Working recipes you can mount instantly</h3>
+              </div>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setRecipeShelfOpen((current) => !current)}
+              >
+                {recipeShelfOpen ? 'Show Fewer' : 'Show All'}
+              </button>
+            </div>
+            <p className="muted handbook-panel-copy">
+              Each recipe loads a working example so Mason can study it, run it, and then remix it.
+            </p>
+            <div className="blueprint-list handbook-list">
+              {visibleRecipes.map((recipe) => (
+                <article key={recipe.id} className="blueprint-row handbook-row">
+                  <div>
+                    <strong>{recipe.title}</strong>
+                    <p className="muted">{recipe.summary}</p>
+                    <p className="muted">Parts: {recipe.partList.join(', ')}</p>
+                    <p className="muted">Why it works: {recipe.whyItWorks}</p>
+                  </div>
+                  <div className="button-row vertical">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void persistDraft(mountBlueprintToManifest(manifest, recipe.blueprintRecord.blueprint), undefined, { recordHistory: true });
+                        showStatus(`Mounted ${recipe.title}.`, 'success');
+                      }}
+                    >
+                      Mount
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openAssistantWithPrompt(recipe.assistantPrompt)}
+                    >
+                      Ask
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
       ) : null}
 
       <div className="build-layout build-layout-compact">
@@ -1784,132 +2251,6 @@ export function BuildPage() {
                 ))}
               </div>
             </details>
-          ) : null}
-
-          {(projectUnlocked || !job) && (
-            selectedPrimitive?.kind === 'winch'
-            || selectedPrimitive?.kind === 'hook'
-            || selectedPrimitive?.kind === 'node'
-            || selectedPrimitive?.kind === 'wheel'
-            || selectedPrimitive?.kind === 'gear'
-            || selectedPrimitive?.kind === 'pulley'
-            || selectedPrimitive?.kind === 'chain-sprocket'
-            || selectedPrimitive?.kind === 'flywheel'
-            || selectedPrimitive?.kind === 'locomotive'
-            || selectedPrimitive?.kind === 'chassis'
-            || selectedPrimitive?.kind === 'motor'
-            || selectedPrimitive?.kind === 'crane-arm'
-            || selectedPrimitive?.kind === 'bucket'
-            || selectedPrimitive?.kind === 'counterweight'
-            || selectedPrimitive?.kind === 'cargo-block'
-          ) ? (
-            <section className="panel small-panel">
-            <div className="panel-header compact">
-              <div>
-                <p className="eyebrow">Quick Connect</p>
-                <h3>Approved pairings</h3>
-              </div>
-            </div>
-            <p className="muted">
-              {selectedPrimitive.kind === 'node'
-                ? 'Use this when two nodes should become a beam.'
-                : selectedPrimitive.kind === 'hook'
-                  ? 'Use this when a winch and hook are already on the canvas.'
-                  : selectedPrimitive.kind === 'winch'
-                    ? 'Use this to either hang the winch from a hook path or mount it onto a chassis.'
-                    : selectedPrimitive.kind === 'pulley'
-                      ? 'Use this to route an existing rope or belt through the pulley, or add a drive link between rotating parts.'
-                      : selectedPrimitive.kind === 'chain-sprocket'
-                        ? 'Use this to add a chain link between rotating parts or route an existing chain through this sprocket.'
-                  : 'Use this to mount or attach the selected part to the nearest compatible partner.'}
-            </p>
-            <div className="button-row vertical">
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || (selectedPrimitive.kind !== 'winch' && selectedPrimitive.kind !== 'hook')}
-                onClick={handleConnectWinch}
-              >
-                Connect Winch to Hook
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || selectedPrimitive.kind !== 'node'}
-                onClick={handleConnectNodes}
-              >
-                Connect Nodes with Beam
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(selectedPrimitive.kind)}
-                onClick={handleConnectBelt}
-              >
-                Connect Rotating Parts with Drive Link
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['locomotive', 'gear', 'wheel', 'pulley', 'chain-sprocket', 'flywheel'].includes(selectedPrimitive.kind)}
-                onClick={handleConnectLocomotiveDrive}
-              >
-                Drive Locomotive from Rotating Part
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['pulley', 'winch', 'hook'].includes(selectedPrimitive.kind)}
-                onClick={handleRouteRopeThroughPulley}
-              >
-                Route Rope Through Pulley
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['wheel', 'pulley', 'flywheel', 'chain-sprocket'].includes(selectedPrimitive.kind)}
-                onClick={handleRouteDriveLinkThroughIdler}
-              >
-                Route Drive Link Through Idler
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['wheel', 'chassis'].includes(selectedPrimitive.kind)}
-                onClick={handleMountWheelToChassis}
-              >
-                Mount Wheel to Chassis
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['motor', 'chassis'].includes(selectedPrimitive.kind)}
-                onClick={handleMountMotorToChassis}
-              >
-                Mount Motor to Chassis
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['gear', 'pulley', 'chain-sprocket', 'flywheel', 'winch', 'crane-arm', 'chassis'].includes(selectedPrimitive.kind)}
-                onClick={handleMountAssemblyToChassis}
-              >
-                Mount Rotary/Tool to Chassis
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['crane-arm', 'bucket'].includes(selectedPrimitive.kind)}
-                onClick={() => handleAttachArmLoad('bucket')}
-              >
-                Attach Arm to Bucket
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['crane-arm', 'counterweight'].includes(selectedPrimitive.kind)}
-                onClick={() => handleAttachArmLoad('counterweight')}
-              >
-                Attach Arm to Counterweight
-              </button>
-              <button
-                type="button"
-                disabled={!selectedPrimitiveId || !['hook', 'cargo-block'].includes(selectedPrimitive.kind)}
-                onClick={handleHookCargo}
-              >
-                Hook Cargo Block
-              </button>
-            </div>
-          </section>
           ) : null}
         </div>
       </div>

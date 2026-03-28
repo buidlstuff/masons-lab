@@ -241,11 +241,25 @@ function remapPrimitiveConfig(
     config.toNodeId = idMap.get(String(config.toNodeId)) ?? config.toNodeId;
   }
 
-  if (primitive.kind === 'rope' || primitive.kind === 'belt-link' || primitive.kind === 'chain-link') {
+  if (
+    primitive.kind === 'rope'
+    || primitive.kind === 'belt-link'
+    || primitive.kind === 'chain-link'
+    || primitive.kind === 'bolt-link'
+    || primitive.kind === 'hinge-link'
+    || primitive.kind === 'powered-hinge-link'
+  ) {
     config.fromId = idMap.get(String(config.fromId)) ?? config.fromId;
     config.toId = idMap.get(String(config.toId)) ?? config.toId;
     if (Array.isArray(config.viaIds)) {
       config.viaIds = config.viaIds.map((viaId) => idMap.get(String(viaId)) ?? viaId);
+    }
+    if (typeof config.motorId === 'string') {
+      config.motorId = idMap.get(config.motorId) ?? config.motorId;
+    }
+    if (typeof config.pivotX === 'number' && typeof config.pivotY === 'number') {
+      config.pivotX += dx;
+      config.pivotY += dy;
     }
   }
 

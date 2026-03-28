@@ -4,6 +4,7 @@ import { JobCard } from '../components/JobCard';
 import { MachineCard } from '../components/MachineCard';
 import { useHomeSummary } from '../hooks/useHomeSummary';
 import { useAppBoot } from '../lib/app-boot';
+import { ENGINEERING_HANDBOOK_ENTRIES } from '../lib/engineering-handbook';
 import { markPerformance, measurePerformance } from '../lib/perf';
 import { scheduleBuildPrefetch } from '../lib/route-preload';
 import { TIER_NAMES, TIER_THRESHOLDS, tierForXp } from '../lib/xp';
@@ -51,37 +52,34 @@ export function HomePage() {
     summaryMeasuredRef.current = true;
   }, [summary]);
 
-  const primaryAction = latestDraft
+  const guidedAction = latestDraft
     ? {
-        label: 'Continue Building',
+        label: 'Resume Guided Play',
         to: `/build/${latestDraft.draftId}`,
         title: latestDraft.manifest.metadata.title,
         detail: 'Pick up where you left off.',
       }
     : nextProject
       ? {
-          label: 'Start Building',
-          // Go directly into the builder — skip the detail page
+          label: nextProject.completed ? 'Replay Guided Play' : 'Start Guided Play',
           to: `/build?job=${nextProject.jobId}`,
           title: nextProject.title,
           detail: nextProject.summary,
         }
       : {
-          label: 'Open Empty Yard',
-          to: '/build',
-          title: 'New Yard Draft',
-          detail: 'Build one machine from scratch.',
+          label: 'Browse Guided Play',
+          to: '#starter-projects',
+          title: 'Guided Play',
+          detail: 'Start with a recipe or a starter project.',
         };
-  const primaryLabel = latestDraft
-    ? `Resume ${primaryAction.title}`
-    : nextProject
-      ? `Start ${nextProject.title}`
-      : primaryAction.label;
-  const secondaryAction = allStarterProjectsComplete
-    ? { label: 'Open Free Build', to: '/build' }
-    : { label: 'Browse Projects', to: '#starter-projects' };
+  const freeBuildAction = {
+    label: 'Open Free Build',
+    to: '/build',
+    title: latestDraft ? 'Open the yard' : 'Start from scratch',
+    detail: 'Open the canvas with the full part drawer and build whatever you want.',
+  };
+  const handbookRecipes = ENGINEERING_HANDBOOK_ENTRIES;
   const completedCount = summary?.completedCount ?? 0;
-  const isSecondaryHashLink = secondaryAction.to.startsWith('#');
   const homeLoading = boot.status === 'pending' || (boot.status === 'ready' && !summary);
   const homeDegraded = boot.status === 'degraded';
 
@@ -90,24 +88,8 @@ export function HomePage() {
       <section className="hero-shell yard-hero home-hero">
         <div className="hero-copy home-hero-copy">
           <p className="eyebrow">Mason&apos;s Lab</p>
-          <h1>Build machines that actually work.</h1>
-          <p className="home-hero-deck">
-            A bright engineering yard for motion, flow, and problem-solving. Every visible part should earn its place.
-          </p>
-          <div className="hero-actions home-hero-actions">
-            <Link to={primaryAction.to} className="primary-link">
-              {primaryLabel}
-            </Link>
-            {isSecondaryHashLink ? (
-              <a href={secondaryAction.to} className="ghost-button home-hero-link">
-                {secondaryAction.label}
-              </a>
-            ) : (
-              <Link to={secondaryAction.to} className="ghost-button home-hero-link">
-                {secondaryAction.label}
-              </Link>
-            )}
-          </div>
+          <h1>Mason&apos;s Engineering Lab</h1>
+          <p className="home-hero-deck">Choose guided play or open free build.</p>
           <div className="home-hero-stats" aria-label="Yard summary">
             <div className="home-stat-chip">
               <strong>{homeLoading ? '…' : projects.length}</strong>
@@ -119,7 +101,7 @@ export function HomePage() {
             </div>
             <div className="home-stat-chip">
               <strong>{homeLoading ? '…' : xp}</strong>
-              <span>XP</span>
+              <span>{`Tier ${tier} · ${tierName}`}</span>
             </div>
           </div>
           {homeDegraded ? (
@@ -129,7 +111,7 @@ export function HomePage() {
           ) : null}
         </div>
 
-        <div className="hero-panel home-focus-panel">
+        <div className="hero-panel home-entry-panel">
           {homeLoading ? (
             <div className="home-loading-stack" aria-hidden="true">
               <div className="home-focus-card home-loading-card">
@@ -138,30 +120,42 @@ export function HomePage() {
                 <div className="skeleton-line skeleton-line-copy" />
                 <div className="skeleton-line skeleton-line-copy short" />
               </div>
-              <div className="home-path-list home-loading-card">
+              <div className="home-focus-card home-loading-card">
                 <div className="skeleton-line skeleton-line-eyebrow" />
-                <div className="skeleton-line skeleton-line-copy" />
-                <div className="skeleton-line skeleton-line-copy" />
-                <div className="skeleton-line skeleton-line-copy short" />
-              </div>
-              <div className="xp-bar-block home-tier-block home-loading-card">
+                <div className="skeleton-line skeleton-line-title" />
                 <div className="skeleton-line skeleton-line-copy" />
                 <div className="skeleton-line skeleton-line-copy short" />
               </div>
             </div>
           ) : (
             <>
-              <div className="home-focus-card">
-                <p className="eyebrow">Current Focus</p>
-                <strong>{primaryAction.title}</strong>
-                <p>{primaryAction.detail}</p>
-                <Link to={primaryAction.to} className="home-inline-link">
-                  {latestDraft ? 'Keep Going' : 'Jump In'}
+              <div className="home-entry-grid">
+                {guidedAction.to.startsWith('#') ? (
+                  <a href={guidedAction.to} className="home-entry-card home-entry-card-guided">
+                    <p className="eyebrow">Guided Play</p>
+                    <strong>{guidedAction.title}</strong>
+                    <p>{guidedAction.detail}</p>
+                    <span>{guidedAction.label}</span>
+                  </a>
+                ) : (
+                  <Link to={guidedAction.to} className="home-entry-card home-entry-card-guided">
+                    <p className="eyebrow">Guided Play</p>
+                    <strong>{guidedAction.title}</strong>
+                    <p>{guidedAction.detail}</p>
+                    <span>{guidedAction.label}</span>
+                  </Link>
+                )}
+
+                <Link to={freeBuildAction.to} className="home-entry-card home-entry-card-free">
+                  <p className="eyebrow">Free Build</p>
+                  <strong>{freeBuildAction.title}</strong>
+                  <p>{freeBuildAction.detail}</p>
+                  <span>{freeBuildAction.label}</span>
                 </Link>
               </div>
 
               <div className="home-path-list">
-                <p className="eyebrow">Path</p>
+                <p className="eyebrow">Starter Path</p>
                 {orderedProjects.slice(0, 3).map((project, index) => (
                   <Link key={project.jobId} to={`/build?job=${project.jobId}`} className="home-path-row">
                     <span className="home-path-index">{index + 1}</span>
@@ -182,7 +176,7 @@ export function HomePage() {
                   <div className="xp-bar-fill" style={{ width: `${tierProgress}%` }} />
                 </div>
                 <p className="xp-bar-caption muted">
-                  XP only lands when the machine truly works.
+                  Guided play teaches the basics. Free build is where the experiments start.
                 </p>
               </div>
             </>
@@ -190,11 +184,35 @@ export function HomePage() {
         </div>
       </section>
 
+      <section className="section-block">
+        <div className="section-head">
+          <div>
+            <p className="eyebrow">Engineering Handbook</p>
+            <h2>Open a working example</h2>
+          </div>
+        </div>
+        <div className="card-grid home-handbook-grid">
+          {handbookRecipes.map((recipe) => (
+            <Link
+              key={recipe.id}
+              to={`/build?blueprint=${recipe.blueprintId}`}
+              className="yard-start-card home-handbook-card"
+            >
+              <p className="eyebrow">Recipe</p>
+              <strong>{recipe.title}</strong>
+              <p>{recipe.summary}</p>
+              <p className="muted">Parts: {recipe.partList.join(', ')}</p>
+              <span>Open Recipe</span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
       <section className="section-block" id="starter-projects">
         <div className="section-head">
           <div>
-            <p className="eyebrow">Starter Projects</p>
-            <h2>{allStarterProjectsComplete ? 'Mission yard unlocked' : 'Three projects. Clear cause and effect.'}</h2>
+            <p className="eyebrow">Guided Play</p>
+            <h2>{allStarterProjectsComplete ? 'Starter path finished' : 'Start with clear cause and effect.'}</h2>
           </div>
         </div>
         {allStarterProjectsComplete ? (
@@ -268,9 +286,15 @@ export function HomePage() {
               <h3>No Draft Yet</h3>
               <p>Start the first project and the yard will remember where you stopped.</p>
               <div className="home-empty-actions">
-                <Link to={primaryAction.to} className="home-inline-link">
-                  {latestDraft ? 'Open Draft' : 'Start First Project'}
-                </Link>
+                {guidedAction.to.startsWith('#') ? (
+                  <a href={guidedAction.to} className="home-inline-link">
+                    Start First Project
+                  </a>
+                ) : (
+                  <Link to={guidedAction.to} className="home-inline-link">
+                    Start First Project
+                  </Link>
+                )}
               </div>
             </div>
           )}

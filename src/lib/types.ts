@@ -24,6 +24,9 @@ export type PrimitiveKind =
   | 'rope'
   | 'belt-link'
   | 'chain-link'
+  | 'bolt-link'
+  | 'hinge-link'
+  | 'powered-hinge-link'
   | 'hook'
   | 'rail-segment'
   | 'rail-switch'
@@ -237,6 +240,33 @@ export interface ChainLinkConfig {
   toId: string;
   length: number;
   viaIds?: string[];
+}
+
+export interface BoltLinkConfig {
+  fromId: string;
+  toId: string;
+  offsetX: number;
+  offsetY: number;
+  angleOffset: number;
+}
+
+export interface HingeLinkConfig {
+  fromId: string;
+  toId: string;
+  pivotX: number;
+  pivotY: number;
+  fromLocalX: number;
+  fromLocalY: number;
+  toLocalX: number;
+  toLocalY: number;
+  minAngle: number;
+  maxAngle: number;
+}
+
+export interface PoweredHingeLinkConfig extends HingeLinkConfig {
+  motorId: string;
+  targetAngle: number;
+  enabled: boolean;
 }
 
 export interface HookConfig {
@@ -479,6 +509,9 @@ export type PrimitiveConfig =
   | RopeConfig
   | BeltLinkConfig
   | ChainLinkConfig
+  | BoltLinkConfig
+  | HingeLinkConfig
+  | PoweredHingeLinkConfig
   | HookConfig
   | RailSegmentConfig
   | RailSwitchConfig

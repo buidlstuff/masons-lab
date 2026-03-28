@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type p5 from 'p5';
+import { getPrimitiveAnchor as getConnectorAnchor } from '../lib/connectors';
+import { movePrimitive as previewMovePrimitive } from '../lib/editor';
 import type { BuildTelemetry, ExperimentManifest, PrimitiveInstance, PrimitiveKind } from '../lib/types';
 import { findPrimitiveById, type RuntimeSnapshot } from '../lib/simulation';
 
@@ -44,15 +46,28 @@ function placementRadiusForKind(kind: PrimitiveKind): number {
 }
 
 function connectorPathPoints(
-  config: { fromId: string; toId: string; viaIds?: string[] },
+  connector: PrimitiveInstance,
   primitives: PrimitiveInstance[],
   runtime: RuntimeSnapshot,
 ) {
+  const config = connector.config as { fromId: string; toId: string; viaIds?: string[] };
   const ids = [config.fromId, ...(config.viaIds ?? []), config.toId];
   return ids
     .map((id) => {
       const primitive = findPrimitiveById(primitives, id);
-      return primitive ? getPrimitiveAnchor(primitive, primitives, runtime) : null;
+      if (!primitive) {
+        return null;
+      }
+      let role: 'general' | 'joint' | 'rope' = 'general';
+      if (connector.kind === 'rope' && (id === config.fromId || id === config.toId)) {
+        role = 'rope';
+      } else if (
+        (connector.kind === 'hinge-link' || connector.kind === 'powered-hinge-link')
+        && (id === config.fromId || id === config.toId)
+      ) {
+        role = 'joint';
+      }
+      return getPrimitiveConnectorPoint(primitive, runtime, role);
     })
     .filter((point): point is { x: number; y: number } => Boolean(point));
 }
@@ -346,11 +361,11 @@ export function MachineCanvas({
       case 'spring-linear':
         return 'Linear spring — it stores stretch and compression between the anchor and plate';
       case 'crane-arm':
-        return 'Crane arm — mount it to a chassis or let it pivot from the ground, then hang a bucket or counterweight';
+        return 'Crane arm — mount it to a chassis, hinge it to a base, or rope the tip to a winch';
       case 'counterweight':
         return 'Counterweight — a heavy block that can balance or collide with other parts';
       case 'bucket':
-        return 'Bucket — it collects nearby material and dumps when it tips far enough';
+        return 'Bucket — hang it from a rope, bolt it to an arm, or let it collect nearby material';
       case 'water':
         return 'Water — bodies inside the pool slow down and get a buoyancy lift';
       case 'station-zone':
@@ -367,9 +382,9 @@ export function MachineCanvas({
         return 'Tunnel — a covered channel that keeps flow between two openings';
       case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
       case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
-      case 'winch':    return 'Winch — place a Hook below for lifting, or mount it onto a chassis first';
+      case 'winch':    return 'Winch — rope it to a hook, bucket, crane arm, or cargo block for lifting';
       case 'node':     return 'Node — place another Node then Quick Connect → Beam';
-      case 'hook':     return 'Hook — Quick Connect to attach it to a Winch';
+      case 'hook':     return 'Hook — Quick Connect it to a winch, then clip cargo blocks to the hook';
       case 'locomotive': return 'Locomotive — set its trackId, then Quick Connect it to a rotating drive part';
       default:         return `${sel.label ?? sel.kind} — drag to move · Inspector to adjust`;
     }
@@ -581,7 +596,7 @@ function drawConnectionOverlay(
         instance.fill(245, 158, 11, 130);
         instance.textSize(11);
         instance.textAlign(instance.CENTER, instance.TOP);
-        instance.text('Place a Hook here, then Quick Connect', x, y + 230);
+        instance.text('Place a hook, bucket, arm, or cargo below, then Quick Connect', x, y + 230);
       }
     }
 
@@ -1690,8 +1705,7 @@ function drawPrimitive(
       break;
     }
     case 'rope': {
-      const config = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
-      const points = connectorPathPoints(config, primitives, runtime);
+      const points = connectorPathPoints(primitive, primitives, runtime);
       if (points.length >= 2) {
         const labelPoint = connectorLabelPoint(points);
         instance.stroke(selected ? '#fbbf24' : '#b45309');
@@ -1714,8 +1728,7 @@ function drawPrimitive(
     }
     case 'belt-link':
     case 'chain-link': {
-      const config = primitive.config as { fromId: string; toId: string; viaIds?: string[] };
-      const points = connectorPathPoints(config, primitives, runtime);
+      const points = connectorPathPoints(primitive, primitives, runtime);
       if (points.length >= 2) {
         const labelPoint = connectorLabelPoint(points);
         const ctx = instance.drawingContext as CanvasRenderingContext2D;
@@ -1737,6 +1750,72 @@ function drawPrimitive(
           instance.textSize(10);
           instance.textAlign(instance.CENTER, instance.CENTER);
           instance.text(primitive.kind === 'chain-link' ? 'CHAIN' : 'BELT', labelPoint.x, labelPoint.y - 10);
+        }
+      }
+      break;
+    }
+    case 'bolt-link': {
+      const points = connectorPathPoints(primitive, primitives, runtime);
+      if (points.length >= 2) {
+        const labelPoint = connectorLabelPoint(points);
+        const start = points[0];
+        const end = points[points.length - 1];
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.max(1, Math.hypot(dx, dy));
+        const px = -dy / length;
+        const py = dx / length;
+
+        instance.stroke(selected ? '#f59e0b' : '#334155');
+        instance.strokeWeight(selected ? 6 : 5);
+        instance.line(start.x, start.y, end.x, end.y);
+
+        instance.noStroke();
+        instance.fill(selected ? '#fbbf24' : '#0f172a');
+        instance.circle(start.x, start.y, selected ? 16 : 14);
+        instance.circle(end.x, end.y, selected ? 16 : 14);
+
+        instance.stroke('#f8fafc');
+        instance.strokeWeight(2);
+        instance.line(start.x - px * 5, start.y - py * 5, start.x + px * 5, start.y + py * 5);
+        instance.line(end.x - px * 5, end.y - py * 5, end.x + px * 5, end.y + py * 5);
+
+        if (labelPoint) {
+          instance.noStroke();
+          instance.fill(selected ? '#fbbf24' : 'rgba(255, 252, 246, 0.92)');
+          instance.rectMode(instance.CENTER);
+          instance.rect(labelPoint.x, labelPoint.y - 14, 48, 18, 9);
+          instance.fill('#0f172a');
+          instance.textSize(9);
+          instance.textAlign(instance.CENTER, instance.CENTER);
+          instance.text('BOLT', labelPoint.x, labelPoint.y - 14);
+          instance.rectMode(instance.CORNER);
+        }
+      }
+      break;
+    }
+    case 'hinge-link':
+    case 'powered-hinge-link': {
+      const points = connectorPathPoints(primitive, primitives, runtime);
+      if (points.length >= 2) {
+        const pivot = {
+          x: (points[0].x + points[points.length - 1].x) / 2,
+          y: (points[0].y + points[points.length - 1].y) / 2,
+        };
+        instance.stroke(selected ? '#fbbf24' : (primitive.kind === 'powered-hinge-link' ? '#ef7b45' : '#38bdf8'));
+        instance.strokeWeight(selected ? 4 : 3);
+        instance.line(points[0].x, points[0].y, pivot.x, pivot.y);
+        instance.line(pivot.x, pivot.y, points[points.length - 1].x, points[points.length - 1].y);
+        instance.noStroke();
+        instance.fill(selected ? '#fbbf24' : (primitive.kind === 'powered-hinge-link' ? '#fb923c' : '#7dd3fc'));
+        instance.circle(pivot.x, pivot.y, selected ? 14 : 10);
+        instance.circle(points[0].x, points[0].y, selected ? 10 : 7);
+        instance.circle(points[points.length - 1].x, points[points.length - 1].y, selected ? 10 : 7);
+        if (selected) {
+          instance.fill('#0f172a');
+          instance.textSize(10);
+          instance.textAlign(instance.CENTER, instance.CENTER);
+          instance.text(primitive.kind === 'powered-hinge-link' ? 'PWR' : 'HINGE', pivot.x, pivot.y - 14);
         }
       }
       break;
@@ -2029,6 +2108,9 @@ function hitTest(
       case 'rope':
       case 'belt-link':
       case 'chain-link':
+      case 'bolt-link':
+      case 'hinge-link':
+      case 'powered-hinge-link':
         return false;
       case 'rail-segment': {
         const points = (primitive.config as { points: Array<{ x: number; y: number }> }).points;
@@ -2111,8 +2193,18 @@ function getPrimitiveAnchor(
   primitives: PrimitiveInstance[],
   runtime: RuntimeSnapshot,
 ) {
+  if (
+    primitive.kind === 'rope'
+    || primitive.kind === 'belt-link'
+    || primitive.kind === 'chain-link'
+    || primitive.kind === 'bolt-link'
+    || primitive.kind === 'hinge-link'
+    || primitive.kind === 'powered-hinge-link'
+  ) {
+    return connectorLabelPoint(connectorPathPoints(primitive, primitives, runtime)) ?? { x: 0, y: 0 };
+  }
   if ('x' in primitive.config && 'y' in primitive.config) {
-    return getLivePos(primitive, runtime);
+    return getPrimitiveConnectorPoint(primitive, runtime);
   }
   if ('path' in primitive.config) {
     const path = (primitive.config as { path: Array<{ x: number; y: number }> }).path;
@@ -2186,30 +2278,46 @@ function applyDragToManifest(
   manifest: ExperimentManifest,
   drag: { id: string; x: number; y: number },
 ): ExperimentManifest {
+  return previewMovePrimitive(manifest, drag.id, drag.x, drag.y);
+}
+
+function rotatePoint(point: { x: number; y: number }, angle: number) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
   return {
-    ...manifest,
-    primitives: manifest.primitives.map((p) => {
-      if (p.id !== drag.id) return p;
-      if ('x' in p.config && 'y' in p.config) {
-        return { ...p, config: { ...p.config, x: drag.x, y: drag.y } };
-      }
-      if ('path' in p.config) {
-        const path = (p.config as { path: Array<{ x: number; y: number }> }).path;
-        const anchor = averagePoint(path);
-        const dx = drag.x - anchor.x;
-        const dy = drag.y - anchor.y;
-        return { ...p, config: { ...p.config, path: path.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })) } };
-      }
-      if ('points' in p.config) {
-        const points = (p.config as { points: Array<{ x: number; y: number }> }).points;
-        const anchor = averagePoint(points);
-        const dx = drag.x - anchor.x;
-        const dy = drag.y - anchor.y;
-        return { ...p, config: { ...p.config, points: points.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })) } };
-      }
-      return p;
-    }),
+    x: point.x * cos - point.y * sin,
+    y: point.x * sin + point.y * cos,
   };
+}
+
+function getPrimitiveConnectorPoint(
+  primitive: PrimitiveInstance,
+  runtime: RuntimeSnapshot,
+  role: 'general' | 'joint' | 'rope' = 'general',
+) {
+  const body = runtime.bodyPositions?.[primitive.id];
+  if (body) {
+    if (primitive.kind === 'crane-arm') {
+      const length = (primitive.config as { length?: number }).length ?? 120;
+      const local = role === 'joint'
+        ? { x: -length / 2, y: 0 }
+        : role === 'rope'
+          ? { x: length / 2, y: 0 }
+          : { x: 0, y: 0 };
+      const rotated = rotatePoint(local, body.angle ?? 0);
+      return { x: body.x + rotated.x, y: body.y + rotated.y };
+    }
+
+    if (primitive.kind === 'bucket' && (role === 'joint' || role === 'rope')) {
+      const depth = (primitive.config as { depth?: number }).depth ?? 30;
+      const rotated = rotatePoint({ x: 0, y: -depth / 2 }, body.angle ?? 0);
+      return { x: body.x + rotated.x, y: body.y + rotated.y };
+    }
+
+    return { x: body.x, y: body.y };
+  }
+
+  return getConnectorAnchor(primitive, role);
 }
 
 function averagePoint(points: Array<{ x: number; y: number }>) {

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { isMechanicalJointEndpointKind, isRopeEndpointKind } from '../lib/connectors';
 import { PART_CATEGORIES, type ExperimentManifest, type PrimitiveInstance, type PrimitiveKind } from '../lib/types';
 
 const BEGINNER_PARTS: PrimitiveKind[] = ['motor', 'gear', 'wheel', 'conveyor', 'hopper'];
@@ -12,7 +13,7 @@ interface PartPaletteProps {
   projectTitle?: string;
   projectStepTitle?: string;
   onSelectKind: (kind: PrimitiveKind | null) => void;
-  onCreateConnector?: (kind: 'rope' | 'belt-link' | 'chain-link') => void;
+  onCreateConnector?: (kind: 'rope' | 'belt-link' | 'chain-link' | 'bolt-link' | 'hinge-link' | 'powered-hinge-link') => void;
 }
 
 interface PaletteSuggestion {
@@ -59,16 +60,30 @@ export function PartPalette({
       .map(([kind]) => kind as PrimitiveKind),
     [counts],
   );
+  const mechanicalCandidates = useMemo(
+    () => manifest.primitives.filter((primitive) => isMechanicalJointEndpointKind(primitive.kind) && primitive.kind !== 'motor'),
+    [manifest.primitives],
+  );
+  const ropeEndpointCount = useMemo(
+    () => manifest.primitives.filter((primitive) => isRopeEndpointKind(primitive.kind)).length,
+    [manifest.primitives],
+  );
   const connectorReadiness = useMemo(() => ({
-    rope: counts.winch > 0 && counts.hook > 0,
+    rope: counts.winch > 0 && ropeEndpointCount > 0,
     'belt-link': counts.wheel + counts.pulley + counts.flywheel >= 2,
     'chain-link': counts['chain-sprocket'] >= 2,
-  }), [counts]);
+    'bolt-link': mechanicalCandidates.length >= 2,
+    'hinge-link': mechanicalCandidates.length >= 2,
+    'powered-hinge-link': mechanicalCandidates.length >= 2 && counts.motor > 0,
+  }), [counts, mechanicalCandidates.length, ropeEndpointCount]);
   const readyConnectorLabels = useMemo(
     () => [
       connectorReadiness.rope ? 'Rope' : null,
       connectorReadiness['belt-link'] ? 'Belt' : null,
       connectorReadiness['chain-link'] ? 'Chain' : null,
+      connectorReadiness['bolt-link'] ? 'Bolt' : null,
+      connectorReadiness['hinge-link'] ? 'Hinge' : null,
+      connectorReadiness['powered-hinge-link'] ? 'Powered Hinge' : null,
     ].filter((label): label is string => Boolean(label)),
     [connectorReadiness],
   );
@@ -158,14 +173,14 @@ export function PartPalette({
       {!guidedKinds && onCreateConnector ? (
         <div className="palette-connector-card">
           <p className="palette-context-label">Connectors</p>
-          <strong>Ropes, belts, and chains are created from matching parts already on the canvas.</strong>
+          <strong>Ropes, belts, chains, bolts, and hinges are created from matching parts already on the canvas.</strong>
           <p className="muted">
-            Use these shortcuts for the first connector, then Quick Connect can route them through pulleys and idlers.
+            Use these shortcuts for the first connector, then Quick Connect can route or refine the connection around the machine.
           </p>
           <p className="palette-connector-status muted">
             {readyConnectorLabels.length > 0
               ? `Ready now: ${readyConnectorLabels.join(', ')}.`
-              : 'Add a winch + hook, two belt wheels/pulleys/flywheels, or two chain sprockets first.'}
+              : 'Add matching machine parts first. Powered Hinge also needs a motor on the canvas.'}
           </p>
           <div className="palette-connector-row">
             <button
@@ -188,6 +203,27 @@ export function PartPalette({
               onClick={() => onCreateConnector('chain-link')}
             >
               Chain{counts['chain-link'] ? ` x${counts['chain-link']}` : ''}
+            </button>
+            <button
+              type="button"
+              disabled={!connectorReadiness['bolt-link']}
+              onClick={() => onCreateConnector('bolt-link')}
+            >
+              Bolt{counts['bolt-link'] ? ` x${counts['bolt-link']}` : ''}
+            </button>
+            <button
+              type="button"
+              disabled={!connectorReadiness['hinge-link']}
+              onClick={() => onCreateConnector('hinge-link')}
+            >
+              Hinge{counts['hinge-link'] ? ` x${counts['hinge-link']}` : ''}
+            </button>
+            <button
+              type="button"
+              disabled={!connectorReadiness['powered-hinge-link']}
+              onClick={() => onCreateConnector('powered-hinge-link')}
+            >
+              Powered Hinge{counts['powered-hinge-link'] ? ` x${counts['powered-hinge-link']}` : ''}
             </button>
           </div>
         </div>
@@ -434,6 +470,9 @@ function countKinds(manifest: ExperimentManifest) {
     rope: 0,
     'belt-link': 0,
     'chain-link': 0,
+    'bolt-link': 0,
+    'hinge-link': 0,
+    'powered-hinge-link': 0,
     hook: 0,
     'rail-segment': 0,
     'rail-switch': 0,

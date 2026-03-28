@@ -1,3 +1,4 @@
+import { getEngineeringRecipeBlueprints } from './engineering-recipes';
 import { baseManifest } from './manifest-factories';
 import type { SavedBlueprintRecord, SavedExperimentRecord, SiteJobDefinition } from './types';
 
@@ -142,7 +143,7 @@ export function getFeaturedMachines(): SavedExperimentRecord[] {
 }
 
 export function getStarterBlueprints(): SavedBlueprintRecord[] {
-  return [];
+  return getEngineeringRecipeBlueprints();
 }
 
 export function getStarterJobs(): SiteJobDefinition[] {

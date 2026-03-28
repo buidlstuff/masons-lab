@@ -89,8 +89,8 @@ function RootLayout() {
         >
           <span className="brand-icon">M</span>
           <div>
-            <p className="eyebrow">Engineering Yard</p>
-            <strong>Mason&apos;s Construction Sandbox</strong>
+            <p className="eyebrow">Workshop</p>
+            <strong>Mason&apos;s Engineering Lab</strong>
           </div>
         </Link>
         <nav className="site-nav">

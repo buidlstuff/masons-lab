@@ -18,6 +18,7 @@
  */
 
 import Matter from 'matter-js';
+import { getPrimitiveAnchor as getConnectorAnchor } from './connectors';
 import type { CargoLifecycleState, ExperimentManifest, PrimitiveInstance, PrimitiveKind } from './types';
 
 // Must match MachineCanvas createCanvas(960, 560)
@@ -117,6 +118,29 @@ export function buildMatterWorld(
     totalLength: number;
     constraint: Matter.Constraint;
   }> = [];
+  const boltLinks: Array<{
+    primitiveId: string;
+    fromId: string;
+    toId: string;
+    offsetX: number;
+    offsetY: number;
+    angleOffset: number;
+  }> = [];
+  const hingeLinks: Array<{
+    primitiveId: string;
+    fromId: string;
+    toId: string;
+    fromLocalX: number;
+    fromLocalY: number;
+    toLocalX: number;
+    toLocalY: number;
+    minAngle: number;
+    maxAngle: number;
+    motorId?: string;
+    targetAngle?: number;
+    enabled?: boolean;
+    constraint: Matter.Constraint;
+  }> = [];
   const cargoSpawnMap = new Map<string, { x: number; y: number }>();
   const cargoIdleTimers = new Map<string, number>();
   const cargoRespawnCounts = new Map<string, number>();
@@ -157,32 +181,61 @@ export function buildMatterWorld(
     walls: Matter.Body[];
   }> = [];
 
-  function primitiveCurrentPoint(primitiveId: string) {
-    const primitive = primitiveMap.get(primitiveId);
-    if (!primitive) return { x: 0, y: 0 };
-    const body = bodyMap.get(primitive.id);
-    if (body) return { x: body.position.x, y: body.position.y };
-    if ('x' in primitive.config && 'y' in primitive.config) {
-      return { x: primitive.config.x, y: primitive.config.y };
+  function localAnchorForPrimitive(primitive: PrimitiveInstance, role: 'general' | 'joint' | 'rope' = 'general') {
+    if (primitive.kind === 'crane-arm') {
+      const config = primitive.config as { length?: number };
+      const length = config.length ?? 120;
+      if (role === 'joint') {
+        return { x: -length / 2, y: 0 };
+      }
+      if (role === 'rope') {
+        return { x: length / 2, y: 0 };
+      }
+      return { x: 0, y: 0 };
     }
+
+    if (primitive.kind === 'bucket') {
+      const config = primitive.config as { depth?: number };
+      if (role === 'joint' || role === 'rope') {
+        return { x: 0, y: -(config.depth ?? 30) / 2 };
+      }
+    }
+
     return { x: 0, y: 0 };
   }
 
-  function anchorForPrimitive(primitiveId: string) {
+  function worldPointFromBody(body: Matter.Body, localPoint: { x: number; y: number }) {
+    const cos = Math.cos(body.angle);
+    const sin = Math.sin(body.angle);
+    return {
+      x: body.position.x + localPoint.x * cos - localPoint.y * sin,
+      y: body.position.y + localPoint.x * sin + localPoint.y * cos,
+    };
+  }
+
+  function primitiveCurrentPoint(primitiveId: string, role: 'general' | 'joint' | 'rope' = 'general') {
+    const primitive = primitiveMap.get(primitiveId);
+    if (!primitive) return { x: 0, y: 0 };
+    const body = bodyMap.get(primitive.id);
+    if (body) return worldPointFromBody(body, localAnchorForPrimitive(primitive, role));
+    return getConnectorAnchor(primitive, role);
+  }
+
+  function anchorForPrimitive(primitiveId: string, role: 'general' | 'joint' | 'rope' = 'general') {
     const primitive = primitiveMap.get(primitiveId);
     if (!primitive) {
       return { pointA: { x: 0, y: 0 } };
     }
     const body = bodyMap.get(primitive.id);
     if (body) {
-      return { bodyA: body, pointA: { x: 0, y: 0 } };
+      return { bodyA: body, pointA: localAnchorForPrimitive(primitive, role) };
     }
-    return { pointA: primitiveCurrentPoint(primitive.id) };
+    return { pointA: primitiveCurrentPoint(primitive.id, role) };
   }
 
   function ropePrefixLength(fromId: string, viaIds: string[]) {
     if (viaIds.length === 0) return 0;
-    const points = [fromId, ...viaIds].map(primitiveCurrentPoint);
+    const points = [fromId, ...viaIds].map((primitiveId) => primitiveCurrentPoint(primitiveId, 'rope'));
     let total = 0;
     for (let index = 0; index < points.length - 1; index += 1) {
       total += Math.hypot(
@@ -202,6 +255,27 @@ export function buildMatterWorld(
   }) {
     const prefix = ropePrefixLength(entry.fromId, entry.viaIds);
     entry.constraint.length = Math.max(24, entry.totalLength - prefix);
+  }
+
+  function normalizeAngle(angle: number) {
+    let next = angle;
+    while (next > Math.PI) next -= Math.PI * 2;
+    while (next < -Math.PI) next += Math.PI * 2;
+    return next;
+  }
+
+  function placeBodyAtPivot(
+    body: Matter.Body,
+    localPoint: { x: number; y: number },
+    pivot: { x: number; y: number },
+    angle = body.angle,
+  ) {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    Matter.Body.setPosition(body, {
+      x: pivot.x - (localPoint.x * cos - localPoint.y * sin),
+      y: pivot.y - (localPoint.x * sin + localPoint.y * cos),
+    });
   }
 
   function listAssignedCargoForWagon(wagonId: string) {
@@ -519,15 +593,17 @@ export function buildMatterWorld(
           beltLinkMap.get(toPrim.id)!.push({ id: fromPrim.id, ratio: ratioBtoA });
         }
       } else if (prim.kind === 'rope') {
-        const hookBody = bodyMap.get(cfg.toId);
-        if (!fromPrim || !hookBody) continue;
+        const endpointPrim = primitiveMap.get(cfg.toId);
+        const endpointBody = bodyMap.get(cfg.toId);
+        if (!fromPrim || !endpointPrim || !endpointBody) continue;
         const viaIds = (cfg.viaIds ?? []).filter((viaId) => primitiveMap.has(viaId));
         const anchorId = viaIds.at(-1) ?? cfg.fromId;
-        const anchor = anchorForPrimitive(anchorId);
+        const anchor = anchorForPrimitive(anchorId, 'rope');
         const constraint = Matter.Constraint.create({
           ...(anchor.bodyA ? { bodyA: anchor.bodyA } : {}),
           pointA: anchor.pointA,
-          bodyB: hookBody,
+          bodyB: endpointBody,
+          pointB: localAnchorForPrimitive(endpointPrim, 'rope'),
           length: Math.max(24, cfg.length - ropePrefixLength(cfg.fromId, viaIds)),
           stiffness: 0.05,
           damping: 0.2,
@@ -538,6 +614,66 @@ export function buildMatterWorld(
           fromId: cfg.fromId,
           viaIds,
           totalLength: cfg.length,
+          constraint,
+        });
+        Matter.World.add(engine.world, constraint);
+      }
+    }
+
+    if (prim.kind === 'bolt-link') {
+      const cfg = prim.config as { fromId: string; toId: string; offsetX: number; offsetY: number; angleOffset: number };
+      if (bodyMap.has(cfg.fromId) && bodyMap.has(cfg.toId)) {
+        boltLinks.push({
+          primitiveId: prim.id,
+          fromId: cfg.fromId,
+          toId: cfg.toId,
+          offsetX: cfg.offsetX,
+          offsetY: cfg.offsetY,
+          angleOffset: cfg.angleOffset,
+        });
+      }
+    }
+
+    if (prim.kind === 'hinge-link' || prim.kind === 'powered-hinge-link') {
+      const cfg = prim.config as {
+        fromId: string;
+        toId: string;
+        fromLocalX: number;
+        fromLocalY: number;
+        toLocalX: number;
+        toLocalY: number;
+        minAngle: number;
+        maxAngle: number;
+        motorId?: string;
+        targetAngle?: number;
+        enabled?: boolean;
+      };
+      const fromBody = bodyMap.get(cfg.fromId);
+      const toBody = bodyMap.get(cfg.toId);
+      if (fromBody && toBody) {
+        const constraint = Matter.Constraint.create({
+          bodyA: fromBody,
+          pointA: { x: cfg.fromLocalX, y: cfg.fromLocalY },
+          bodyB: toBody,
+          pointB: { x: cfg.toLocalX, y: cfg.toLocalY },
+          length: 0,
+          stiffness: 1,
+          damping: 0.3,
+          label: `hinge-${prim.id}`,
+        });
+        hingeLinks.push({
+          primitiveId: prim.id,
+          fromId: cfg.fromId,
+          toId: cfg.toId,
+          fromLocalX: cfg.fromLocalX,
+          fromLocalY: cfg.fromLocalY,
+          toLocalX: cfg.toLocalX,
+          toLocalY: cfg.toLocalY,
+          minAngle: cfg.minAngle,
+          maxAngle: cfg.maxAngle,
+          motorId: cfg.motorId,
+          targetAngle: cfg.targetAngle,
+          enabled: cfg.enabled,
           constraint,
         });
         Matter.World.add(engine.world, constraint);
@@ -892,6 +1028,27 @@ export function buildMatterWorld(
     }
   }
 
+  function readMotorState(motor: PrimitiveInstance) {
+    const cfg = motor.config as { rpm: number; powerState: boolean };
+    const powerControl = manifest.controls.find(
+      (control) => control.bind?.targetId === motor.id && control.bind?.path === 'powerState',
+    );
+    const powered = powerControl
+      ? Boolean(currentControls[powerControl.id] ?? cfg.powerState)
+      : cfg.powerState;
+    const rpmControl = manifest.controls.find(
+      (control) => control.bind?.targetId === motor.id && control.bind?.path === 'rpm',
+    );
+    const rpm = rpmControl
+      ? Number(currentControls[rpmControl.id] ?? cfg.rpm)
+      : cfg.rpm;
+    return {
+      powered,
+      rpm,
+      angVel: (rpm * Math.PI) / 30,
+    };
+  }
+
   function tickWaterZones(supportedCargoIds: Set<string>) {
     const waterZones = manifest.primitives.filter((p) => p.kind === 'water');
     if (waterZones.length === 0) return;
@@ -933,21 +1090,8 @@ export function buildMatterWorld(
     activeMotorIds = new Set<string>();
 
     for (const motor of manifest.primitives.filter((p) => p.kind === 'motor')) {
-      const cfg = motor.config as { rpm: number; powerState: boolean };
-      const powerControl = manifest.controls.find(
-        (c) => c.bind?.targetId === motor.id && c.bind?.path === 'powerState',
-      );
-      const powered = powerControl
-        ? Boolean(currentControls[powerControl.id] ?? cfg.powerState)
-        : cfg.powerState;
+      const { powered, angVel } = readMotorState(motor);
       if (!powered) continue;
-      const rpmControl = manifest.controls.find(
-        (c) => c.bind?.targetId === motor.id && c.bind?.path === 'rpm',
-      );
-      const rpm = rpmControl
-        ? Number(currentControls[rpmControl.id] ?? cfg.rpm)
-        : cfg.rpm;
-      const angVel = (rpm * Math.PI) / 30; // RPM → rad/s
       activeMotorIds.add(motor.id);
 
       // Drive gears in range
@@ -1284,6 +1428,73 @@ export function buildMatterWorld(
     }
   }
 
+  function tickBoltLinks() {
+    for (const link of boltLinks) {
+      const fromBody = bodyMap.get(link.fromId);
+      const toBody = bodyMap.get(link.toId);
+      if (!fromBody || !toBody) continue;
+      const cos = Math.cos(fromBody.angle);
+      const sin = Math.sin(fromBody.angle);
+      Matter.Body.setPosition(toBody, {
+        x: fromBody.position.x + link.offsetX * cos - link.offsetY * sin,
+        y: fromBody.position.y + link.offsetX * sin + link.offsetY * cos,
+      });
+      Matter.Body.setAngle(toBody, fromBody.angle + link.angleOffset);
+      Matter.Body.setVelocity(toBody, { x: fromBody.velocity.x, y: fromBody.velocity.y });
+      Matter.Body.setAngularVelocity(toBody, fromBody.angularVelocity);
+    }
+  }
+
+  function tickHinges(dt: number) {
+    for (const link of hingeLinks) {
+      const fromBody = bodyMap.get(link.fromId);
+      const toBody = bodyMap.get(link.toId);
+      if (!fromBody || !toBody) continue;
+
+      const pivot = worldPointFromBody(fromBody, { x: link.fromLocalX, y: link.fromLocalY });
+      let nextAngle = toBody.angle;
+
+      if (link.motorId) {
+        const motor = primitiveMap.get(link.motorId);
+        const connectorPrim = primitiveMap.get(link.primitiveId);
+        const enabledControl = manifest.controls.find(
+          (control) => control.bind?.targetId === link.primitiveId && control.bind?.path === 'enabled',
+        );
+        const targetControl = manifest.controls.find(
+          (control) => control.bind?.targetId === link.primitiveId && control.bind?.path === 'targetAngle',
+        );
+        const enabled = enabledControl
+          ? Boolean(currentControls[enabledControl.id] ?? (connectorPrim?.config as { enabled?: boolean } | undefined)?.enabled ?? true)
+          : link.enabled ?? true;
+        const targetAngle = targetControl
+          ? Number(currentControls[targetControl.id] ?? (connectorPrim?.config as { targetAngle?: number } | undefined)?.targetAngle ?? 45)
+          : link.targetAngle ?? 45;
+        if (enabled && motor?.kind === 'motor') {
+          const motorState = readMotorState(motor);
+          if (motorState.powered) {
+            const clampedTarget = Math.max(link.minAngle, Math.min(link.maxAngle, targetAngle));
+            const desiredAngle = fromBody.angle + (clampedTarget * Math.PI) / 180;
+            const deltaAngle = normalizeAngle(desiredAngle - toBody.angle);
+            const step = Math.min(Math.abs(deltaAngle), Math.max(0.08, Math.abs(motorState.angVel) * dt * 0.65));
+            nextAngle = toBody.angle + Math.sign(deltaAngle || 1) * step;
+          }
+        }
+      }
+
+      const relativeAngle = normalizeAngle(nextAngle - fromBody.angle);
+      const minAngle = (link.minAngle * Math.PI) / 180;
+      const maxAngle = (link.maxAngle * Math.PI) / 180;
+      const clampedRelative = Math.max(minAngle, Math.min(maxAngle, relativeAngle));
+      const clampedAngle = fromBody.angle + clampedRelative;
+      const previousAngle = toBody.angle;
+      if (Math.abs(clampedAngle - toBody.angle) > 0.0001) {
+        Matter.Body.setAngle(toBody, clampedAngle);
+      }
+      placeBodyAtPivot(toBody, { x: link.toLocalX, y: link.toLocalY }, pivot, clampedAngle);
+      Matter.Body.setAngularVelocity(toBody, normalizeAngle(clampedAngle - previousAngle) / Math.max(dt, 0.016));
+    }
+  }
+
   function tickBuckets() {
     for (const prim of manifest.primitives.filter((p) => p.kind === 'bucket')) {
       const bucketBody = bodyMap.get(prim.id);
@@ -1580,6 +1791,8 @@ export function buildMatterWorld(
     locoProgress = tickLocomotive(_dt, prevTrainProgress);
 
     tickWinches(_dt);
+    tickBoltLinks();
+    tickHinges(_dt);
     tickPistons(_dt);
     tickRacks();
     tickSprings();
@@ -2113,6 +2326,9 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
     case 'rope':
     case 'belt-link':
     case 'chain-link':
+    case 'bolt-link':
+    case 'hinge-link':
+    case 'powered-hinge-link':
     case 'conveyor':
     case 'hopper':
     case 'material-pile':

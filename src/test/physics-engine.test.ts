@@ -3,6 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { buildMatterWorld } from '../lib/physics-engine';
 import { createEmptyManifest } from '../lib/seed-data';
 
+function normalizeAngle(angle: number) {
+  let next = angle;
+  while (next > Math.PI) next -= Math.PI * 2;
+  while (next < -Math.PI) next += Math.PI * 2;
+  return next;
+}
+
 function stepWorld(
   world: ReturnType<typeof buildMatterWorld>,
   frames: number,
@@ -228,6 +235,193 @@ describe('physics engine conveyor flow', () => {
 
     expect(Math.abs(frame.rotations['pulley-a'] ?? 0)).toBeGreaterThan(0.01);
     expect(Math.abs(frame.rotations['flywheel-1'] ?? 0)).toBeGreaterThan(0.01);
+    world.cleanup();
+  });
+
+  it('shortens a rope to lift a bucket endpoint', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'motor-1',
+        kind: 'motor',
+        label: 'Motor',
+        config: { x: 140, y: 110, rpm: 90, torque: 1, powerState: true },
+      },
+      {
+        id: 'winch-1',
+        kind: 'winch',
+        label: 'Winch',
+        config: { x: 180, y: 120, speed: 30, ropeLength: 180 },
+      },
+      {
+        id: 'bucket-1',
+        kind: 'bucket',
+        label: 'Bucket',
+        config: { x: 180, y: 260, width: 40, depth: 30 },
+      },
+      {
+        id: 'rope-1',
+        kind: 'rope',
+        label: 'Bucket Rope',
+        config: { fromId: 'winch-1', toId: 'bucket-1', length: 180 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const initial = stepWorld(world, 0);
+    const frame = stepWorld(world, 180);
+
+    expect(frame.bodyPositions['bucket-1']?.y).toBeLessThan((initial.bodyPositions['bucket-1']?.y ?? 999) - 10);
+    world.cleanup();
+  });
+
+  it('lets a rope pull on a crane-arm tip', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'motor-1',
+        kind: 'motor',
+        label: 'Motor',
+        config: { x: 120, y: 120, rpm: 90, torque: 1, powerState: true },
+      },
+      {
+        id: 'winch-1',
+        kind: 'winch',
+        label: 'Winch',
+        config: { x: 160, y: 130, speed: 30, ropeLength: 230 },
+      },
+      {
+        id: 'arm-1',
+        kind: 'crane-arm',
+        label: 'Crane Arm',
+        config: { x: 220, y: 280, length: 140 },
+      },
+      {
+        id: 'rope-1',
+        kind: 'rope',
+        label: 'Arm Rope',
+        config: { fromId: 'winch-1', toId: 'arm-1', length: 230 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const initial = stepWorld(world, 0);
+    const frame = stepWorld(world, 180);
+    const initialArm = initial.bodyPositions['arm-1'];
+    const currentArm = frame.bodyPositions['arm-1'];
+
+    expect(currentArm).toBeTruthy();
+    expect(initialArm).toBeTruthy();
+    expect(
+      Math.hypot(
+        (currentArm?.x ?? 0) - (initialArm?.x ?? 0),
+        (currentArm?.y ?? 0) - (initialArm?.y ?? 0),
+      ),
+    ).toBeGreaterThan(10);
+    world.cleanup();
+  });
+
+  it('keeps bolted parts rigidly aligned', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'platform-1',
+        kind: 'platform',
+        label: 'Platform',
+        config: { x: 220, y: 320, width: 140 },
+      },
+      {
+        id: 'cargo-1',
+        kind: 'cargo-block',
+        label: 'Cargo',
+        config: { x: 280, y: 320, weight: 1 },
+      },
+      {
+        id: 'bolt-1',
+        kind: 'bolt-link',
+        label: 'Bolt Link',
+        config: { fromId: 'platform-1', toId: 'cargo-1', offsetX: 60, offsetY: 0, angleOffset: 0 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 90);
+
+    expect(Math.abs((frame.bodyPositions['cargo-1']?.x ?? 0) - (frame.bodyPositions['platform-1']?.x ?? 0) - 60)).toBeLessThan(1);
+    expect(Math.abs((frame.bodyPositions['cargo-1']?.y ?? 0) - (frame.bodyPositions['platform-1']?.y ?? 0))).toBeLessThan(1);
+    world.cleanup();
+  });
+
+  it('drives a powered hinge toward its target angle', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'motor-1',
+        kind: 'motor',
+        label: 'Motor',
+        config: { x: 150, y: 220, rpm: 100, torque: 1, powerState: true },
+      },
+      {
+        id: 'base-1',
+        kind: 'chassis',
+        label: 'Base',
+        config: { x: 260, y: 300, width: 180, height: 24 },
+      },
+      {
+        id: 'arm-1',
+        kind: 'crane-arm',
+        label: 'Arm',
+        config: { x: 260, y: 280, length: 150 },
+      },
+      {
+        id: 'hinge-1',
+        kind: 'powered-hinge-link',
+        label: 'Powered Hinge',
+        config: {
+          fromId: 'base-1',
+          toId: 'arm-1',
+          pivotX: 260,
+          pivotY: 280,
+          fromLocalX: 0,
+          fromLocalY: -20,
+          toLocalX: -75,
+          toLocalY: 0,
+          minAngle: -55,
+          maxAngle: 65,
+          motorId: 'motor-1',
+          targetAngle: 35,
+          enabled: true,
+        },
+      },
+    ];
+    manifest.controls = [
+      {
+        id: 'hinge-run',
+        kind: 'toggle',
+        label: 'Run',
+        bind: { targetId: 'hinge-1', path: 'enabled' },
+        defaultValue: true,
+      },
+      {
+        id: 'hinge-target',
+        kind: 'slider',
+        label: 'Angle',
+        bind: { targetId: 'hinge-1', path: 'targetAngle' },
+        defaultValue: 35,
+        min: -55,
+        max: 65,
+        step: 5,
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 180);
+    const relativeAngle = normalizeAngle(
+      (frame.bodyPositions['arm-1']?.angle ?? 0) - (frame.bodyPositions['base-1']?.angle ?? 0),
+    );
+
+    expect(Math.abs(relativeAngle)).toBeGreaterThan(0.1);
+    expect(Math.abs(relativeAngle)).toBeLessThan(1.5);
     world.cleanup();
   });
 
