@@ -1109,6 +1109,7 @@ export function buildMatterWorld(
   function recoverLostCargo(dt: number, supportedCargoIds: Set<string>) {
     const conveyors = manifest.primitives.filter((primitive) => primitive.kind === 'conveyor');
     const hoppers = manifest.primitives.filter((primitive) => primitive.kind === 'hopper');
+    const sceneKeepsLooseCargo = manifest.metadata.tags.includes('silly-scene');
 
     for (const cargo of manifest.primitives.filter((primitive) => MATERIAL_KINDS.includes(primitive.kind))) {
       const body = bodyMap.get(cargo.id);
@@ -1139,6 +1140,11 @@ export function buildMatterWorld(
         ? (cargoIdleTimers.get(cargo.id) ?? 0) + dt
         : 0;
       cargoIdleTimers.set(cargo.id, idle);
+
+      if (sceneKeepsLooseCargo) {
+        cargoStates.set(cargo.id, supportedCargoIds.has(cargo.id) ? 'supported' : body.speed > 0.25 ? 'airborne' : 'spawned');
+        continue;
+      }
 
       const outOfBounds = body.position.y > CANVAS_H + 90 || body.position.x < -80 || body.position.x > CANVAS_W + 80;
       const irrecoverable = groundedAwayFromFlow && idle > 1.25;

@@ -93,6 +93,28 @@ describe('physics engine conveyor flow', () => {
     world.cleanup();
   });
 
+  it('does not auto-respawn settled cargo in silly scenes', () => {
+    const manifest = createEmptyManifest();
+    manifest.metadata.tags = [...manifest.metadata.tags, 'silly-scene'];
+    manifest.primitives = [
+      {
+        id: 'cargo-1',
+        kind: 'cargo-block',
+        label: 'Cargo',
+        config: { x: 480, y: 535, weight: 1 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest, {
+      stableCargoSpawns: { 'cargo-1': { x: 480, y: 535 } },
+    });
+    const frame = stepWorld(world, 180);
+
+    expect(frame.lostCargoCount).toBe(0);
+    expect(frame.bodyPositions['cargo-1']?.y).toBeGreaterThan(520);
+    world.cleanup();
+  });
+
   it('respawns cargo that falls irrecoverably out of bounds', () => {
     const manifest = createEmptyManifest();
     manifest.primitives = [

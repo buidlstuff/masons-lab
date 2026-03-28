@@ -148,6 +148,44 @@ function findNearestPrimitive(
     })[0];
 }
 
+function hasConnectorBetween(
+  manifest: ExperimentManifest,
+  leftId: string,
+  rightId: string,
+  connectorKinds: PrimitiveKind[],
+) {
+  return manifest.primitives.some((primitive) => {
+    if (!connectorKinds.includes(primitive.kind)) return false;
+    const config = primitive.config as { fromId?: string; toId?: string };
+    return (
+      (config.fromId === leftId && config.toId === rightId)
+      || (config.fromId === rightId && config.toId === leftId)
+    );
+  });
+}
+
+function findNearestPrimitivePair(
+  manifest: ExperimentManifest,
+  leftCandidates: PrimitiveInstance[],
+  rightCandidates: PrimitiveInstance[],
+  blocked?: (left: PrimitiveInstance, right: PrimitiveInstance) => boolean,
+) {
+  let best: { left: PrimitiveInstance; right: PrimitiveInstance; dist: number } | null = null;
+  for (const left of leftCandidates) {
+    const leftAnchor = getPrimitiveAnchor(left, manifest);
+    for (const right of rightCandidates) {
+      if (left.id === right.id) continue;
+      if (blocked?.(left, right)) continue;
+      const rightAnchor = getPrimitiveAnchor(right, manifest);
+      const dist = Math.hypot(rightAnchor.x - leftAnchor.x, rightAnchor.y - leftAnchor.y);
+      if (!best || dist < best.dist) {
+        best = { left, right, dist };
+      }
+    }
+  }
+  return best;
+}
+
 function createInitialRuntimeSnapshot(): RuntimeSnapshot {
   return {
     time: 0,
@@ -804,6 +842,62 @@ export function BuildPage() {
     showStatus('Connected the winch to the hook.', 'success');
   }, [manifest, persistDraft, selectedPrimitiveId, showStatus]);
 
+  const handleCreateConnectorShortcut = useCallback((kind: 'rope' | 'belt-link' | 'chain-link') => {
+    if (!manifest) {
+      return;
+    }
+
+    if (kind === 'rope') {
+      const winches = manifest.primitives.filter((primitive) => primitive.kind === 'winch');
+      const hooks = manifest.primitives.filter((primitive) => primitive.kind === 'hook');
+      const pair = findNearestPrimitivePair(
+        manifest,
+        winches,
+        hooks,
+        (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['rope']),
+      );
+      if (!pair) {
+        showStatus('Place both a winch and a hook first, then Rope can link them.', 'warning');
+        return;
+      }
+      void persistDraft(connectPrimitives(manifest, pair.left.id, pair.right.id), undefined, { recordHistory: true });
+      showStatus('Created a rope between the nearest winch and hook.', 'success');
+      return;
+    }
+
+    if (kind === 'belt-link') {
+      const beltKinds: PrimitiveKind[] = ['wheel', 'pulley', 'flywheel'];
+      const candidates = manifest.primitives.filter((primitive) => beltKinds.includes(primitive.kind));
+      const pair = findNearestPrimitivePair(
+        manifest,
+        candidates,
+        candidates,
+        (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['belt-link', 'chain-link', 'rope']),
+      );
+      if (!pair) {
+        showStatus('Place two wheels, pulleys, or flywheels first, then Belt can link them.', 'warning');
+        return;
+      }
+      void persistDraft(connectPrimitives(manifest, pair.left.id, pair.right.id), undefined, { recordHistory: true });
+      showStatus('Created a drive belt between the nearest matching parts.', 'success');
+      return;
+    }
+
+    const sprockets = manifest.primitives.filter((primitive) => primitive.kind === 'chain-sprocket');
+    const pair = findNearestPrimitivePair(
+      manifest,
+      sprockets,
+      sprockets,
+      (left, right) => hasConnectorBetween(manifest, left.id, right.id, ['belt-link', 'chain-link', 'rope']),
+    );
+    if (!pair) {
+      showStatus('Place two chain sprockets first, then Chain can link them.', 'warning');
+      return;
+    }
+    void persistDraft(connectPrimitives(manifest, pair.left.id, pair.right.id), undefined, { recordHistory: true });
+    showStatus('Created a chain link between the nearest sprockets.', 'success');
+  }, [manifest, persistDraft, showStatus]);
+
   const handleConnectNodes = useCallback(() => {
     if (!manifest) {
       return;
@@ -1213,14 +1307,17 @@ export function BuildPage() {
       : manifest.primitives.length === 0
         ? 'Start mode'
         : 'Select mode';
+  const isSillyScene = manifest.metadata.tags.includes('silly-scene');
   const goalProgress = job ? getGoalProgress(job, manifest, runtimeSnapshot, playState) : null;
   const goalPct = goalProgress ? Math.min(100, goalProgress.target > 0 ? (goalProgress.current / goalProgress.target) * 100 : 0) : 0;
   const primaryStepKind = activeProjectStep?.allowedPartKinds[0] ?? null;
-  const recoveryHint = runtimeSnapshot.lostCargoCount > 0
-    ? `${runtimeSnapshot.lostCargoCount} cargo recovery${runtimeSnapshot.lostCargoCount === 1 ? '' : 'ies'} happened automatically.`
-    : runtimeSnapshot.beltPowered
-      ? 'The loader is powered. Keep testing the flow.'
-      : 'Undo, reset, and respawn are ready if the build gets messy.';
+  const recoveryHint = isSillyScene
+    ? 'Scene parts stay where physics leaves them. Use Reset Scene any time you want the original setup back.'
+    : runtimeSnapshot.lostCargoCount > 0
+      ? `${runtimeSnapshot.lostCargoCount} cargo recovery${runtimeSnapshot.lostCargoCount === 1 ? '' : 'ies'} happened automatically.`
+      : runtimeSnapshot.beltPowered
+        ? 'The loader is powered. Keep testing the flow.'
+        : 'Undo, reset, and respawn are ready if the build gets messy.';
 
   const buildReadiness: 'loading-engine' | 'ready' = simulationStatus !== 'ready' || !canvasReady
     ? 'loading-engine'
@@ -1285,8 +1382,8 @@ export function BuildPage() {
 
       <section className="panel recovery-strip">
         <div className="recovery-strip-copy">
-          <p className="eyebrow">Recovery</p>
-          <strong>{contextualConnectPrompt}</strong>
+          <p className="eyebrow">{isSillyScene ? 'Scene Tools' : 'Recovery'}</p>
+          <strong>{isSillyScene ? 'Reset the setup or add a public connector shortcut to remix the scene.' : contextualConnectPrompt}</strong>
           <p className="muted">{recoveryHint}</p>
         </div>
         <div className="hero-actions recovery-strip-actions">
@@ -1316,6 +1413,11 @@ export function BuildPage() {
           {job ? (
             <button type="button" onClick={handleResetStep}>
               Reset Step
+            </button>
+          ) : null}
+          {!job && isSillyScene ? (
+            <button type="button" onClick={handleResetDraft}>
+              Reset Scene
             </button>
           ) : null}
           <button type="button" onClick={() => openAssistantWithPrompt(builderFocus.assistantPrompt)}>
@@ -1543,6 +1645,7 @@ export function BuildPage() {
             projectTitle={job?.title}
             projectStepTitle={activeProjectStep?.title}
             onSelectKind={handleSelectKind}
+            onCreateConnector={(kind) => handleCreateConnectorShortcut(kind)}
           />
           {manifest.controls.length > 0 ? (
             <ControlPanel

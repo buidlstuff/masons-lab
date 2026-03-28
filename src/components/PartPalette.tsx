@@ -12,6 +12,7 @@ interface PartPaletteProps {
   projectTitle?: string;
   projectStepTitle?: string;
   onSelectKind: (kind: PrimitiveKind | null) => void;
+  onCreateConnector?: (kind: 'rope' | 'belt-link' | 'chain-link') => void;
 }
 
 interface PaletteSuggestion {
@@ -28,6 +29,7 @@ export function PartPalette({
   projectTitle,
   projectStepTitle,
   onSelectKind,
+  onCreateConnector,
 }: PartPaletteProps) {
   const [beginner, setBeginner] = useState(() => {
     try {
@@ -137,6 +139,27 @@ export function PartPalette({
               {labelForPart(kind)} x{counts[kind]}
             </span>
           ))}
+        </div>
+      ) : null}
+
+      {!guidedKinds && onCreateConnector ? (
+        <div className="palette-connector-card">
+          <p className="palette-context-label">Connectors</p>
+          <strong>Ropes, belts, and chains are created from matching parts already on the canvas.</strong>
+          <p className="muted">
+            Use these shortcuts for the first connector, then Quick Connect can route them through pulleys and idlers.
+          </p>
+          <div className="palette-connector-row">
+            <button type="button" onClick={() => onCreateConnector('rope')}>
+              Rope{counts.rope ? ` x${counts.rope}` : ''}
+            </button>
+            <button type="button" onClick={() => onCreateConnector('belt-link')}>
+              Belt{counts['belt-link'] ? ` x${counts['belt-link']}` : ''}
+            </button>
+            <button type="button" onClick={() => onCreateConnector('chain-link')}>
+              Chain{counts['chain-link'] ? ` x${counts['chain-link']}` : ''}
+            </button>
+          </div>
         </div>
       ) : null}
 
