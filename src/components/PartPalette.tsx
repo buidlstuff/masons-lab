@@ -89,6 +89,7 @@ export function PartPalette({
   );
 
   const isLimitedStep = Boolean(guidedKinds);
+  const showSelectionStrip = Boolean(guidedKinds || activeJobHint);
 
   const renderPartTile = (kind: PrimitiveKind) => (
     <button
@@ -124,19 +125,21 @@ export function PartPalette({
         ) : null}
       </div>
 
-      <div className="palette-selection-strip">
-        <p className="palette-selection-label">{selectedPrimitive ? 'Selected part' : 'Build hint'}</p>
-        <strong>
-          {selectedPrimitive
-            ? `${labelForPart(selectedPrimitive.kind)} selected`
-            : manifest.primitives.length === 0
-              ? 'Start with one visible cause-and-effect part'
-              : 'Parts stay on the right. Connections start from the red Connect Parts button.'}
-        </strong>
-        <p className="muted">{paletteHint}</p>
-      </div>
+      {showSelectionStrip ? (
+        <div className="palette-selection-strip">
+          <p className="palette-selection-label">{selectedPrimitive ? 'Selected part' : 'Build hint'}</p>
+          <strong>
+            {selectedPrimitive
+              ? `${labelForPart(selectedPrimitive.kind)} selected`
+              : manifest.primitives.length === 0
+                ? 'Start with one visible cause-and-effect part'
+                : 'Parts stay on the right. Connections start from the red Connect Parts button.'}
+          </strong>
+          <p className="muted">{paletteHint}</p>
+        </div>
+      ) : null}
 
-      <div className="palette-category-chip-row">
+      <div className="palette-category-chip-row palette-category-jump-row">
         {categoryAnchors.map((category) => (
           <button
             key={category.anchorId}

@@ -3036,6 +3036,8 @@ button:disabled {
   height: 100%;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding-right: 0.18rem;
 }
 
@@ -3065,15 +3067,21 @@ button:disabled {
 
 .parts-dock-panel .palette-selection-strip {
   margin-bottom: 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: 16px;
 }
 
 .parts-dock-panel .palette-category-chip-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.45rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+  scrollbar-width: thin;
 }
 
 .parts-dock-panel .palette-category-chip {
+  flex: 0 0 auto;
   padding: 0.45rem 0.7rem;
   font-size: 0.73rem;
   font-weight: 700;
@@ -3100,8 +3108,19 @@ button:disabled {
   transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, opacity 140ms ease;
 }
 
+.parts-dock-panel .palette-grid-quick {
+  display: flex;
+  gap: 0.45rem;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+  grid-template-columns: none;
+  scrollbar-width: thin;
+}
+
 .parts-dock-panel .palette-item-quick {
-  min-height: 4.6rem;
+  flex: 0 0 4.7rem;
+  min-height: 4.7rem;
+  padding: 0.45rem 0.25rem;
 }
 
 .parts-dock-panel .palette-item:disabled {
@@ -3120,6 +3139,28 @@ button:disabled {
 .parts-dock-panel .palette-presence {
   margin: 0;
   padding-top: 0.2rem;
+}
+
+.page-build .builder-parts-rail::-webkit-scrollbar,
+.parts-dock-panel .palette-grid-quick::-webkit-scrollbar,
+.parts-dock-panel .palette-category-chip-row::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.page-build .builder-parts-rail::-webkit-scrollbar-thumb,
+.parts-dock-panel .palette-grid-quick::-webkit-scrollbar-thumb,
+.parts-dock-panel .palette-category-chip-row::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(61, 120, 132, 0.26);
+  border: 2px solid rgba(255, 255, 255, 0.7);
+}
+
+.page-build .builder-parts-rail::-webkit-scrollbar-track,
+.parts-dock-panel .palette-grid-quick::-webkit-scrollbar-track,
+.parts-dock-panel .palette-category-chip-row::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
 }
 
 .machine-canvas-shell {
