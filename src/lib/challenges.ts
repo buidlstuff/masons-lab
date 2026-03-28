@@ -48,7 +48,10 @@ function getBodyPoint(
   const body = runtime.bodyPositions?.[primitive.id];
   if (body) return body;
   if ('x' in primitive.config && 'y' in primitive.config) {
-    return { x: primitive.config.x, y: primitive.config.y };
+    return {
+      x: Number(primitive.config.x),
+      y: Number(primitive.config.y),
+    };
   }
   return null;
 }
@@ -109,7 +112,10 @@ function collectFootprintPoints(manifest: ExperimentManifest) {
   const points: Array<{ x: number; y: number }> = [];
   for (const primitive of manifest.primitives) {
     if ('x' in primitive.config && 'y' in primitive.config) {
-      points.push({ x: primitive.config.x, y: primitive.config.y });
+      points.push({
+        x: Number(primitive.config.x),
+        y: Number(primitive.config.y),
+      });
     }
     if (primitive.kind === 'conveyor') {
       points.push(...((primitive.config as { path: Array<{ x: number; y: number }> }).path ?? []));

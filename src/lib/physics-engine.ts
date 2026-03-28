@@ -20,9 +20,10 @@
 import Matter from 'matter-js';
 import { getJointIsland, getPrimitiveAnchor as getConnectorAnchor } from './connectors';
 import {
-  getTrackPointFromPoints,
+  getTrackPoseFromPoints,
   resolveRailRoute,
   trackLengthFromPoints,
+  type RailRoute,
   type RailSwitchBranch,
 } from './rail-routing';
 import type { CargoLifecycleState, ExperimentManifest, PrimitiveInstance, PrimitiveKind } from './types';
@@ -30,6 +31,7 @@ import type { CargoLifecycleState, ExperimentManifest, PrimitiveInstance, Primit
 // Must match MachineCanvas createCanvas(960, 560)
 const CANVAS_W = 960;
 const CANVAS_H = 560;
+const DEFAULT_WAGON_RAIL_SPEED = 0.18;
 
 function teethToRadius(teeth: number): number {
   return Math.max(24, teeth * 1.4);
@@ -158,6 +160,8 @@ export function buildMatterWorld(
   const wagonCargoCooldowns = new Map<string, number>();
   const wagonUnloadTimers = new Map<string, number>();
   const trampolineCooldowns = new Map<string, number>();
+  const railVehicleProgressState = new Map<string, number>();
+  const wagonFollowOffsetState = new Map<string, number>();
   let lostCargoCount = 0;
   let throughput = 0;
   const motorPistonMap = new Map<string, string[]>();
@@ -226,7 +230,7 @@ export function buildMatterWorld(
     if (!primitive) return { x: 0, y: 0 };
     const body = bodyMap.get(primitive.id);
     if (body) return worldPointFromBody(body, localAnchorForPrimitive(primitive, role));
-    return getConnectorAnchor(primitive, role);
+    return getConnectorAnchor(primitive, role, manifest.primitives);
   }
 
   function anchorForPrimitive(primitiveId: string, role: 'general' | 'joint' | 'rope' = 'general') {
@@ -381,6 +385,28 @@ export function buildMatterWorld(
     return null;
   }
 
+  function bodyInsideWaterZone(body: Matter.Body) {
+    for (const zone of manifest.primitives) {
+      if (zone.kind !== 'water') continue;
+      const cfg = zone.config as { x: number; y: number; width?: number; height?: number };
+      const width = cfg.width ?? 100;
+      const height = cfg.height ?? 80;
+      const left = cfg.x - width / 2;
+      const right = cfg.x + width / 2;
+      const top = cfg.y - height / 2;
+      const bottom = cfg.y + height / 2;
+      if (
+        body.position.x >= left
+        && body.position.x <= right
+        && body.position.y >= top
+        && body.position.y <= bottom
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Ground + boundary walls
   Matter.World.add(engine.world, [
     Matter.Bodies.rectangle(CANVAS_W / 2, CANVAS_H + 25, CANVAS_W + 100, 50, {
@@ -406,6 +432,45 @@ export function buildMatterWorld(
       options.stableCargoSpawns?.[cargo.id] ?? { x: cfg.x, y: cfg.y },
     );
     cargoStates.set(cargo.id, 'spawned');
+  }
+
+  for (const primitive of manifest.primitives) {
+    if (primitive.kind !== 'locomotive' && primitive.kind !== 'wagon') continue;
+    const cfg = primitive.config as { trackId?: string; progress?: number; offset?: number };
+    if (typeof cfg.trackId !== 'string') continue;
+    let progress = cfg.progress ?? 0;
+    if (
+      primitive.kind === 'wagon'
+      && typeof cfg.progress !== 'number'
+      && typeof cfg.offset === 'number'
+    ) {
+      const leadLocomotive = manifest.primitives.find((candidate) =>
+        candidate.kind === 'locomotive'
+        && (candidate.config as { trackId?: string }).trackId === cfg.trackId);
+      const leadProgress = Number((leadLocomotive?.config as { progress?: number } | undefined)?.progress ?? 0);
+      progress = leadProgress + cfg.offset;
+    }
+    railVehicleProgressState.set(primitive.id, wrapUnitProgress(progress));
+  }
+
+  for (const wagon of manifest.primitives.filter((primitive) => primitive.kind === 'wagon')) {
+    const wagonCfg = wagon.config as { trackId?: string; offset?: number; progress?: number };
+    if (typeof wagonCfg.trackId !== 'string') continue;
+    const leadLocomotive = manifest.primitives.find((primitive) =>
+      primitive.kind === 'locomotive'
+      && (primitive.config as { trackId?: string }).trackId === wagonCfg.trackId);
+    if (!leadLocomotive) continue;
+    const leadProgress = wrapUnitProgress(
+      Number((leadLocomotive.config as { progress?: number }).progress ?? 0),
+    );
+    wagonFollowOffsetState.set(
+      wagon.id,
+      normalizeRailOffset(
+        typeof wagonCfg.offset === 'number'
+          ? wagonCfg.offset
+          : Number(wagonCfg.progress ?? 0) - leadProgress,
+      ),
+    );
   }
 
   function spawnSandParticlesForPile(prim: PrimitiveInstance) {
@@ -437,7 +502,7 @@ export function buildMatterWorld(
       spawnSandParticlesForPile(prim);
       continue;
     }
-    const body = createBodyForPrimitive(prim);
+    const body = createBodyForPrimitive(prim, manifest.primitives);
     if (body) {
       bodyMap.set(prim.id, body);
       Matter.World.add(engine.world, body);
@@ -1012,11 +1077,15 @@ export function buildMatterWorld(
     }
   }
 
-  // ── Loco free-build state ─────────────────────────────────────────────────
-  // In free-build mode (no recipeId), we do scripted rail-follow here.
-  const locoPrim = manifest.primitives.find((p) => p.kind === 'locomotive');
+  // ── Rail vehicle state ────────────────────────────────────────────────────
+  // Rail-bound locomotives and wagons keep real physics bodies so they can
+  // carry cargo and participate in bolt/hinge assemblies honestly.
+  const locoPrim = manifest.primitives.find((primitive) =>
+    primitive.kind === 'locomotive'
+    && typeof (primitive.config as { trackId?: string }).trackId === 'string',
+  );
   let locoProgress = locoPrim
-    ? ((locoPrim.config as { progress: number }).progress ?? 0)
+    ? (railVehicleProgressState.get(locoPrim.id) ?? 0)
     : 0;
 
   let currentControls: Record<string, string | number | boolean> = {};
@@ -1054,6 +1123,63 @@ export function buildMatterWorld(
       speed: speedControl
         ? Number(currentControls[speedControl.id] ?? cfg.speed)
         : cfg.speed,
+    };
+  }
+
+  function getRailRoute(
+    routeCache: Map<string, RailRoute>,
+    trackId: string,
+  ) {
+    if (!routeCache.has(trackId)) {
+      routeCache.set(trackId, resolveRailRoute(manifest.primitives, trackId, readRailSwitchBranch));
+    }
+    return routeCache.get(trackId)!;
+  }
+
+  function syncRailVehicleBody(
+    primitive: PrimitiveInstance,
+    routeCache: Map<string, RailRoute>,
+  ) {
+    const cfg = primitive.config as { trackId?: string };
+    if (typeof cfg.trackId !== 'string') return;
+    const route = getRailRoute(routeCache, cfg.trackId);
+    if (route.points.length < 2) return;
+    const body = bodyMap.get(primitive.id);
+    if (!body) return;
+    const progress = railVehicleProgressState.get(primitive.id) ?? 0;
+    const pose = getTrackPoseFromPoints(route.points, progress);
+    Matter.Body.setPosition(body, { x: pose.x, y: pose.y });
+    if (Math.abs(normalizeAngle(body.angle - pose.angle)) > 0.0001) {
+      Matter.Body.setAngle(body, pose.angle);
+    }
+    Matter.Body.setVelocity(body, { x: 0, y: 0 });
+    Matter.Body.setAngularVelocity(body, 0);
+  }
+
+  function readRailVehiclePose(
+    primitive: PrimitiveInstance,
+    routeCache: Map<string, RailRoute>,
+  ) {
+    const body = bodyMap.get(primitive.id);
+    if (body) {
+      return { x: body.position.x, y: body.position.y, angle: body.angle };
+    }
+
+    const cfg = primitive.config as { x?: number; y?: number; trackId?: string; progress?: number };
+    if (typeof cfg.trackId === 'string') {
+      const route = getRailRoute(routeCache, cfg.trackId);
+      if (route.points.length >= 2) {
+        return getTrackPoseFromPoints(
+          route.points,
+          railVehicleProgressState.get(primitive.id) ?? wrapUnitProgress(cfg.progress ?? 0),
+        );
+      }
+    }
+
+    return {
+      x: Number(cfg.x ?? 0),
+      y: Number(cfg.y ?? 0),
+      angle: 0,
     };
   }
 
@@ -1134,14 +1260,28 @@ export function buildMatterWorld(
         const bottom = cfg.y + height / 2;
         if (body.position.x < left || body.position.x > right) continue;
         if (body.position.y < top || body.position.y > bottom) continue;
+        const submersion = clampNumber(
+          (body.position.y - top) / Math.max(1, height),
+          0.08,
+          1,
+        );
+        const dampedVerticalVelocity = clampNumber(
+          body.velocity.y < 0
+            ? body.velocity.y * 0.68
+            : body.velocity.y * 0.74,
+          -1.2,
+          2.4,
+        );
         Matter.Body.setVelocity(body, {
-          x: body.velocity.x * 0.94,
-          y: body.velocity.y * 0.94,
+          x: body.velocity.x * 0.92,
+          y: body.position.y < top + 18 && dampedVerticalVelocity < -0.6
+            ? -0.6
+            : dampedVerticalVelocity,
         });
-        const density = cfg.density ?? 0.8;
+        const density = clampNumber(cfg.density ?? 0.8, 0.2, 1.4);
         Matter.Body.applyForce(body, body.position, {
-          x: 0,
-          y: -(body.mass * engine.gravity.y * density),
+          x: -body.velocity.x * body.mass * 0.00016,
+          y: -(body.mass * engine.gravity.y * Math.min(0.82, (0.2 + density * 0.35) * submersion)),
         });
       }
     }
@@ -1389,14 +1529,19 @@ export function buildMatterWorld(
         return Math.abs(cfg.x - body.position.x) <= (cfg.width ?? 120) / 2 + 24
           && Math.abs(cfg.y - body.position.y) <= (cfg.height ?? 80) / 2 + 24;
       });
+      const inWater = bodyInsideWaterZone(body);
 
-      if (supportedCargoIds.has(cargo.id)) {
+      if (supportedCargoIds.has(cargo.id) || inWater) {
         cargoIdleTimers.set(cargo.id, 0);
-        cargoStates.set(cargo.id, 'supported');
+        cargoStates.set(cargo.id, inWater && body.speed > 0.25 ? 'airborne' : 'supported');
         continue;
       }
 
-      const groundedAwayFromFlow = body.position.y > CANVAS_H - 24 && !nearConveyor && !nearHopper && !nearStation;
+      const groundedAwayFromFlow = body.position.y > CANVAS_H - 24
+        && !nearConveyor
+        && !nearHopper
+        && !nearStation
+        && !inWater;
       const idle = groundedAwayFromFlow && body.speed < 0.18
         ? (cargoIdleTimers.get(cargo.id) ?? 0) + dt
         : 0;
@@ -1658,11 +1803,119 @@ export function buildMatterWorld(
     }
   }
 
-  function tickWagons(dt: number, routePoints: Array<{ x: number; y: number }>) {
+  function tickRailVehicles(
+    dt: number,
+    prevPrimaryProgress: number,
+  ): {
+    primaryLocomotive: PrimitiveInstance | null;
+    primaryProgress: number;
+    primaryRoute: RailRoute | null;
+    routeCache: Map<string, RailRoute>;
+  } {
+    const routeCache = new Map<string, RailRoute>();
+    const railLocomotives = manifest.primitives.filter((primitive) =>
+      primitive.kind === 'locomotive'
+      && typeof (primitive.config as { trackId?: string }).trackId === 'string');
+    const leadLocomotiveByTrack = new Map<string, PrimitiveInstance>();
+
+    for (const locomotive of railLocomotives) {
+      const cfg = locomotive.config as { trackId: string; progress?: number; drivePartId?: string };
+      const route = getRailRoute(routeCache, cfg.trackId);
+      const locoState = readLocoState(locomotive);
+      const currentProgress = railVehicleProgressState.get(locomotive.id)
+        ?? (locomotive.id === locoPrim?.id ? prevPrimaryProgress : wrapUnitProgress(cfg.progress ?? 0));
+      let nextProgress = currentProgress;
+
+      if (locoState.enabled && route.points.length >= 2) {
+        if (cfg.drivePartId) {
+          const drivePrim = primitiveMap.get(cfg.drivePartId);
+          const driveBody = drivePrim ? bodyMap.get(drivePrim.id) : null;
+          if (drivePrim && driveBody && isRotatingPrimitiveKind(drivePrim.kind)) {
+            const linearSpeed = Math.abs(driveBody.angularVelocity * rotatingRadius(drivePrim));
+            const delta = dt * (linearSpeed / Math.max(1, trackLengthFromPoints(route.points)));
+            nextProgress = wrapUnitProgress(currentProgress + delta);
+          }
+        }
+
+        if (nextProgress === currentProgress) {
+          let motorRpm = 0;
+          for (const [motorId, locoIds] of motorLocoMap) {
+            if (!locoIds.includes(locomotive.id) || !activeMotorIds.has(motorId)) continue;
+            const motorPrim = primitiveMap.get(motorId);
+            if (!motorPrim || motorPrim.kind !== 'motor') continue;
+            motorRpm = Math.max(
+              motorRpm,
+              Number((motorPrim.config as { rpm?: number }).rpm ?? 0),
+            );
+          }
+          const effectiveSpeed = motorRpm > 0
+            ? Math.max(Math.abs(locoState.speed), motorRpm * 0.005)
+            : Math.abs(locoState.speed);
+          nextProgress = wrapUnitProgress(currentProgress + dt * effectiveSpeed * 0.35);
+        }
+      }
+
+      railVehicleProgressState.set(locomotive.id, nextProgress);
+      syncRailVehicleBody(locomotive, routeCache);
+      if (!leadLocomotiveByTrack.has(cfg.trackId)) {
+        leadLocomotiveByTrack.set(cfg.trackId, locomotive);
+      }
+    }
+
+    for (const wagon of manifest.primitives.filter((primitive) =>
+      primitive.kind === 'wagon'
+      && typeof (primitive.config as { trackId?: string }).trackId === 'string')) {
+      const cfg = wagon.config as { trackId: string; progress?: number; offset?: number };
+      const leadLocomotive = leadLocomotiveByTrack.get(cfg.trackId);
+      const currentProgress = railVehicleProgressState.get(wagon.id)
+        ?? wrapUnitProgress(cfg.progress ?? 0);
+      let nextProgress = currentProgress;
+
+      if (leadLocomotive) {
+        let followOffset = wagonFollowOffsetState.get(wagon.id);
+        if (typeof followOffset !== 'number') {
+          const leadProgress = railVehicleProgressState.get(leadLocomotive.id) ?? 0;
+          followOffset = normalizeRailOffset(currentProgress - leadProgress);
+          wagonFollowOffsetState.set(wagon.id, followOffset);
+        }
+        nextProgress = wrapUnitProgress(
+          (railVehicleProgressState.get(leadLocomotive.id) ?? 0) + followOffset,
+        );
+      } else {
+        nextProgress = wrapUnitProgress(currentProgress + dt * DEFAULT_WAGON_RAIL_SPEED * 0.35);
+      }
+
+      railVehicleProgressState.set(wagon.id, nextProgress);
+      syncRailVehicleBody(wagon, routeCache);
+    }
+
+    const primaryLocomotive = railLocomotives[0] ?? null;
+    const primaryRoute = primaryLocomotive
+      ? getRailRoute(
+          routeCache,
+          (primaryLocomotive.config as { trackId: string }).trackId,
+        )
+      : null;
+    const primaryProgress = primaryLocomotive
+      ? (railVehicleProgressState.get(primaryLocomotive.id) ?? prevPrimaryProgress)
+      : prevPrimaryProgress;
+
+    return {
+      primaryLocomotive,
+      primaryProgress,
+      primaryRoute,
+      routeCache,
+    };
+  }
+
+  function tickWagons(
+    dt: number,
+    routeCache: Map<string, RailRoute>,
+  ) {
     const wagonLoads: Record<string, number> = {};
     const wagonCargo: Record<string, string[]> = {};
     const wagons = manifest.primitives.filter((p) => p.kind === 'wagon');
-    if (wagons.length === 0 || routePoints.length < 2) return { wagonLoads, wagonCargo };
+    if (wagons.length === 0) return { wagonLoads, wagonCargo };
 
     for (const [cargoId, cooldown] of [...wagonCargoCooldowns.entries()]) {
       const nextCooldown = cooldown - dt;
@@ -1681,9 +1934,10 @@ export function buildMatterWorld(
     }
 
     for (const wagon of wagons) {
-      const cfg = wagon.config as { offset: number; capacity?: number };
-      const wagonProgress = wrapUnitProgress(locoProgress + cfg.offset);
-      const wagonPos = getTrackPointFromPoints(routePoints, wagonProgress);
+      const cfg = wagon.config as { capacity?: number };
+      const wagonPose = readRailVehiclePose(wagon, routeCache);
+      const wagonBody = bodyMap.get(wagon.id);
+      const wagonPos = { x: wagonPose.x, y: wagonPose.y };
       const capacity = cfg.capacity ?? 6;
       const loadStation = pointInsideStation(wagonPos, 'load');
       const unloadStation = pointInsideStation(wagonPos, 'unload');
@@ -1758,10 +2012,14 @@ export function buildMatterWorld(
         if (!body) continue;
         const column = (entry.slot % 3) - 1;
         const row = Math.floor(entry.slot / 3);
-        Matter.Body.setPosition(body, {
-          x: wagonPos.x + column * 16,
-          y: wagonPos.y - 8 - row * 18,
-        });
+        const localSlot = { x: column * 16, y: -8 - row * 18 };
+        const slotPoint = wagonBody
+          ? worldPointFromBody(wagonBody, localSlot)
+          : {
+              x: wagonPos.x + localSlot.x,
+              y: wagonPos.y + localSlot.y,
+            };
+        Matter.Body.setPosition(body, slotPoint);
         Matter.Body.setVelocity(body, { x: 0, y: 0 });
         Matter.Body.setAngle(body, 0);
         Matter.Body.setAngularVelocity(body, 0);
@@ -1770,46 +2028,6 @@ export function buildMatterWorld(
     }
 
     return { wagonLoads, wagonCargo };
-  }
-
-  // ── tickLocomotive ────────────────────────────────────────────────────────
-  // Advance loco + wagon positions along their track in free-build mode.
-  // Returns updated locoProgress (0..1).
-  function tickLocomotive(
-    dt: number,
-    prevProgress: number,
-    routePoints: Array<{ x: number; y: number }>,
-  ): number {
-    if (!locoPrim) return prevProgress;
-    const cfg = locoPrim.config as { drivePartId?: string };
-    const locoState = readLocoState(locoPrim);
-    if (!locoState.enabled) {
-      return prevProgress;
-    }
-    if (cfg.drivePartId && routePoints.length >= 2) {
-      const drivePrim = primitiveMap.get(cfg.drivePartId);
-      const driveBody = drivePrim ? bodyMap.get(drivePrim.id) : null;
-      if (drivePrim && driveBody && isRotatingPrimitiveKind(drivePrim.kind)) {
-        const linearSpeed = Math.abs(driveBody.angularVelocity * rotatingRadius(drivePrim));
-        const delta = dt * (linearSpeed / Math.max(1, trackLengthFromPoints(routePoints)));
-        return wrapUnitProgress(prevProgress + delta);
-      }
-    }
-
-    let motorRpm = 0;
-    for (const [motorId, locoIds] of motorLocoMap) {
-      if (!locoIds.includes(locoPrim.id) || !activeMotorIds.has(motorId)) continue;
-      const motorPrim = primitiveMap.get(motorId);
-      if (!motorPrim || motorPrim.kind !== 'motor') continue;
-      motorRpm = Math.max(
-        motorRpm,
-        Number((motorPrim.config as { rpm?: number }).rpm ?? 0),
-      );
-    }
-    const effectiveSpeed = motorRpm > 0
-      ? Math.max(Math.abs(locoState.speed), motorRpm * 0.005)
-      : Math.abs(locoState.speed);
-    return wrapUnitProgress(prevProgress + dt * effectiveSpeed * 0.35);
   }
 
   // ── tick ──────────────────────────────────────────────────────────────────
@@ -1879,12 +2097,10 @@ export function buildMatterWorld(
         flywheelHops += 1;
       }
     }
-    // Advance loco early so wagon-carried cargo can interact with hoppers and other
-    // systems during the current frame rather than one frame late.
-    const activeRoute = locoPrim
-      ? resolveRailRoute(manifest.primitives, (locoPrim.config as { trackId: string }).trackId, readRailSwitchBranch)
-      : null;
-    locoProgress = tickLocomotive(_dt, prevTrainProgress, activeRoute?.points ?? []);
+    // Advance rail vehicles early so carried cargo and attached parts use the
+    // real vehicle positions for the rest of the frame.
+    const railFrame = tickRailVehicles(_dt, prevTrainProgress);
+    locoProgress = railFrame.primaryProgress;
 
     tickWinches(_dt);
     tickBoltLinks();
@@ -1895,7 +2111,7 @@ export function buildMatterWorld(
     const conveyorFrame = tickConveyors();
     tickWaterZones(conveyorFrame.supportedCargoIds);
     tickTrampolines(_dt);
-    const wagonFrame = tickWagons(_dt, activeRoute?.points ?? []);
+    const wagonFrame = tickWagons(_dt, railFrame.routeCache);
     const collectedThisTick = tickHopper();
     tickBuckets();
     recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
@@ -1928,26 +2144,6 @@ export function buildMatterWorld(
     for (const [id, angVel] of inertiaDriven) {
       const baseAngle = bodyPositions[id]?.angle ?? rotations[id] ?? 0;
       rotations[id] = baseAngle + angVel * _dt;
-    }
-
-    // Virtual positions for loco + wagons (not real physics bodies)
-    if (locoPrim) {
-      const routePoints = activeRoute?.points ?? [];
-      const locoPos = getTrackPointFromPoints(
-        routePoints.length >= 2 ? routePoints : [{ x: 0, y: 0 }, { x: 0, y: 0 }],
-        locoProgress,
-      );
-      bodyPositions[locoPrim.id] = { x: locoPos.x, y: locoPos.y, angle: 0 };
-
-      for (const wagon of manifest.primitives.filter((p) => p.kind === 'wagon')) {
-        const wCfg = wagon.config as { offset: number };
-        const wProgress = wrapUnitProgress(locoProgress + wCfg.offset);
-        const wPos = getTrackPointFromPoints(
-          routePoints.length >= 2 ? routePoints : [{ x: 0, y: 0 }, { x: 0, y: 0 }],
-          wProgress,
-        );
-        bodyPositions[wagon.id] = { x: wPos.x, y: wPos.y, angle: 0 };
-      }
     }
 
     // Hook Y
@@ -1998,7 +2194,7 @@ export function buildMatterWorld(
     }
 
     // Wagon delivered: loco past 85% of its track
-    const wagonDelivered = Boolean(locoPrim) && locoProgress > 0.85;
+    const wagonDelivered = Boolean(railFrame.primaryLocomotive) && locoProgress > 0.85;
 
     return {
       rotations,
@@ -2009,7 +2205,7 @@ export function buildMatterWorld(
       gearMeshes,
       trainProgress: locoProgress,
       wagonDelivered,
-      trainTrackId: activeRoute?.activeTrackId,
+      trainTrackId: railFrame.primaryRoute?.activeTrackId,
       switchStates,
       gearTelemetry,
       cargoStates: Object.fromEntries(cargoStates.entries()),
@@ -2107,9 +2303,54 @@ function wrapUnitProgress(value: number) {
   return ((value % 1) + 1) % 1;
 }
 
+function normalizeRailOffset(value: number) {
+  let next = value;
+  while (next > 0.5) next -= 1;
+  while (next < -0.5) next += 1;
+  return next;
+}
+
+function getRailVehicleSpawnPose(
+  primitive: PrimitiveInstance,
+  primitives: PrimitiveInstance[],
+) {
+  const cfg = primitive.config as { x?: number; y?: number; trackId?: string; progress?: number; offset?: number };
+  if (typeof cfg.trackId === 'string') {
+    const route = resolveRailRoute(primitives, cfg.trackId);
+    if (route.points.length >= 2) {
+      let progress = cfg.progress ?? 0;
+      if (
+        primitive.kind === 'wagon'
+        && typeof cfg.progress !== 'number'
+        && typeof cfg.offset === 'number'
+      ) {
+        const leadLocomotive = primitives.find((candidate) =>
+          candidate.kind === 'locomotive'
+          && (candidate.config as { trackId?: string }).trackId === cfg.trackId);
+        const leadProgress = Number((leadLocomotive?.config as { progress?: number } | undefined)?.progress ?? 0);
+        progress = wrapUnitProgress(leadProgress + cfg.offset);
+      }
+      return {
+        ...getTrackPoseFromPoints(route.points, progress),
+        railBound: true,
+      };
+    }
+  }
+
+  return {
+    x: Number(cfg.x ?? 0),
+    y: Number(cfg.y ?? 0),
+    angle: 0,
+    railBound: false,
+  };
+}
+
 // ─── Body factory ─────────────────────────────────────────────────────────────
 
-function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
+function createBodyForPrimitive(
+  prim: PrimitiveInstance,
+  primitives: PrimitiveInstance[],
+): Matter.Body | null {
   switch (prim.kind) {
     case 'node': {
       const cfg = prim.config as { x: number; y: number };
@@ -2396,6 +2637,32 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
       });
     }
 
+    case 'locomotive': {
+      const pose = getRailVehicleSpawnPose(prim, primitives);
+      return Matter.Bodies.rectangle(pose.x, pose.y, 48, 28, {
+        label: prim.id,
+        angle: pose.angle,
+        isSensor: pose.railBound,
+        density: 0.0025,
+        friction: 0.55,
+        frictionAir: 0.03,
+        restitution: 0.06,
+      });
+    }
+
+    case 'wagon': {
+      const pose = getRailVehicleSpawnPose(prim, primitives);
+      return Matter.Bodies.rectangle(pose.x, pose.y, 40, 24, {
+        label: prim.id,
+        angle: pose.angle,
+        isSensor: pose.railBound,
+        density: 0.0022,
+        friction: 0.6,
+        frictionAir: 0.03,
+        restitution: 0.05,
+      });
+    }
+
     case 'beam':
     case 'rope':
     case 'belt-link':
@@ -2410,8 +2677,6 @@ function createBodyForPrimitive(prim: PrimitiveInstance): Matter.Body | null {
     case 'hinge':
     case 'rail-segment':
     case 'rail-switch':
-    case 'locomotive':
-    case 'wagon':
     case 'station-zone':
       return null;
 

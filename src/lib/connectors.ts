@@ -4,13 +4,14 @@ import type {
   PrimitiveInstance,
   PrimitiveKind,
 } from './types';
+import { getTrackPoseFromPoints, resolveRailRoute } from './rail-routing';
 
 export const TRANSMISSION_CONNECTOR_KINDS = ['belt-link', 'chain-link'] as const;
 export const MECHANICAL_CONNECTOR_KINDS = ['bolt-link', 'hinge-link', 'powered-hinge-link'] as const;
 export const CONNECTOR_KINDS = ['rope', ...TRANSMISSION_CONNECTOR_KINDS, ...MECHANICAL_CONNECTOR_KINDS] as const;
 export const ROTARY_LINK_ENDPOINT_KINDS = ['wheel', 'pulley', 'chain-sprocket', 'flywheel'] as const;
 export const ROPE_ENDPOINT_KINDS = ['hook', 'bucket', 'crane-arm', 'cargo-block'] as const;
-export const STRUCTURAL_BASE_KINDS = ['chassis', 'platform', 'wall', 'ramp', 'gearbox', 'chute', 'silo-bin', 'tunnel', 'trampoline'] as const;
+export const STRUCTURAL_BASE_KINDS = ['chassis', 'locomotive', 'wagon', 'platform', 'wall', 'ramp', 'gearbox', 'chute', 'silo-bin', 'tunnel', 'trampoline'] as const;
 export const BODY_BACKED_CONNECTOR_ENDPOINT_KINDS = [
   'wheel',
   'motor',
@@ -34,6 +35,8 @@ export const BODY_BACKED_CONNECTOR_ENDPOINT_KINDS = [
   'ball',
   'rock',
   'chassis',
+  'locomotive',
+  'wagon',
   'chute',
   'silo-bin',
   'tunnel',
@@ -109,7 +112,33 @@ export function getConnectedPrimitiveIds(primitive: PrimitiveInstance) {
 export function getPrimitiveAnchor(
   primitive: PrimitiveInstance,
   role: ConnectorAnchorRole = 'general',
+  primitives?: PrimitiveInstance[],
 ) {
+  if (primitive.kind === 'locomotive' || primitive.kind === 'wagon') {
+    const cfg = primitive.config as { x?: number; y?: number; trackId?: string; progress?: number; offset?: number };
+    if (typeof cfg.x === 'number' && typeof cfg.y === 'number') {
+      return { x: cfg.x, y: cfg.y };
+    }
+    if (typeof cfg.trackId === 'string' && primitives) {
+      const route = resolveRailRoute(primitives, cfg.trackId);
+      if (route.points.length >= 2) {
+        let progress = cfg.progress ?? 0;
+        if (
+          primitive.kind === 'wagon'
+          && typeof cfg.progress !== 'number'
+          && typeof cfg.offset === 'number'
+        ) {
+          const leadLocomotive = primitives.find((candidate) =>
+            candidate.kind === 'locomotive'
+            && (candidate.config as { trackId?: string }).trackId === cfg.trackId);
+          progress = Number((leadLocomotive?.config as { progress?: number } | undefined)?.progress ?? 0) + cfg.offset;
+        }
+        const pose = getTrackPoseFromPoints(route.points, progress);
+        return { x: pose.x, y: pose.y };
+      }
+    }
+  }
+
   if (primitive.kind === 'crane-arm') {
     const config = primitive.config as { x: number; y: number; length?: number };
     const length = config.length ?? 120;
@@ -175,8 +204,8 @@ export function measureConnectorPath(
     if (!current || !previous) {
       continue;
     }
-    const currentAnchor = getPrimitiveAnchor(current, role);
-    const previousAnchor = getPrimitiveAnchor(previous, role);
+    const currentAnchor = getPrimitiveAnchor(current, role, manifest.primitives);
+    const previousAnchor = getPrimitiveAnchor(previous, role, manifest.primitives);
     total += Math.hypot(currentAnchor.x - previousAnchor.x, currentAnchor.y - previousAnchor.y);
   }
   return total;

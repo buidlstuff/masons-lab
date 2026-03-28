@@ -1,9 +1,9 @@
 import { nanoid } from 'nanoid';
 import {
   connectorReferencesPrimitive,
+  getPrimitiveAnchor as getConnectorAnchor,
   getJointIsland,
   getPoweredHingeControls,
-  getPrimitiveAnchor as getConnectorAnchor,
   hasConnectorBetween,
   isMechanicalJointEndpointKind,
   isRopeEndpointKind,
@@ -12,6 +12,7 @@ import {
   measureConnectorPath,
   normalizeJointPair,
 } from './connectors';
+import { findNearestRailPlacement } from './rail-routing';
 import type { ExperimentManifest, PrimitiveConfig, PrimitiveInstance, PrimitiveKind } from './types';
 
 interface ConnectPrimitiveOptions {
@@ -33,11 +34,87 @@ function isLegacyRotaryRope(primitive: PrimitiveInstance, sourceId: string, targ
   );
 }
 
+const VEHICLE_BASE_KINDS: PrimitiveKind[] = ['chassis', 'locomotive', 'wagon'];
+const RAIL_SNAP_DISTANCE = 64;
+
+function currentRailVehicleAnchor(
+  manifest: ExperimentManifest,
+  primitive: PrimitiveInstance,
+) {
+  const cfg = primitive.config as { x?: number; y?: number; trackId?: string; progress?: number };
+  if (typeof cfg.x === 'number' && typeof cfg.y === 'number') {
+    return { x: cfg.x, y: cfg.y };
+  }
+  return getConnectorAnchor(primitive, 'general', manifest.primitives);
+}
+
+function placeRailVehiclePrimitive(
+  manifest: ExperimentManifest,
+  primitive: PrimitiveInstance,
+  x: number,
+  y: number,
+) {
+  const nearestRail = findNearestRailPlacement(manifest.primitives, x, y, RAIL_SNAP_DISTANCE);
+
+  if (primitive.kind === 'locomotive') {
+    const config = primitive.config as { speed: number; drivePartId?: string; enabled?: boolean };
+    if (nearestRail) {
+      return {
+        ...primitive,
+        config: {
+          speed: config.speed,
+          drivePartId: config.drivePartId,
+          enabled: config.enabled ?? true,
+          trackId: nearestRail.trackId,
+          progress: nearestRail.progress,
+        } as PrimitiveConfig,
+      };
+    }
+    return {
+      ...primitive,
+      config: {
+        speed: config.speed,
+        drivePartId: config.drivePartId,
+        enabled: config.enabled ?? true,
+        x,
+        y,
+      } as PrimitiveConfig,
+    };
+  }
+
+  if (primitive.kind === 'wagon') {
+    const config = primitive.config as { capacity: number };
+    if (nearestRail) {
+      return {
+        ...primitive,
+        config: {
+          capacity: config.capacity,
+          trackId: nearestRail.trackId,
+          progress: nearestRail.progress,
+        } as PrimitiveConfig,
+      };
+    }
+    return {
+      ...primitive,
+      config: {
+        capacity: config.capacity,
+        x,
+        y,
+      } as PrimitiveConfig,
+    };
+  }
+
+  return primitive;
+}
+
 export function addPrimitive(manifest: ExperimentManifest, kind: PrimitiveKind, x: number, y: number): ExperimentManifest {
   const primitive = createPrimitive(kind, x, y);
+  const placedPrimitive = primitive.kind === 'locomotive' || primitive.kind === 'wagon'
+    ? placeRailVehiclePrimitive(manifest, primitive, x, y)
+    : primitive;
   return {
     ...manifest,
-    primitives: [...manifest.primitives, primitive],
+    primitives: [...manifest.primitives, placedPrimitive],
   };
 }
 
@@ -54,6 +131,75 @@ export function movePrimitive(manifest: ExperimentManifest, primitiveId: string,
   const moved = manifest.primitives.find((primitive) => primitive.id === primitiveId);
   if (!moved) {
     return manifest;
+  }
+
+  if (moved.kind === 'locomotive' || moved.kind === 'wagon') {
+    const currentAnchor = currentRailVehicleAnchor(manifest, moved);
+    const nextPrimitive = placeRailVehiclePrimitive(manifest, moved, x, y);
+    const nextAnchor = currentRailVehicleAnchor(
+      {
+        ...manifest,
+        primitives: manifest.primitives.map((primitive) => (
+          primitive.id === primitiveId ? nextPrimitive : primitive
+        )),
+      },
+      nextPrimitive,
+    );
+    const deltaX = nextAnchor.x - currentAnchor.x;
+    const deltaY = nextAnchor.y - currentAnchor.y;
+    const island = getJointIsland(manifest, primitiveId);
+    const shiftedPrimitives = manifest.primitives.map((primitive) => {
+      if (primitive.id === primitiveId) {
+        return nextPrimitive;
+      }
+
+      if (
+        (primitive.kind === 'hinge-link' || primitive.kind === 'powered-hinge-link')
+        && island.has((primitive.config as { fromId: string }).fromId)
+        && island.has((primitive.config as { toId: string }).toId)
+      ) {
+        return {
+          ...primitive,
+          config: {
+            ...primitive.config,
+            pivotX: Number((primitive.config as { pivotX?: number }).pivotX ?? 0) + deltaX,
+            pivotY: Number((primitive.config as { pivotY?: number }).pivotY ?? 0) + deltaY,
+          } as PrimitiveConfig,
+        };
+      }
+
+      if (!island.has(primitive.id)) {
+        return primitive;
+      }
+
+      return shiftPrimitiveByDelta(primitive, deltaX, deltaY, manifest);
+    });
+
+    const finalPrimitives = shiftedPrimitives.map((primitive) => {
+      const attachedToId = (primitive.config as { attachedToId?: string }).attachedToId;
+      if (!attachedToId || !supportsAttachmentOffsets(primitive) || !('x' in primitive.config && 'y' in primitive.config)) {
+        return primitive;
+      }
+      const parent = shiftedPrimitives.find((item) => item.id === attachedToId);
+      if (!parent) {
+        return primitive;
+      }
+      const anchor = getAttachmentAnchor(parent, { ...manifest, primitives: shiftedPrimitives });
+      const position = { x: Number(primitive.config.x), y: Number(primitive.config.y) };
+      return {
+        ...primitive,
+        config: {
+          ...primitive.config,
+          attachOffsetX: position.x - anchor.x,
+          attachOffsetY: position.y - anchor.y,
+        } as PrimitiveConfig,
+      };
+    });
+
+    return {
+      ...manifest,
+      primitives: finalPrimitives,
+    };
   }
 
   const { deltaX, deltaY } = resolveMoveDelta(moved, x, y);
@@ -82,7 +228,7 @@ export function movePrimitive(manifest: ExperimentManifest, primitiveId: string,
       return primitive;
     }
 
-    return shiftPrimitiveByDelta(primitive, deltaX, deltaY);
+    return shiftPrimitiveByDelta(primitive, deltaX, deltaY, manifest);
   });
 
   const finalPrimitives = shiftedPrimitives.map((primitive) => {
@@ -94,13 +240,14 @@ export function movePrimitive(manifest: ExperimentManifest, primitiveId: string,
     if (!parent) {
       return primitive;
     }
-    const anchor = getAttachmentAnchor(parent);
+    const anchor = getAttachmentAnchor(parent, { ...manifest, primitives: shiftedPrimitives });
+    const position = { x: Number(primitive.config.x), y: Number(primitive.config.y) };
     return {
       ...primitive,
       config: {
         ...primitive.config,
-        attachOffsetX: primitive.config.x - anchor.x,
-        attachOffsetY: primitive.config.y - anchor.y,
+        attachOffsetX: position.x - anchor.x,
+        attachOffsetY: position.y - anchor.y,
       } as PrimitiveConfig,
     };
   });
@@ -228,36 +375,36 @@ export function connectPrimitives(
   }
 
   if (
-    (source.kind === 'wheel' && target.kind === 'chassis')
-    || (source.kind === 'chassis' && target.kind === 'wheel')
+    (source.kind === 'wheel' && VEHICLE_BASE_KINDS.includes(target.kind))
+    || (VEHICLE_BASE_KINDS.includes(source.kind) && target.kind === 'wheel')
   ) {
     const wheel = source.kind === 'wheel' ? source : target;
-    const chassis = source.kind === 'chassis' ? source : target;
-    return attachPrimitive(manifest, wheel.id, chassis.id);
+    const base = source.kind === 'wheel' ? target : source;
+    return attachPrimitive(manifest, wheel.id, base.id, manifest);
   }
 
   if (
-    (source.kind === 'motor' && target.kind === 'chassis')
-    || (source.kind === 'chassis' && target.kind === 'motor')
+    (source.kind === 'motor' && VEHICLE_BASE_KINDS.includes(target.kind))
+    || (VEHICLE_BASE_KINDS.includes(source.kind) && target.kind === 'motor')
   ) {
     const motor = source.kind === 'motor' ? source : target;
-    const chassis = source.kind === 'chassis' ? source : target;
-    return attachPrimitive(manifest, motor.id, chassis.id);
+    const base = source.kind === 'motor' ? target : source;
+    return attachPrimitive(manifest, motor.id, base.id, manifest);
   }
 
   if (
     (
       ['gear', 'pulley', 'chain-sprocket', 'flywheel', 'winch', 'crane-arm'].includes(source.kind)
-      && target.kind === 'chassis'
+      && VEHICLE_BASE_KINDS.includes(target.kind)
     )
     || (
-      source.kind === 'chassis'
+      VEHICLE_BASE_KINDS.includes(source.kind)
       && ['gear', 'pulley', 'chain-sprocket', 'flywheel', 'winch', 'crane-arm'].includes(target.kind)
     )
   ) {
-    const mounted = source.kind === 'chassis' ? target : source;
-    const chassis = source.kind === 'chassis' ? source : target;
-    return attachPrimitive(manifest, mounted.id, chassis.id);
+    const mounted = VEHICLE_BASE_KINDS.includes(source.kind) ? target : source;
+    const base = VEHICLE_BASE_KINDS.includes(source.kind) ? source : target;
+    return attachPrimitive(manifest, mounted.id, base.id, manifest);
   }
 
   if (
@@ -266,7 +413,7 @@ export function connectPrimitives(
   ) {
     const arm = source.kind === 'crane-arm' ? source : target;
     const load = source.kind === 'crane-arm' ? target : source;
-    return attachPrimitive(manifest, load.id, arm.id);
+    return attachPrimitive(manifest, load.id, arm.id, manifest);
   }
 
   if (
@@ -334,8 +481,8 @@ function createConnectorPrimitive(
     if (hasConnectorBetween(manifest, source.id, target.id, ['belt-link', 'chain-link'])) {
       return manifest;
     }
-    const sourcePos = getAttachmentAnchor(source);
-    const targetPos = getAttachmentAnchor(target);
+    const sourcePos = getAttachmentAnchor(source, manifest);
+    const targetPos = getAttachmentAnchor(target, manifest);
     const linkKind: PrimitiveKind = kind === 'chain-link' || source.kind === 'chain-sprocket' || target.kind === 'chain-sprocket'
       ? 'chain-link'
       : 'belt-link';
@@ -365,8 +512,8 @@ function createConnectorPrimitive(
       return manifest;
     }
     const { from, to } = normalizeJointPair(source, target);
-    const fromAnchor = getConnectorAnchor(from, 'general');
-    const toAnchor = getConnectorAnchor(to, 'general');
+    const fromAnchor = getConnectorAnchor(from, 'general', manifest.primitives);
+    const toAnchor = getConnectorAnchor(to, 'general', manifest.primitives);
     return {
       ...manifest,
       primitives: [
@@ -399,8 +546,8 @@ function createConnectorPrimitive(
     }
 
     const { from, to } = normalizeJointPair(source, target);
-    const fromAnchor = getConnectorAnchor(from, 'joint');
-    const toAnchor = getConnectorAnchor(to, 'joint');
+    const fromAnchor = getConnectorAnchor(from, 'joint', manifest.primitives);
+    const toAnchor = getConnectorAnchor(to, 'joint', manifest.primitives);
     const connectorId = `${kind === 'powered-hinge-link' ? 'phinge' : 'hinge'}-${nanoid(6)}`;
     const nextPrimitives = [
       ...manifest.primitives,
@@ -579,9 +726,9 @@ function createPrimitive(kind: PrimitiveKind, x: number, y: number): PrimitiveIn
     case 'rail-switch':
       return { id: `switch-${nanoid(6)}`, kind, label: 'Rail Switch', config: { x, y, branch: 'right' } };
     case 'locomotive':
-      return { id: `loco-${nanoid(6)}`, kind, label: 'Locomotive', config: { trackId: 'track-main', progress: 0, speed: 0.18 } };
+      return { id: `loco-${nanoid(6)}`, kind, label: 'Locomotive', config: { x, y, speed: 0.18, enabled: true } };
     case 'wagon':
-      return { id: `wagon-${nanoid(6)}`, kind, label: 'Wagon', config: { trackId: 'track-main', offset: -0.12, capacity: 6 } };
+      return { id: `wagon-${nanoid(6)}`, kind, label: 'Wagon', config: { x, y, capacity: 6 } };
     case 'station-zone':
       return { id: `station-${nanoid(6)}`, kind, label: 'Station Zone', config: { x, y, width: 120, height: 120, action: 'load' } };
     case 'trampoline':
@@ -609,9 +756,13 @@ function averagePoint(points: Array<{ x: number; y: number }>) {
 
 function resolveMoveDelta(primitive: PrimitiveInstance, x: number, y: number) {
   if ('x' in primitive.config && 'y' in primitive.config) {
+    const current = {
+      x: Number(primitive.config.x),
+      y: Number(primitive.config.y),
+    };
     return {
-      deltaX: x - primitive.config.x,
-      deltaY: y - primitive.config.y,
+      deltaX: x - current.x,
+      deltaY: y - current.y,
     };
   }
   if ('path' in primitive.config) {
@@ -631,14 +782,45 @@ function resolveMoveDelta(primitive: PrimitiveInstance, x: number, y: number) {
   return { deltaX: 0, deltaY: 0 };
 }
 
-function shiftPrimitiveByDelta(primitive: PrimitiveInstance, deltaX: number, deltaY: number): PrimitiveInstance {
+function shiftPrimitiveByDelta(
+  primitive: PrimitiveInstance,
+  deltaX: number,
+  deltaY: number,
+  manifest: ExperimentManifest,
+): PrimitiveInstance {
+  if (primitive.kind === 'locomotive' || primitive.kind === 'wagon') {
+    const anchor = currentRailVehicleAnchor(manifest, primitive);
+    const baseConfig = primitive.kind === 'locomotive'
+      ? {
+          speed: Number((primitive.config as { speed?: number }).speed ?? 0.18),
+          drivePartId: (primitive.config as { drivePartId?: string }).drivePartId,
+          enabled: Boolean((primitive.config as { enabled?: boolean }).enabled ?? true),
+        }
+      : {
+          capacity: Number((primitive.config as { capacity?: number }).capacity ?? 6),
+        };
+
+    return {
+      ...primitive,
+      config: {
+        ...baseConfig,
+        x: anchor.x + deltaX,
+        y: anchor.y + deltaY,
+      } as PrimitiveConfig,
+    };
+  }
+
   if ('x' in primitive.config && 'y' in primitive.config) {
+    const current = {
+      x: Number(primitive.config.x),
+      y: Number(primitive.config.y),
+    };
     return {
       ...primitive,
       config: {
         ...primitive.config,
-        x: primitive.config.x + deltaX,
-        y: primitive.config.y + deltaY,
+        x: current.x + deltaX,
+        y: current.y + deltaY,
       } as PrimitiveConfig,
     };
   }
@@ -682,18 +864,23 @@ function supportsAttachmentOffsets(primitive: PrimitiveInstance) {
     || primitive.kind === 'counterweight';
 }
 
-function getAttachmentAnchor(primitive: PrimitiveInstance) {
-  return getConnectorAnchor(primitive, 'general');
+function getAttachmentAnchor(primitive: PrimitiveInstance, manifest: ExperimentManifest) {
+  return getConnectorAnchor(primitive, 'general', manifest.primitives);
 }
 
-function attachPrimitive(manifest: ExperimentManifest, childId: string, parentId: string): ExperimentManifest {
+function attachPrimitive(
+  manifest: ExperimentManifest,
+  childId: string,
+  parentId: string,
+  anchorManifest: ExperimentManifest = manifest,
+): ExperimentManifest {
   const child = manifest.primitives.find((primitive) => primitive.id === childId);
   const parent = manifest.primitives.find((primitive) => primitive.id === parentId);
   if (!child || !parent || !('x' in child.config && 'y' in child.config)) {
     return manifest;
   }
-  const anchor = getAttachmentAnchor(parent);
-  const childPos = { x: child.config.x, y: child.config.y };
+  const anchor = getAttachmentAnchor(parent, anchorManifest);
+  const childPos = { x: Number(child.config.x), y: Number(child.config.y) };
   return {
     ...manifest,
     primitives: manifest.primitives.map((primitive) => (

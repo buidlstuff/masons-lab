@@ -82,7 +82,7 @@ function ballNearBucket(manifest: ExperimentManifest, runtime: RuntimeSnapshot) 
   const bucket = manifest.primitives.find((primitive) => primitive.kind === 'bucket');
   if (!bucket) return false;
   const bucketPoint = runtime.bodyPositions?.[bucket.id] ?? ('x' in bucket.config && 'y' in bucket.config
-    ? { x: bucket.config.x, y: bucket.config.y }
+    ? { x: Number(bucket.config.x), y: Number(bucket.config.y) }
     : null);
   if (!bucketPoint) return false;
   return manifest.primitives

@@ -271,7 +271,7 @@ function deriveSuggestions(
         break;
       case 'locomotive':
       case 'wagon':
-        push('rail-segment', 'Train parts still need a real rail segment underneath them.');
+        push('rail-segment', 'Drag train parts near rail if you want them to snap into train mode.');
         push('station-zone', 'Stations give the rail system clear pickup and drop-off moments.');
         break;
       case 'ball':
@@ -402,11 +402,11 @@ function connectionHintForKind(kind: PrimitiveKind) {
     case 'hook':
       return 'Hoists only make sense once the winch and hook are linked, and pulleys can now redirect that rope path.';
     case 'rail-segment':
-      return 'Rails define the path, and locomotives can now be linked to a real rotating drive part.';
+      return 'Rails define the path and now automatically snap nearby locomotives and wagons into train mode.';
     case 'locomotive':
-      return 'Locomotives need rail plus a linked rotating driver if you want them to feel part of the machine.';
+      return 'Locomotives snap to nearby rail, but they can also stay off rail as regular bodies that take bolt-on parts, wheels, and tools.';
     case 'wagon':
-      return 'Wagons now load loose material near the rail and can unload it into hoppers, chutes, silos, or conveyors.';
+      return 'Wagons can ride rail automatically or stay free as cargo carriers that accept bolt-on parts and loose material.';
     case 'station-zone':
       return 'Station zones give wagons a deliberate place to load or unload instead of relying on lucky proximity.';
     case 'trampoline':

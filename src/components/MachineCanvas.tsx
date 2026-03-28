@@ -428,7 +428,7 @@ export function MachineCanvas({
       case 'rail-switch':
         return 'Rail switch — use quick controls or Machine Controls to choose the left or right branch before the train reaches it';
       case 'locomotive':
-        return 'Locomotive — set its trackId, then use Run and Speed to send it down a real rail route';
+        return 'Locomotive — drag it onto rail to snap it in, or leave it free and bolt on wheels, tools, and cargo';
       case 'winch':
         return 'Winch — rope it to a hook, bucket, crane arm, or cargo block, then use Up and Down to reel it in or out';
       case 'chute':
@@ -1239,7 +1239,7 @@ function getPlacementAssessment(
       return {
         tone: 'info',
         title: 'Splash zone',
-        detail: 'Water works best where falling bodies can drift through the pool for a moment.',
+        detail: 'Water now behaves like a floaty low-gravity zone, so falling bodies drift instead of disappearing.',
       };
     case 'hinge':
       return {
@@ -1299,14 +1299,14 @@ function getPlacementAssessment(
     case 'wagon':
       return hasKind(manifest, 'rail-segment')
         ? {
-            tone: 'warn',
-            title: 'Track needs one more step',
-            detail: 'After placing, set trackId in the Inspector so it matches a real rail segment.',
+            tone: 'good',
+            title: 'Ready to snap',
+            detail: 'Drop it near the rail and it will snap onto the line automatically. Drag it away if you want a free body instead.',
           }
         : {
             tone: 'warn',
             title: 'No rail yet',
-            detail: 'Place rail first. Then set trackId in the Inspector so this can move.',
+            detail: 'Place rail first if you want train motion, or use it off rail like a body that can take wheels, motors, and bolt-on parts.',
           };
     case 'station-zone':
       return hasKind(manifest, 'wagon')
@@ -2401,7 +2401,9 @@ function wrapUnitProgress(value: number) {
 }
 
 function isDraggablePrimitive(primitive: PrimitiveInstance) {
-  return 'x' in primitive.config && 'y' in primitive.config
+  return primitive.kind === 'locomotive'
+    || primitive.kind === 'wagon'
+    || 'x' in primitive.config && 'y' in primitive.config
     || 'path' in primitive.config
     || 'points' in primitive.config;
 }

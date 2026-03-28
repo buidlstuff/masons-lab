@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { connectPrimitives, deletePrimitive, movePrimitive } from '../lib/editor';
+import { addPrimitive, connectPrimitives, deletePrimitive, movePrimitive } from '../lib/editor';
 import { createEmptyManifest } from '../lib/seed-data';
 
 describe('editor connector flows', () => {
@@ -61,5 +61,53 @@ describe('editor connector flows', () => {
 
     expect(cleaned.primitives.some((primitive) => primitive.kind === 'powered-hinge-link')).toBe(false);
     expect(cleaned.controls).toHaveLength(0);
+  });
+
+  it('snaps rail vehicles onto nearby track when they are placed', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'track-1',
+        kind: 'rail-segment',
+        label: 'Rail',
+        config: { points: [{ x: 160, y: 260 }, { x: 640, y: 260 }], segmentType: 'straight' },
+      },
+    ];
+
+    const withLocomotive = addPrimitive(manifest, 'locomotive', 320, 272);
+    const locomotive = withLocomotive.primitives.find((primitive) => primitive.kind === 'locomotive');
+    expect((locomotive?.config as { trackId?: string }).trackId).toBe('track-1');
+    expect((locomotive?.config as { progress?: number }).progress ?? 0).toBeGreaterThan(0.25);
+    expect((locomotive?.config as { progress?: number }).progress ?? 0).toBeLessThan(0.4);
+
+    const withWagon = addPrimitive(withLocomotive, 'wagon', 520, 250);
+    const wagon = withWagon.primitives.find((primitive) => primitive.kind === 'wagon');
+    expect((wagon?.config as { trackId?: string }).trackId).toBe('track-1');
+    expect((wagon?.config as { progress?: number }).progress ?? 0).toBeGreaterThan(0.7);
+  });
+
+  it('lets snapped wagons drag back off the rail into free-body mode', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'track-1',
+        kind: 'rail-segment',
+        label: 'Rail',
+        config: { points: [{ x: 160, y: 260 }, { x: 640, y: 260 }], segmentType: 'straight' },
+      },
+      {
+        id: 'wagon-1',
+        kind: 'wagon',
+        label: 'Wagon',
+        config: { trackId: 'track-1', progress: 0.5, capacity: 6 },
+      },
+    ];
+
+    const moved = movePrimitive(manifest, 'wagon-1', 120, 180);
+    const wagon = moved.primitives.find((primitive) => primitive.id === 'wagon-1');
+
+    expect((wagon?.config as { trackId?: string }).trackId).toBeUndefined();
+    expect((wagon?.config as { x?: number }).x).toBe(120);
+    expect((wagon?.config as { y?: number }).y).toBe(180);
   });
 });

@@ -186,7 +186,7 @@ function getPrimitiveAnchor(
   }
   const nextVisited = new Set(visited).add(primitive.id);
   if ('x' in primitive.config && 'y' in primitive.config) {
-    return getConnectorAnchor(primitive, 'general');
+    return getConnectorAnchor(primitive, 'general', manifest.primitives);
   }
   if ('path' in primitive.config) {
     return averagePoint((primitive.config as { path: Array<{ x: number; y: number }> }).path);
@@ -826,7 +826,9 @@ export function BuildPage() {
           'speed',
           Number((selectedPrimitive.config as { speed?: number }).speed ?? 0.18),
         ));
-        subtitle = `Train route ${runtimeSnapshot.trainTrackId ?? (selectedPrimitive.config as { trackId?: string }).trackId ?? 'unassigned'}. Speed ${speed.toFixed(2)}.`;
+        subtitle = typeof (selectedPrimitive.config as { trackId?: string }).trackId === 'string'
+          ? `Snapped to rail ${runtimeSnapshot.trainTrackId ?? (selectedPrimitive.config as { trackId?: string }).trackId}. Speed ${speed.toFixed(2)}.`
+          : 'Free body. Bolt on tools or add wheels and a motor if you want to drive it off rail.';
         actions.push({
           id: 'loco-run',
           label: enabled ? 'Stop' : 'Run',
@@ -1243,7 +1245,8 @@ export function BuildPage() {
       setSelectedPrimitiveId(placedPrimitive?.id);
       playUiTone('place');
 
-      const placementFeedback = guidedPlacement?.feedback ?? describePlacedPrimitive(manifest, placingKind, nextPosition.x, nextPosition.y);
+      const placementFeedback = guidedPlacement?.feedback
+        ?? describePlacedPrimitive(manifest, placingKind, nextPosition.x, nextPosition.y, placedPrimitive ?? null);
       showStatus(placementFeedback.message, placementFeedback.tone);
     },
     [activeProjectStep, manifest, persistDraft, placingKind, showStatus],
@@ -2559,6 +2562,7 @@ function describePlacedPrimitive(
   kind: PrimitiveKind,
   x: number,
   y: number,
+  primitive?: PrimitiveInstance | null,
 ): { message: string; tone: NoticeTone } {
   switch (kind) {
     case 'motor':
@@ -2648,7 +2652,7 @@ function describePlacedPrimitive(
           };
     case 'rail-segment':
       return {
-        message: 'Rail placed. Add a locomotive, then set its trackId in the Inspector so it matches this rail.',
+        message: 'Rail placed. Drop a locomotive or wagon near it and the vehicle will snap onto the track automatically.',
         tone: 'info',
       };
     case 'station-zone':
@@ -2658,14 +2662,14 @@ function describePlacedPrimitive(
       };
     case 'locomotive':
     case 'wagon':
-      return hasPart(manifest, 'rail-segment')
+      return typeof (primitive?.config as { trackId?: string } | undefined)?.trackId === 'string'
         ? {
-            message: `${labelForPrimitive(kind)} placed. Set its trackId in the Inspector so it points at a real rail segment.`,
-            tone: 'warning',
+            message: `${labelForPrimitive(kind)} snapped onto the nearby rail. It can still carry cargo, tools, and bolt-on parts while it rides the line.`,
+            tone: 'success',
           }
         : {
-            message: `${labelForPrimitive(kind)} placed. Add rail first, then set its trackId in the Inspector.`,
-            tone: 'warning',
+            message: `${labelForPrimitive(kind)} placed as a free body. Add rail nearby to snap it on, or bolt on wheels, motors, and tools.`,
+            tone: hasPart(manifest, 'rail-segment') ? 'info' : 'warning',
           };
     case 'trampoline':
       return {
@@ -2689,7 +2693,7 @@ function placementInstructionForKind(kind: PrimitiveKind) {
     case 'conveyor':
       return 'Conveyors come alive once cargo, a hopper, and a nearby motor join the setup.';
     case 'rail-segment':
-      return 'Rails are the track. Locomotives still need their trackId set, and can later be linked to a rotating driver.';
+      return 'Rails now grab nearby locomotives and wagons automatically when you place or drag them onto the line.';
     case 'station-zone':
       return 'Stations turn passing wagons into deliberate load or unload moments.';
     case 'trampoline':
@@ -2712,10 +2716,10 @@ function selectedInstructionForKind(kind: PrimitiveKind) {
     case 'conveyor':
       return 'Conveyors are best tested with cargo on top and a hopper waiting at the far end.';
     case 'rail-segment':
-      return 'Rails define the path, but locomotives and wagons still need the right trackId to follow them.';
+      return 'Rails drive snapped locomotives and wagons automatically, and switches decide which branch they take.';
     case 'locomotive':
     case 'wagon':
-      return 'Point this at a real rail segment first. Locomotives can also be driven by a wheel, gear, pulley, sprocket, or flywheel.';
+      return 'Drag it onto a rail to snap it into train mode, or leave it free and bolt on wheels, motors, or tools like any other body.';
     case 'station-zone':
       return 'Set the station to load or unload, then run a wagon through its rectangle to see the transfer.';
     case 'trampoline':

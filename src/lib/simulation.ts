@@ -236,7 +236,9 @@ function createInitialSnapshot(manifest: ExperimentManifest | null): RuntimeSnap
   const primitives = manifest?.primitives ?? [];
   const hook = primitives.find((primitive) => primitive.kind === 'hook');
   const hookY = hook && 'y' in hook.config ? (hook.config.y as number) : 0;
-  const loco = primitives.find((primitive) => primitive.kind === 'locomotive');
+  const loco = primitives.find((primitive) =>
+    primitive.kind === 'locomotive'
+    && typeof (primitive.config as { trackId?: string }).trackId === 'string');
   const trainProgress = loco && 'progress' in loco.config ? (loco.config.progress as number) : 0;
   const trainTrackId = loco && 'trackId' in loco.config ? (loco.config.trackId as string) : undefined;
   const switchStates = Object.fromEntries(

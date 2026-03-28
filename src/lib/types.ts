@@ -293,16 +293,21 @@ export interface RailSwitchConfig {
 }
 
 export interface LocomotiveConfig {
-  trackId: string;
-  progress: number;
+  x?: number;
+  y?: number;
+  trackId?: string;
+  progress?: number;
   speed: number;
   drivePartId?: string;
   enabled?: boolean;
 }
 
 export interface WagonConfig {
-  trackId: string;
-  offset: number;
+  x?: number;
+  y?: number;
+  trackId?: string;
+  progress?: number;
+  offset?: number;
   capacity: number;
 }
 

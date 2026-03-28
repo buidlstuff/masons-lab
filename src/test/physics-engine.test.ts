@@ -487,6 +487,130 @@ describe('physics engine conveyor flow', () => {
     world.cleanup();
   });
 
+  it('propels a wagon body when wheels and a motor are mounted onto it off rail', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'wagon-1',
+        kind: 'wagon',
+        label: 'Wagon',
+        config: { x: 260, y: 470, capacity: 6 },
+      },
+      {
+        id: 'wheel-left',
+        kind: 'wheel',
+        label: 'Left Wheel',
+        config: {
+          x: 220,
+          y: 494,
+          radius: 28,
+          traction: 0.9,
+          attachedToId: 'wagon-1',
+          attachOffsetX: -34,
+          attachOffsetY: 24,
+        },
+      },
+      {
+        id: 'wheel-right',
+        kind: 'wheel',
+        label: 'Right Wheel',
+        config: {
+          x: 300,
+          y: 494,
+          radius: 28,
+          traction: 0.9,
+          attachedToId: 'wagon-1',
+          attachOffsetX: 34,
+          attachOffsetY: 24,
+        },
+      },
+      {
+        id: 'motor-1',
+        kind: 'motor',
+        label: 'Motor',
+        config: {
+          x: 260,
+          y: 442,
+          rpm: 90,
+          torque: 1,
+          powerState: true,
+          attachedToId: 'wagon-1',
+          attachOffsetX: 0,
+          attachOffsetY: -10,
+        },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 180);
+
+    expect(Math.abs((frame.bodyPositions['wagon-1']?.x ?? 0) - 260)).toBeGreaterThan(20);
+    world.cleanup();
+  });
+
+  it('lets a wagon cruise along rail even without a locomotive', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'track-1',
+        kind: 'rail-segment',
+        label: 'Rail',
+        config: { points: [{ x: 180, y: 250 }, { x: 760, y: 250 }], segmentType: 'straight' },
+      },
+      {
+        id: 'wagon-1',
+        kind: 'wagon',
+        label: 'Wagon',
+        config: { trackId: 'track-1', progress: 0.05, capacity: 4 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 180);
+
+    expect(frame.bodyPositions['wagon-1']?.x ?? 0).toBeGreaterThan(300);
+    world.cleanup();
+  });
+
+  it('keeps bolted cargo attached to a rail-bound locomotive while it moves', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'track-1',
+        kind: 'rail-segment',
+        label: 'Rail',
+        config: { points: [{ x: 180, y: 250 }, { x: 760, y: 250 }], segmentType: 'straight' },
+      },
+      {
+        id: 'loco-1',
+        kind: 'locomotive',
+        label: 'Locomotive',
+        config: { trackId: 'track-1', progress: 0.05, speed: 0.5, enabled: true },
+      },
+      {
+        id: 'cargo-1',
+        kind: 'cargo-block',
+        label: 'Cargo',
+        config: { x: 240, y: 250, weight: 1 },
+      },
+      {
+        id: 'bolt-1',
+        kind: 'bolt-link',
+        label: 'Bolt Link',
+        config: { fromId: 'loco-1', toId: 'cargo-1', offsetX: 34, offsetY: 0, angleOffset: 0 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 180);
+    const locoX = frame.bodyPositions['loco-1']?.x ?? 0;
+    const cargoX = frame.bodyPositions['cargo-1']?.x ?? 0;
+
+    expect(locoX).toBeGreaterThan(300);
+    expect(Math.abs((cargoX - locoX) - 34)).toBeLessThan(10);
+    world.cleanup();
+  });
+
   it('loads wagon cargo and unloads it into a hopper downstream', () => {
     const manifest = createEmptyManifest();
     manifest.primitives = [
@@ -612,6 +736,35 @@ describe('physics engine conveyor flow', () => {
     expect(frame.wagonLoads['wagon-1'] ?? 0).toBe(0);
     expect(frame.wagonCargo['wagon-1'] ?? []).toHaveLength(0);
     expect(frame.bodyPositions['cargo-1']?.x).toBeGreaterThan(650);
+    world.cleanup();
+  });
+
+  it('treats water as a floaty low-gravity zone instead of losing cargo', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'water-1',
+        kind: 'water',
+        label: 'Water',
+        config: { x: 480, y: 410, width: 320, height: 180, density: 1.1 },
+      },
+      {
+        id: 'cargo-1',
+        kind: 'cargo-block',
+        label: 'Cargo',
+        config: { x: 480, y: 360, weight: 1 },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest, {
+      stableCargoSpawns: { 'cargo-1': { x: 480, y: 360 } },
+    });
+    const frame = stepWorld(world, 240);
+
+    expect(frame.lostCargoCount).toBe(0);
+    expect(frame.cargoStates['cargo-1']).not.toBe('respawned');
+    expect(frame.bodyPositions['cargo-1']?.y ?? 0).toBeGreaterThan(200);
+    expect(frame.bodyPositions['cargo-1']?.y ?? 999).toBeLessThan(540);
     world.cleanup();
   });
 

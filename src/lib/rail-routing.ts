@@ -8,6 +8,18 @@ export interface RailRoute {
   switchId?: string;
 }
 
+export interface RailPose {
+  x: number;
+  y: number;
+  angle: number;
+}
+
+export interface RailPlacement extends RailPose {
+  trackId: string;
+  progress: number;
+  distance: number;
+}
+
 const RAIL_SWITCH_TOLERANCE = 30;
 
 function distance(a: { x: number; y: number }, b: { x: number; y: number }) {
@@ -36,8 +48,16 @@ export function getTrackPointFromPoints(
   points: Array<{ x: number; y: number }>,
   progress: number,
 ) {
+  return getTrackPoseFromPoints(points, progress);
+}
+
+export function getTrackPoseFromPoints(
+  points: Array<{ x: number; y: number }>,
+  progress: number,
+): RailPose {
   if (points.length < 2) {
-    return points[0] ?? { x: 0, y: 0 };
+    const fallback = points[0] ?? { x: 0, y: 0 };
+    return { ...fallback, angle: 0 };
   }
   const clamped = Math.max(0, Math.min(0.999, progress));
   const segment = Math.min(points.length - 2, Math.floor(clamped * (points.length - 1)));
@@ -47,6 +67,7 @@ export function getTrackPointFromPoints(
   return {
     x: start.x + (end.x - start.x) * t,
     y: start.y + (end.y - start.y) * t,
+    angle: Math.atan2(end.y - start.y, end.x - start.x),
   };
 }
 
@@ -59,6 +80,73 @@ export function trackLengthFromPoints(points: Array<{ x: number; y: number }>) {
     total += Math.hypot(points[index + 1].x - points[index].x, points[index + 1].y - points[index].y);
   }
   return Math.max(1, total);
+}
+
+export function projectPointOntoTrackPoints(
+  points: Array<{ x: number; y: number }>,
+  px: number,
+  py: number,
+): Omit<RailPlacement, 'trackId'> | null {
+  if (points.length < 2) {
+    return null;
+  }
+
+  let best: Omit<RailPlacement, 'trackId'> | null = null;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) {
+      continue;
+    }
+    const t = Math.max(0, Math.min(1, ((px - start.x) * dx + (py - start.y) * dy) / lenSq));
+    const x = start.x + dx * t;
+    const y = start.y + dy * t;
+    const distance = Math.hypot(px - x, py - y);
+    if (!best || distance < best.distance) {
+      best = {
+        x,
+        y,
+        angle: Math.atan2(dy, dx),
+        progress: (index + t) / (points.length - 1),
+        distance,
+      };
+    }
+  }
+  return best;
+}
+
+export function findNearestRailPlacement(
+  primitives: PrimitiveInstance[],
+  x: number,
+  y: number,
+  maxDistance = Number.POSITIVE_INFINITY,
+): RailPlacement | null {
+  let best: RailPlacement | null = null;
+
+  for (const primitive of primitives) {
+    if (primitive.kind !== 'rail-segment') {
+      continue;
+    }
+    const points = getRailPoints(primitive);
+    const placement = projectPointOntoTrackPoints(points, x, y);
+    if (!placement) {
+      continue;
+    }
+    if (placement.distance > maxDistance) {
+      continue;
+    }
+    if (!best || placement.distance < best.distance) {
+      best = {
+        trackId: primitive.id,
+        ...placement,
+      };
+    }
+  }
+
+  return best;
 }
 
 export function resolveRailRoute(
