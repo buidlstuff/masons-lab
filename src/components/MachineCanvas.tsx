@@ -90,6 +90,10 @@ interface MachineCanvasProps {
   runtime: RuntimeSnapshot;
   selectedPrimitiveId?: string;
   placingKind?: PrimitiveKind | null;
+  connectionMode?: {
+    kind: 'rope' | 'belt-link' | 'chain-link' | 'bolt-link' | 'hinge-link' | 'powered-hinge-link' | 'beam';
+    sourceId?: string | null;
+  } | null;
   diagnosticsEnabled?: boolean;
   activeJobHint?: string;
   projectGuide?: {
@@ -102,6 +106,7 @@ interface MachineCanvasProps {
   } | null;
   onPlacePrimitive: (x: number, y: number) => void;
   onSelectPrimitive: (primitiveId?: string) => void;
+  onConnectPick?: (primitiveId: string) => void;
   onMovePrimitive: (primitiveId: string, x: number, y: number) => void;
   onTelemetry: (telemetry: BuildTelemetry) => void;
   onConnectionFlash?: (ids: string[]) => void;
@@ -114,11 +119,13 @@ export function MachineCanvas({
   runtime,
   selectedPrimitiveId,
   placingKind,
+  connectionMode,
   diagnosticsEnabled,
   activeJobHint,
   projectGuide,
   onPlacePrimitive,
   onSelectPrimitive,
+  onConnectPick,
   onMovePrimitive,
   onTelemetry,
   onConnectionFlash,
@@ -133,9 +140,11 @@ export function MachineCanvas({
   const runtimeRef = useRef(runtime);
   const selectedRef = useRef(selectedPrimitiveId);
   const placingRef = useRef(placingKind);
+  const connectionModeRef = useRef(connectionMode);
   const projectGuideRef = useRef(projectGuide);
   const onPlaceRef = useRef(onPlacePrimitive);
   const onSelectRef = useRef(onSelectPrimitive);
+  const onConnectPickRef = useRef(onConnectPick);
   const onMoveRef = useRef(onMovePrimitive);
   const onTelemetryRef = useRef(onTelemetry);
   const onConnectionFlashRef = useRef(onConnectionFlash);
@@ -161,9 +170,11 @@ export function MachineCanvas({
     runtimeRef.current = runtime;
     selectedRef.current = selectedPrimitiveId;
     placingRef.current = placingKind;
+    connectionModeRef.current = connectionMode;
     projectGuideRef.current = projectGuide;
     onPlaceRef.current = onPlacePrimitive;
     onSelectRef.current = onSelectPrimitive;
+    onConnectPickRef.current = onConnectPick;
     onMoveRef.current = onMovePrimitive;
     onTelemetryRef.current = onTelemetry;
     onConnectionFlashRef.current = onConnectionFlash;
@@ -172,9 +183,11 @@ export function MachineCanvas({
     diagnosticsRef.current = diagnosticsEnabled ?? false;
   }, [
     onCanvasReady,
+    connectionMode,
     diagnosticsEnabled,
     manifest,
     onConnectionFlash,
+    onConnectPick,
     onMovePrimitive,
     onPlacePrimitive,
     onSelectPrimitive,
@@ -236,6 +249,7 @@ export function MachineCanvas({
             hoveredIdRef.current,
             draggingIdRef.current,
             placingRef.current,
+            connectionModeRef.current,
             projectGuideRef.current,
             flashTimesRef.current,
             diagnosticsRef.current,
@@ -246,6 +260,8 @@ export function MachineCanvas({
             ? manifestRef.current.primitives.find((primitive) => primitive.id === hoveredIdRef.current)
             : undefined;
           if (placingRef.current) {
+            instance.cursor('crosshair');
+          } else if (connectionModeRef.current?.kind) {
             instance.cursor('crosshair');
           } else if (draggingIdRef.current) {
             instance.cursor('grabbing');
@@ -265,6 +281,19 @@ export function MachineCanvas({
 
           if (placingRef.current) {
             onPlaceRef.current(x, y);
+            return;
+          }
+
+          if (connectionModeRef.current?.kind) {
+            const hit = hitTest(
+              manifestRef.current.primitives,
+              x,
+              y,
+              runtimeRef.current,
+            );
+            if (hit) {
+              onConnectPickRef.current?.(hit.id);
+            }
             return;
           }
 
@@ -337,6 +366,15 @@ export function MachineCanvas({
 
   const hint = (() => {
     if (placingKind) return `Click canvas to place ${labelFor(placingKind)}`;
+    if (connectionMode?.kind) {
+      const source = connectionMode.sourceId
+        ? manifest.primitives.find((primitive) => primitive.id === connectionMode.sourceId)
+        : undefined;
+      const connector = labelForConnectionMode(connectionMode.kind);
+      return source
+        ? `${connector} — ${labelFor(source.kind)} locked in. Click the second part.`
+        : `${connector} — click the first part, then the second part.`;
+    }
     const sel = manifest.primitives.find((p) => p.id === selectedPrimitiveId);
     if (!sel) return 'Click a part to select · Drag to reposition';
     switch (sel.kind) {
@@ -348,8 +386,8 @@ export function MachineCanvas({
       case 'pulley':
       case 'chain-sprocket':
         return sel.kind === 'pulley'
-          ? 'Pulley — use it as a rotating part, or Quick Connect to route a rope or belt through it'
-          : 'Chain sprocket — place it in a motor ring, touch another rotating part, or Quick Connect a routed chain';
+          ? 'Pulley — use it as a rotating part, or use Connect to add a belt around matching parts'
+          : 'Chain sprocket — place it in a motor ring, touch another rotating part, or use Connect to add a chain';
       case 'flywheel':
         return 'Flywheel — feed it from a motor, gear train, or belt link to store motion';
       case 'gearbox':
@@ -383,9 +421,9 @@ export function MachineCanvas({
       case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
       case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
       case 'winch':    return 'Winch — rope it to a hook, bucket, crane arm, or cargo block for lifting';
-      case 'node':     return 'Node — place another Node then Quick Connect → Beam';
-      case 'hook':     return 'Hook — Quick Connect it to a winch, then clip cargo blocks to the hook';
-      case 'locomotive': return 'Locomotive — set its trackId, then Quick Connect it to a rotating drive part';
+      case 'node':     return 'Node — place another Node, then Connect with Beam';
+      case 'hook':     return 'Hook — connect it to a winch with Rope, then clip cargo blocks to the hook';
+      case 'locomotive': return 'Locomotive — set its trackId, then link it to a rotating drive part';
       default:         return `${sel.label ?? sel.kind} — drag to move · Inspector to adjust`;
     }
   })();
@@ -397,8 +435,14 @@ export function MachineCanvas({
       <div className="machine-canvas-toolbar">
         <div className="canvas-toolbar-main">
           <span>{sunnyStatus}</span>
-          <span className={`canvas-mode-pill ${placingKind ? 'placing' : selectedPrimitiveId ? 'selected' : 'idle'}`}>
-            {placingKind ? `Place ${labelFor(placingKind)}` : selectedPrimitiveId ? 'Selected part' : 'Select and drag'}
+          <span className={`canvas-mode-pill ${placingKind || connectionMode?.kind ? 'placing' : selectedPrimitiveId ? 'selected' : 'idle'}`}>
+            {placingKind
+              ? `Place ${labelFor(placingKind)}`
+              : connectionMode?.kind
+                ? `Connect ${labelForConnectionMode(connectionMode.kind)}`
+                : selectedPrimitiveId
+                  ? 'Selected part'
+                  : 'Select and drag'}
           </span>
         </div>
         <span className="canvas-hint">{hint}</span>
@@ -435,6 +479,7 @@ function drawScene(
   hoveredPrimitiveId: string | undefined,
   draggingPrimitiveId: string | undefined,
   placingKind: PrimitiveKind | null | undefined,
+  connectionMode: MachineCanvasProps['connectionMode'],
   projectGuide: MachineCanvasProps['projectGuide'],
   flashTimes: Record<string, number>,
   diagnosticsEnabled: boolean,
@@ -478,6 +523,7 @@ function drawScene(
     hoveredPrimitiveId,
     draggingPrimitiveId,
     placingKind,
+    connectionMode,
     instance.mouseX,
     instance.mouseY,
   );
@@ -596,7 +642,7 @@ function drawConnectionOverlay(
         instance.fill(245, 158, 11, 130);
         instance.textSize(11);
         instance.textAlign(instance.CENTER, instance.TOP);
-        instance.text('Place a hook, bucket, arm, or cargo below, then Quick Connect', x, y + 230);
+        instance.text('Place a hook, bucket, arm, or cargo below, then use Connect → Rope', x, y + 230);
       }
     }
 
@@ -923,19 +969,84 @@ function drawInteractionOverlay(
   hoveredPrimitiveId: string | undefined,
   draggingPrimitiveId: string | undefined,
   placingKind: PrimitiveKind | null | undefined,
+  connectionMode: MachineCanvasProps['connectionMode'],
   mouseX: number,
   mouseY: number,
 ) {
   const modeText = placingKind
     ? `Place ${labelFor(placingKind)}`
+    : connectionMode?.kind
+      ? `Connect ${labelForConnectionMode(connectionMode.kind)}`
     : draggingPrimitiveId
       ? 'Dragging part'
       : selectedPrimitiveId
         ? 'Part selected'
         : 'Select mode';
-  drawModeChip(instance, 16, 16, modeText, placingKind ? 'good' : selectedPrimitiveId ? 'info' : 'warn');
+  drawModeChip(
+    instance,
+    16,
+    16,
+    modeText,
+    placingKind || connectionMode?.kind ? 'good' : selectedPrimitiveId ? 'info' : 'warn',
+  );
 
   if (placingKind && mouseX >= 0 && mouseX <= instance.width && mouseY >= 0 && mouseY <= instance.height) {
+    return;
+  }
+
+  if (connectionMode?.kind) {
+    const sourcePrimitive = connectionMode.sourceId
+      ? manifest.primitives.find((primitive) => primitive.id === connectionMode.sourceId)
+      : undefined;
+
+    if (sourcePrimitive) {
+      const sourceAnchor = getPrimitiveAnchor(sourcePrimitive, manifest.primitives, runtime);
+      instance.push();
+      const ctx = instance.drawingContext as CanvasRenderingContext2D;
+      ctx.setLineDash([8, 6]);
+      instance.stroke(47, 154, 125, 150);
+      instance.strokeWeight(2);
+      if (mouseX >= 0 && mouseX <= instance.width && mouseY >= 0 && mouseY <= instance.height) {
+        instance.line(sourceAnchor.x, sourceAnchor.y, mouseX, mouseY);
+      }
+      ctx.setLineDash([]);
+      instance.noFill();
+      instance.stroke(47, 154, 125, 190);
+      instance.strokeWeight(2);
+      instance.circle(sourceAnchor.x, sourceAnchor.y, 28);
+      instance.pop();
+      drawPreviewCard(
+        instance,
+        sourceAnchor.x,
+        sourceAnchor.y,
+        `First part: ${labelFor(sourcePrimitive.kind)}`,
+        `Now click the second part to create ${labelForConnectionMode(connectionMode.kind).toLowerCase()}.`,
+        'good',
+      );
+    }
+
+    const hoveredPrimitive = hoveredPrimitiveId
+      ? manifest.primitives.find((primitive) => primitive.id === hoveredPrimitiveId)
+      : undefined;
+
+    if (!hoveredPrimitive || draggingPrimitiveId) {
+      return;
+    }
+
+    const hoverDetail = sourcePrimitive && hoveredPrimitive.id === sourcePrimitive.id
+      ? 'Pick a different part for the second click.'
+      : sourcePrimitive
+        ? 'Click to use this as the second part.'
+        : 'Click to use this as the first part.';
+    const anchor = getPrimitiveAnchor(hoveredPrimitive, manifest.primitives, runtime);
+    drawPreviewCard(
+      instance,
+      anchor.x,
+      anchor.y,
+      labelFor(hoveredPrimitive.kind),
+      hoverDetail,
+      hoveredPrimitive.id === selectedPrimitiveId ? 'good' : 'info',
+    );
     return;
   }
 
@@ -1140,7 +1251,7 @@ function getPlacementAssessment(
         ? {
             tone: 'good',
             title: 'Ready to hoist',
-            detail: 'Use Quick Connect once the hook is where you want it.',
+            detail: 'Use Connect → Rope once the hook is where you want it.',
           }
         : {
             tone: 'warn',
@@ -2388,5 +2499,20 @@ function labelFor(kind: PrimitiveKind): string {
     case 'cargo-block':  return 'Cargo Block';
     case 'material-pile': return 'Material Pile';
     default: return kind.split('-').map((s) => s[0].toUpperCase() + s.slice(1)).join(' ');
+  }
+}
+
+function labelForConnectionMode(
+  kind: NonNullable<MachineCanvasProps['connectionMode']>['kind'],
+): string {
+  switch (kind) {
+    case 'rope': return 'Rope';
+    case 'belt-link': return 'Belt';
+    case 'chain-link': return 'Chain';
+    case 'bolt-link': return 'Bolt';
+    case 'hinge-link': return 'Hinge';
+    case 'powered-hinge-link': return 'Powered Hinge';
+    case 'beam': return 'Beam';
+    default: return 'Connector';
   }
 }

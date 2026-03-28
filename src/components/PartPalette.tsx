@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { isMechanicalJointEndpointKind, isRopeEndpointKind } from '../lib/connectors';
 import { PART_CATEGORIES, type ExperimentManifest, type PrimitiveInstance, type PrimitiveKind } from '../lib/types';
 
 const BEGINNER_PARTS: PrimitiveKind[] = ['motor', 'gear', 'wheel', 'conveyor', 'hopper'];
@@ -13,7 +12,6 @@ interface PartPaletteProps {
   projectTitle?: string;
   projectStepTitle?: string;
   onSelectKind: (kind: PrimitiveKind | null) => void;
-  onCreateConnector?: (kind: 'rope' | 'belt-link' | 'chain-link' | 'bolt-link' | 'hinge-link' | 'powered-hinge-link') => void;
 }
 
 interface PaletteSuggestion {
@@ -30,7 +28,6 @@ export function PartPalette({
   projectTitle,
   projectStepTitle,
   onSelectKind,
-  onCreateConnector,
 }: PartPaletteProps) {
   const [beginner, setBeginner] = useState(() => {
     try {
@@ -59,33 +56,6 @@ export function PartPalette({
       .sort((left, right) => right[1] - left[1])
       .map(([kind]) => kind as PrimitiveKind),
     [counts],
-  );
-  const mechanicalCandidates = useMemo(
-    () => manifest.primitives.filter((primitive) => isMechanicalJointEndpointKind(primitive.kind) && primitive.kind !== 'motor'),
-    [manifest.primitives],
-  );
-  const ropeEndpointCount = useMemo(
-    () => manifest.primitives.filter((primitive) => isRopeEndpointKind(primitive.kind)).length,
-    [manifest.primitives],
-  );
-  const connectorReadiness = useMemo(() => ({
-    rope: counts.winch > 0 && ropeEndpointCount > 0,
-    'belt-link': counts.wheel + counts.pulley + counts.flywheel >= 2,
-    'chain-link': counts['chain-sprocket'] >= 2,
-    'bolt-link': mechanicalCandidates.length >= 2,
-    'hinge-link': mechanicalCandidates.length >= 2,
-    'powered-hinge-link': mechanicalCandidates.length >= 2 && counts.motor > 0,
-  }), [counts, mechanicalCandidates.length, ropeEndpointCount]);
-  const readyConnectorLabels = useMemo(
-    () => [
-      connectorReadiness.rope ? 'Rope' : null,
-      connectorReadiness['belt-link'] ? 'Belt' : null,
-      connectorReadiness['chain-link'] ? 'Chain' : null,
-      connectorReadiness['bolt-link'] ? 'Bolt' : null,
-      connectorReadiness['hinge-link'] ? 'Hinge' : null,
-      connectorReadiness['powered-hinge-link'] ? 'Powered Hinge' : null,
-    ].filter((label): label is string => Boolean(label)),
-    [connectorReadiness],
   );
 
   function toggleBeginner() {
@@ -167,65 +137,6 @@ export function PartPalette({
               {labelForPart(kind)} x{counts[kind]}
             </span>
           ))}
-        </div>
-      ) : null}
-
-      {!guidedKinds && onCreateConnector ? (
-        <div className="palette-connector-card">
-          <p className="palette-context-label">Connectors</p>
-          <strong>Ropes, belts, chains, bolts, and hinges are created from matching parts already on the canvas.</strong>
-          <p className="muted">
-            Use these shortcuts for the first connector, then Quick Connect can route or refine the connection around the machine.
-          </p>
-          <p className="palette-connector-status muted">
-            {readyConnectorLabels.length > 0
-              ? `Ready now: ${readyConnectorLabels.join(', ')}.`
-              : 'Add matching machine parts first. Powered Hinge also needs a motor on the canvas.'}
-          </p>
-          <div className="palette-connector-row">
-            <button
-              type="button"
-              disabled={!connectorReadiness.rope}
-              onClick={() => onCreateConnector('rope')}
-            >
-              Rope{counts.rope ? ` x${counts.rope}` : ''}
-            </button>
-            <button
-              type="button"
-              disabled={!connectorReadiness['belt-link']}
-              onClick={() => onCreateConnector('belt-link')}
-            >
-              Belt{counts['belt-link'] ? ` x${counts['belt-link']}` : ''}
-            </button>
-            <button
-              type="button"
-              disabled={!connectorReadiness['chain-link']}
-              onClick={() => onCreateConnector('chain-link')}
-            >
-              Chain{counts['chain-link'] ? ` x${counts['chain-link']}` : ''}
-            </button>
-            <button
-              type="button"
-              disabled={!connectorReadiness['bolt-link']}
-              onClick={() => onCreateConnector('bolt-link')}
-            >
-              Bolt{counts['bolt-link'] ? ` x${counts['bolt-link']}` : ''}
-            </button>
-            <button
-              type="button"
-              disabled={!connectorReadiness['hinge-link']}
-              onClick={() => onCreateConnector('hinge-link')}
-            >
-              Hinge{counts['hinge-link'] ? ` x${counts['hinge-link']}` : ''}
-            </button>
-            <button
-              type="button"
-              disabled={!connectorReadiness['powered-hinge-link']}
-              onClick={() => onCreateConnector('powered-hinge-link')}
-            >
-              Powered Hinge{counts['powered-hinge-link'] ? ` x${counts['powered-hinge-link']}` : ''}
-            </button>
-          </div>
         </div>
       ) : null}
 
@@ -403,7 +314,7 @@ function deriveSuggestions(
         push('winch', 'A winch and hook only become useful together.');
         break;
       case 'node':
-        push('node', 'A second node lets Quick Connect create a beam.');
+        push('node', 'A second node lets Connect create a beam.');
         break;
       case 'rail-segment':
         push('locomotive', 'Locomotives make the track meaningful.');
@@ -526,7 +437,7 @@ function connectionHintForKind(kind: PrimitiveKind) {
     case 'pulley':
       return 'Pulleys can carry a drive link, route a belt through an idler path, or act as rope redirectors once a winch rope exists.';
     case 'chain-sprocket':
-      return 'These can mesh by contact, use Quick Connect for a visible routed chain link, or mount onto a chassis.';
+      return 'These can mesh by contact, use Connect to add a visible chain link, or mount onto a chassis.';
     case 'flywheel':
       return 'Flywheels store spin, so feed them from a motor or belt train and mount them onto a frame if needed.';
     case 'gearbox':
