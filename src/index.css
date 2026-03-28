@@ -2864,7 +2864,9 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
-  min-height: calc(100svh - 8.5rem);
+  height: calc(100svh - 8.35rem);
+  min-height: calc(100svh - 8.35rem);
+  max-height: calc(100svh - 8.35rem);
   padding: 1rem;
   overflow: hidden;
   border-radius: 30px;
@@ -3017,17 +3019,21 @@ button:disabled {
   min-height: 0;
   flex: 1;
   align-items: stretch;
+  overflow: hidden;
 }
 
 .builder-canvas-panel {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .page-build .builder-parts-rail {
   position: relative;
   top: auto;
-  height: auto;
+  height: 100%;
   min-height: 0;
   overflow-y: auto;
   padding-right: 0.18rem;
@@ -3038,7 +3044,7 @@ button:disabled {
   flex-direction: column;
   gap: 0.85rem;
   flex: 0 0 auto;
-  min-height: fit-content;
+  min-height: 100%;
   padding: 1rem;
   overflow: visible;
 }
@@ -3119,6 +3125,7 @@ button:disabled {
 .machine-canvas-shell {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-height: 100%;
   border-radius: 30px;
   overflow: hidden;
@@ -3136,12 +3143,20 @@ button:disabled {
 }
 
 .machine-canvas {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
   flex: 1;
-  min-height: clamp(430px, 62svh, 660px);
+  min-height: 0;
   padding: 0.9rem;
+  overflow: hidden;
   background:
     radial-gradient(circle at top right, rgba(255, 236, 180, 0.65), transparent 22%),
     linear-gradient(180deg, rgba(238, 249, 255, 0.86), rgba(245, 251, 245, 0.8));
+}
+
+.machine-canvas canvas {
+  align-self: flex-start;
 }
 
 .utility-summary {
@@ -4880,6 +4895,8 @@ button:disabled {
 
 @media (max-width: 1200px) {
   .builder-stage-shell {
+    height: auto;
+    max-height: none;
     min-height: auto;
   }
 
