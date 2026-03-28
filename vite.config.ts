@@ -31,6 +31,16 @@ export default defineConfig({
           }
 
           if (
+            normalized.includes('/src/pages/HomePage.tsx')
+            || normalized.includes('/src/components/WinkyDog.tsx')
+            || normalized.includes('/src/lib/challenge-launcher.ts')
+            || normalized.includes('/src/lib/engineering-handbook.ts')
+            || normalized.includes('/src/lib/silly-scene-launcher.ts')
+          ) {
+            return 'home-launcher';
+          }
+
+          if (
             normalized.includes('/src/pages/MachinePage.tsx')
             || normalized.includes('/src/pages/JobPage.tsx')
             || normalized.includes('/src/pages/BlueprintPage.tsx')

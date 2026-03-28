@@ -1,23 +1,118 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { JobCard } from '../components/JobCard';
-import { MachineCard } from '../components/MachineCard';
-import { useHomeSummary } from '../hooks/useHomeSummary';
+import { WinkyDog } from '../components/WinkyDog';
 import { useAppBoot } from '../lib/app-boot';
+import { FEATURED_CHALLENGE_LAUNCHER_CARDS } from '../lib/challenge-launcher';
+import { db } from '../lib/db';
 import { ENGINEERING_HANDBOOK_ENTRIES } from '../lib/engineering-handbook';
 import { markPerformance, measurePerformance } from '../lib/perf';
 import { scheduleBuildPrefetch } from '../lib/route-preload';
 import { SILLY_SCENE_LAUNCHER_CARDS } from '../lib/silly-scene-launcher';
-import { TIER_NAMES, TIER_THRESHOLDS, tierForXp } from '../lib/xp';
+import type { ChallengeProgressRecord, DraftRecord, JobProgressRecord, SavedExperimentRecord, SettingRecord, SiteJobDefinition } from '../lib/types';
+import { TIER_NAMES, tierForXp } from '../lib/xp';
+
+type HomeMode = 'guided' | 'workbook' | 'challenges' | 'scenes' | 'free';
+
+interface HomeSnapshot {
+  challengeProgress: ChallengeProgressRecord[];
+  completedProgress: JobProgressRecord[];
+  draftCandidates: DraftRecord[];
+  jobs: SiteJobDefinition[];
+  machineCandidates: SavedExperimentRecord[];
+  xpRecord?: SettingRecord;
+}
+
+const MODE_ICONS: Record<HomeMode, string> = {
+  guided: '★',
+  workbook: '📘',
+  challenges: '🏅',
+  scenes: '🎈',
+  free: '∞',
+};
+
+const WINKY_HINTS: Record<HomeMode, string> = {
+  guided: 'Winky says: start with the guided builds first and the whole yard makes more sense.',
+  workbook: 'Winky says: recipes are the fastest way to learn what a weird part can actually do.',
+  challenges: 'Winky says: medals pop when your machine really works, not when it only looks busy.',
+  scenes: 'Winky says: silly scenes are best when you remix them instead of leaving them alone.',
+  free: 'Winky says: free build is where the giant ridiculous inventions happen.',
+};
 
 export function HomePage() {
   const boot = useAppBoot();
-  const summary = useHomeSummary(boot.status !== 'pending');
   const summaryMeasuredRef = useRef(false);
-  const projects = summary?.projects ?? [];
-  const latestDraft = summary?.latestDraft ?? null;
-  const honestMachines = summary?.savedMachinesPreview ?? [];
-  const allStarterProjectsComplete = projects.length > 0 && projects.every((project) => project.completed);
+  const [selectedMode, setSelectedMode] = useState<HomeMode>('guided');
+  const [homeSnapshot, setHomeSnapshot] = useState<HomeSnapshot | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (boot.status === 'pending') {
+      setHomeSnapshot(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    void (async () => {
+      const [draftCandidates, machineCandidates, jobs, completedProgress, xpRecord, challengeProgress] = await Promise.all([
+        db.drafts.orderBy('updatedAt').reverse().limit(6).toArray(),
+        db.machines.orderBy('updatedAt').reverse().limit(12).toArray(),
+        db.jobs.orderBy('tier').limit(8).toArray(),
+        db.jobProgress.toCollection().filter((progress) => progress.completed).limit(12).toArray(),
+        db.settings.get('xp'),
+        db.challengeProgress.toArray(),
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      setHomeSnapshot({
+        challengeProgress,
+        completedProgress,
+        draftCandidates,
+        jobs,
+        machineCandidates,
+        xpRecord: xpRecord ?? undefined,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boot.status]);
+
+  const challengeProgress = homeSnapshot?.challengeProgress;
+  const completedProgress = homeSnapshot?.completedProgress;
+  const draftCandidates = homeSnapshot?.draftCandidates;
+  const jobs = homeSnapshot?.jobs;
+  const machineCandidates = homeSnapshot?.machineCandidates;
+  const xpRecord = homeSnapshot?.xpRecord;
+
+  const completedJobIds = useMemo(
+    () => new Set((completedProgress ?? []).map((item) => item.jobId)),
+    [completedProgress],
+  );
+  const projects = useMemo(
+    () => (jobs ?? [])
+      .filter((job) => job.kind === 'starter-project' || job.playable !== false)
+      .map((job) => ({
+        ...job,
+        completed: completedJobIds.has(job.jobId),
+      })),
+    [completedJobIds, jobs],
+  );
+  const latestDraft = useMemo(
+    () => draftCandidates?.find((draft) => !draft.manifest.metadata.recipeId) ?? null,
+    [draftCandidates],
+  );
+  const honestMachines = useMemo(
+    () => (machineCandidates ?? [])
+      .filter((machine) => !machine.featured && !machine.experiment.metadata.recipeId)
+      .slice(0, 4),
+    [machineCandidates],
+  );
   const nextProject = projects.find((project) => !project.completed) ?? projects[0];
   const orderedProjects = useMemo(
     () => (nextProject
@@ -26,13 +121,20 @@ export function HomePage() {
     [nextProject, projects],
   );
 
-  const xp = summary?.xp ?? 0;
+  const challengeProgressCount = useMemo(() => {
+    const featuredIds = new Set(FEATURED_CHALLENGE_LAUNCHER_CARDS.map((challenge) => challenge.id));
+    return (challengeProgress ?? []).filter((entry) => entry.completed && featuredIds.has(entry.challengeId)).length;
+  }, [challengeProgress]);
+
+  const xp = xpRecord ? Number(xpRecord.value) : 0;
   const tier = tierForXp(xp);
   const tierName = TIER_NAMES[tier];
-  const nextTier = tier < 4 ? tier + 1 : null;
-  const tierFloor = TIER_THRESHOLDS[tier];
-  const tierCeiling = nextTier ? TIER_THRESHOLDS[nextTier] : tierFloor;
-  const tierProgress = nextTier ? Math.min(100, ((xp - tierFloor) / (tierCeiling - tierFloor)) * 100) : 100;
+  const completedProjects = projects.filter((project) => project.completed).length;
+  const featuredRecipes = ENGINEERING_HANDBOOK_ENTRIES.slice(0, 4);
+  const featuredScenes = SILLY_SCENE_LAUNCHER_CARDS.slice(0, 4);
+  const homeLoading = boot.status === 'pending' || homeSnapshot === null;
+  const homeDegraded = boot.status === 'degraded';
+  const freeBuildTarget = latestDraft ? `/build/${latestDraft.draftId}` : '/build';
 
   useEffect(() => {
     if (boot.status === 'pending') {
@@ -44,324 +146,291 @@ export function HomePage() {
   }, [boot.status]);
 
   useEffect(() => {
-    if (!summary || summaryMeasuredRef.current) {
+    if (homeLoading || summaryMeasuredRef.current) {
       return;
     }
 
     markPerformance('home-summary-ready');
     measurePerformance('home-summary-duration', 'app-mounted', 'home-summary-ready');
     summaryMeasuredRef.current = true;
-  }, [summary]);
+  }, [homeLoading]);
 
   const guidedAction = latestDraft
     ? {
-        label: 'Resume Guided Play',
+        label: 'Resume Guided Build',
         to: `/build/${latestDraft.draftId}`,
         title: latestDraft.manifest.metadata.title,
-        detail: 'Pick up where you left off.',
+        detail: 'Jump back into the last draft you touched.',
       }
     : nextProject
       ? {
-          label: nextProject.completed ? 'Replay Guided Play' : 'Start Guided Play',
+          label: nextProject.completed ? 'Replay Guided Build' : 'Start Guided Build',
           to: `/build?job=${nextProject.jobId}`,
           title: nextProject.title,
           detail: nextProject.summary,
         }
       : {
-          label: 'Browse Guided Play',
-          to: '#starter-projects',
-          title: 'Guided Play',
-          detail: 'Start with a recipe or a starter project.',
+          label: 'Open Free Build',
+          to: '/build',
+          title: 'Open the workyard',
+          detail: 'Start building directly in the sandbox.',
         };
-  const freeBuildAction = {
-    label: 'Open Free Build',
-    to: '/build',
-    title: latestDraft ? 'Open the yard' : 'Start from scratch',
-    detail: 'Open the canvas with the full part drawer and build whatever you want.',
-  };
-  const handbookRecipes = ENGINEERING_HANDBOOK_ENTRIES;
-  const featuredWorkbookRecipes = handbookRecipes;
-  const featuredScenes = SILLY_SCENE_LAUNCHER_CARDS.slice(0, 4);
-  const completedCount = summary?.completedCount ?? 0;
-  const homeLoading = boot.status === 'pending' || (boot.status === 'ready' && !summary);
-  const homeDegraded = boot.status === 'degraded';
+
+  const modeButtons: Array<{
+    id: HomeMode;
+    label: string;
+    hint: string;
+    badge: string;
+  }> = [
+    {
+      id: 'guided',
+      label: 'Guided Build',
+      hint: 'Start with the three core machines.',
+      badge: homeLoading ? 'Loading…' : `${completedProjects}/${projects.length || 3} cleared`,
+    },
+    {
+      id: 'workbook',
+      label: 'Engineering Workbook',
+      hint: 'Mount a real recipe and take it apart.',
+      badge: `${ENGINEERING_HANDBOOK_ENTRIES.length} recipes`,
+    },
+    {
+      id: 'challenges',
+      label: 'Challenges',
+      hint: 'Earn medals for honest machine behavior.',
+      badge: `${challengeProgressCount ?? 0}/${FEATURED_CHALLENGE_LAUNCHER_CARDS.length} featured`,
+    },
+    {
+      id: 'scenes',
+      label: 'Silly Scenes',
+      hint: 'Load a goofy setup and remix the physics.',
+      badge: `${SILLY_SCENE_LAUNCHER_CARDS.length} scenes`,
+    },
+    {
+      id: 'free',
+      label: 'Free Build',
+      hint: 'Open the yard and invent your own contraption.',
+      badge: latestDraft ? 'Resume draft' : 'Blank yard',
+    },
+  ];
+
+  function renderModePreview() {
+    switch (selectedMode) {
+      case 'guided':
+        return (
+          <>
+            <div className="home-preview-head">
+              <p className="eyebrow">Guided Build</p>
+              <h2>{guidedAction.title}</h2>
+              <p>{guidedAction.detail}</p>
+            </div>
+            <div className="home-preview-actions">
+              <Link to={guidedAction.to} className="home-preview-primary">
+                {guidedAction.label}
+              </Link>
+            </div>
+            <div className="home-preview-grid home-preview-grid-guided">
+              {orderedProjects.slice(0, 3).map((project) => (
+                <Link
+                  key={project.jobId}
+                  to={`/build?job=${project.jobId}`}
+                  className={`home-preview-card${project.completed ? ' is-complete' : ''}${nextProject?.jobId === project.jobId ? ' is-featured' : ''}`}
+                >
+                  <div className="home-preview-card-top">
+                    <span className={`home-preview-badge challenge-tier-${project.completed ? 'bronze' : 'silver'}`}>
+                      {project.completed ? 'Done' : 'Starter'}
+                    </span>
+                    <strong>{project.title}</strong>
+                  </div>
+                  <p>{project.summary}</p>
+                  <span>{project.completed ? 'Replay Build' : 'Start Build'}</span>
+                </Link>
+              ))}
+            </div>
+          </>
+        );
+      case 'workbook':
+        return (
+          <>
+            <div className="home-preview-head">
+              <p className="eyebrow">Engineering Workbook</p>
+              <h2>Working machines you can study instantly</h2>
+              <p>These are real buildable contraptions, not fake examples. Mount one, run it, then remix it.</p>
+            </div>
+            <div className="home-preview-grid home-preview-grid-recipes">
+              {featuredRecipes.map((recipe) => (
+                <Link key={recipe.id} to={`/build?blueprint=${recipe.blueprintId}`} className="home-preview-card">
+                  <div className="home-preview-card-top">
+                    <span className="home-preview-badge home-preview-badge-blue">Recipe</span>
+                    <strong>{recipe.title}</strong>
+                  </div>
+                  <p>{recipe.summary}</p>
+                  <small>{recipe.partList.join(' · ')}</small>
+                  <span>Mount Recipe</span>
+                </Link>
+              ))}
+            </div>
+          </>
+        );
+      case 'challenges':
+        return (
+          <>
+            <div className="home-preview-head">
+              <p className="eyebrow">Challenges</p>
+              <h2>Ten featured medals to chase right now</h2>
+              <p>Challenges unlock automatically while you build. Nothing is scripted. The machine has to really do the thing.</p>
+            </div>
+            <div className="home-preview-actions">
+              <Link to={freeBuildTarget} className="home-preview-primary">
+                Open Build and Earn Medals
+              </Link>
+            </div>
+            <div className="home-preview-grid home-preview-grid-challenges">
+              {FEATURED_CHALLENGE_LAUNCHER_CARDS.map((challenge) => (
+                <article key={challenge.id} className="home-preview-card home-challenge-card">
+                  <div className="home-preview-card-top">
+                    <span className={`home-preview-badge challenge-tier-${challenge.tier}`}>{challenge.tier}</span>
+                    <strong>{challenge.title}</strong>
+                  </div>
+                  <p>{challenge.description}</p>
+                  <small>{challenge.category}</small>
+                </article>
+              ))}
+            </div>
+          </>
+        );
+      case 'scenes':
+        return (
+          <>
+            <div className="home-preview-head">
+              <p className="eyebrow">Silly Scenes</p>
+              <h2>Start from a playful setup</h2>
+              <p>These load as fresh drafts so Mason can experiment immediately instead of building from zero.</p>
+            </div>
+            <div className="home-preview-grid home-preview-grid-scenes">
+              {featuredScenes.map((scene) => (
+                <Link key={scene.id} to={`/build?scene=${scene.id}`} className="home-preview-card">
+                  <div className="home-preview-card-top">
+                    <span className="home-preview-scene-emoji" aria-hidden="true">{scene.emoji}</span>
+                    <strong>{scene.title}</strong>
+                  </div>
+                  <p>{scene.description}</p>
+                  <span>Load Scene</span>
+                </Link>
+              ))}
+            </div>
+          </>
+        );
+      case 'free':
+      default:
+        return (
+          <>
+            <div className="home-preview-head">
+              <p className="eyebrow">Free Build</p>
+              <h2>{latestDraft ? latestDraft.manifest.metadata.title : 'Open the blank workyard'}</h2>
+              <p>
+                {latestDraft
+                  ? latestDraft.manifest.metadata.shortDescription
+                  : 'Start with parts, connections, and the whole sandbox ready to go.'}
+              </p>
+            </div>
+            <div className="home-preview-actions">
+              <Link to={freeBuildTarget} className="home-preview-primary">
+                {latestDraft ? 'Resume Free Build' : 'Start Free Build'}
+              </Link>
+              <Link to="/build" className="home-preview-secondary">
+                Open Fresh Yard
+              </Link>
+            </div>
+            <div className="home-preview-grid home-preview-grid-free">
+              <article className="home-preview-card">
+                <div className="home-preview-card-top">
+                  <span className="home-preview-badge home-preview-badge-green">Sandbox</span>
+                  <strong>Full part drawer</strong>
+                </div>
+                <p>Motors, ropes, hinges, rails, pistons, buckets, springs, and the rest of the yard are ready.</p>
+              </article>
+              <article className="home-preview-card">
+                <div className="home-preview-card-top">
+                  <span className="home-preview-badge home-preview-badge-blue">Workbench</span>
+                  <strong>{honestMachines.length} saved machine{honestMachines.length === 1 ? '' : 's'} nearby</strong>
+                </div>
+                <p>Save the machines that actually taught Mason something, then come back and keep iterating.</p>
+              </article>
+            </div>
+          </>
+        );
+    }
+  }
 
   return (
     <div className="page page-home">
-      <section className="hero-shell yard-hero home-hero">
-        <div className="hero-copy home-hero-copy">
-          <p className="eyebrow">Mason&apos;s Lab</p>
-          <h1>Mason&apos;s Engineering Lab</h1>
-          <p className="home-hero-deck">Choose guided play or open free build.</p>
-          <div className="home-hero-stats" aria-label="Yard summary">
-            <div className="home-stat-chip">
-              <strong>{homeLoading ? '…' : projects.length}</strong>
-              <span>Starter Projects</span>
-            </div>
-            <div className="home-stat-chip">
-              <strong>{homeLoading ? '…' : `${completedCount}/${projects.length}`}</strong>
-              <span>Completed</span>
-            </div>
-            <div className="home-stat-chip">
-              <strong>{homeLoading ? '…' : xp}</strong>
-              <span>{`Tier ${tier} · ${tierName}`}</span>
-            </div>
+      <section className={`home-launcher-screen mode-${selectedMode}`}>
+        <div className="home-launcher-hud" aria-label="Lab progress">
+          <div className="home-hud-pill">
+            <span>Projects</span>
+            <strong>{homeLoading ? '…' : `${completedProjects}/${projects.length || 3}`}</strong>
           </div>
-          {homeDegraded ? (
-            <p className="builder-status builder-status-warning home-boot-status">
-              {boot.message ?? 'Storage is limited, so the yard is running in reduced mode.'}
+          <div className="home-hud-pill">
+            <span>Medals</span>
+            <strong>{homeLoading ? '…' : `${challengeProgressCount ?? 0}/${FEATURED_CHALLENGE_LAUNCHER_CARDS.length}`}</strong>
+          </div>
+          <div className="home-hud-pill">
+            <span>XP</span>
+            <strong>{homeLoading ? '…' : `${xp} · ${tierName}`}</strong>
+          </div>
+        </div>
+
+        <div className="home-launcher-hero">
+          <div className="home-launcher-title-wrap">
+            <p className="eyebrow">Workshop Mode Select</p>
+            <div className="home-launcher-title">
+              <h1 className="home-launcher-heading">
+                <span>Mason&apos;s</span>
+                <strong>Engineering Lab</strong>
+              </h1>
+            </div>
+            <p className="home-launcher-tagline">
+              Build ridiculous machines, earn medals, and learn how every real part behaves.
             </p>
-          ) : null}
-        </div>
+            {homeDegraded ? (
+              <p className="builder-status builder-status-warning home-boot-status">
+                {boot.message ?? 'Storage is limited, so the yard is running in reduced mode.'}
+              </p>
+            ) : null}
+          </div>
 
-        <div className="hero-panel home-entry-panel">
-          {homeLoading ? (
-            <div className="home-loading-stack" aria-hidden="true">
-              <div className="home-focus-card home-loading-card">
-                <div className="skeleton-line skeleton-line-eyebrow" />
-                <div className="skeleton-line skeleton-line-title" />
-                <div className="skeleton-line skeleton-line-copy" />
-                <div className="skeleton-line skeleton-line-copy short" />
-              </div>
-              <div className="home-focus-card home-loading-card">
-                <div className="skeleton-line skeleton-line-eyebrow" />
-                <div className="skeleton-line skeleton-line-title" />
-                <div className="skeleton-line skeleton-line-copy" />
-                <div className="skeleton-line skeleton-line-copy short" />
-              </div>
+          <div className="home-launcher-mascot">
+            <div className="home-winky-bubble">
+              <strong>Winky</strong>
+              <p>{WINKY_HINTS[selectedMode]}</p>
             </div>
-          ) : (
-            <>
-              <div className="home-entry-grid">
-                {guidedAction.to.startsWith('#') ? (
-                  <a href={guidedAction.to} className="home-entry-card home-entry-card-guided">
-                    <p className="eyebrow">Guided Build</p>
-                    <strong>{guidedAction.title}</strong>
-                    <p>{guidedAction.detail}</p>
-                    <span>{guidedAction.label}</span>
-                  </a>
-                ) : (
-                  <Link to={guidedAction.to} className="home-entry-card home-entry-card-guided">
-                    <p className="eyebrow">Guided Build</p>
-                    <strong>{guidedAction.title}</strong>
-                    <p>{guidedAction.detail}</p>
-                    <span>{guidedAction.label}</span>
-                  </Link>
-                )}
-
-                <a href="#engineering-workbook" className="home-entry-card home-entry-card-workbook">
-                  <p className="eyebrow">Engineering Workbook</p>
-                  <strong>Study a working machine</strong>
-                  <p>Open a recipe, mount it instantly, and learn by taking it apart.</p>
-                  <span>Browse Recipes</span>
-                </a>
-
-                <a href="#silly-scenes" className="home-entry-card home-entry-card-scenes">
-                  <p className="eyebrow">Silly Scenes</p>
-                  <strong>Start with a playful setup</strong>
-                  <p>Load a strange physics scene and experiment without building from zero.</p>
-                  <span>Open Scenes</span>
-                </a>
-
-                <Link to={freeBuildAction.to} className="home-entry-card home-entry-card-free">
-                  <p className="eyebrow">Free Build</p>
-                  <strong>{freeBuildAction.title}</strong>
-                  <p>{freeBuildAction.detail}</p>
-                  <span>{freeBuildAction.label}</span>
-                </Link>
-              </div>
-
-              <div className="xp-bar-block home-tier-block">
-                <div className="xp-bar-header">
-                  <span className={`tier-badge tier-${tier}`}>Tier {tier} · {tierName}</span>
-                  <span className="muted">{xp} XP</span>
-                </div>
-                <div className="xp-bar">
-                  <div className="xp-bar-fill" style={{ width: `${tierProgress}%` }} />
-                </div>
-                <p className="xp-bar-caption muted">
-                  Finish the starter builds first, then move into harder open-ended experiments.
-                </p>
-              </div>
-            </>
-          )}
-        </div>
-      </section>
-
-      <section className="section-block" id="engineering-workbook">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Engineering Handbook</p>
-            <h2>Open a working example</h2>
+            <WinkyDog className="home-winky-dog" />
           </div>
         </div>
-        <div className="card-grid home-handbook-grid">
-          {featuredWorkbookRecipes.map((recipe) => (
-            <Link
-              key={recipe.id}
-              to={`/build?blueprint=${recipe.blueprintId}`}
-              className="yard-start-card home-handbook-card"
-            >
-              <p className="eyebrow">Recipe</p>
-              <strong>{recipe.title}</strong>
-              <p>{recipe.summary}</p>
-              <p className="muted">Parts: {recipe.partList.join(', ')}</p>
-              <span>Open Recipe</span>
-            </Link>
-          ))}
-        </div>
-      </section>
 
-      <section className="section-block" id="starter-projects">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Guided Build</p>
-            <h2>{allStarterProjectsComplete ? 'Starter path finished' : 'Start with clear cause and effect.'}</h2>
-          </div>
-        </div>
-        <p className="home-section-note muted">
-          Do these first. Once the basics feel natural, this path can grow into harder challenges.
-        </p>
-        {allStarterProjectsComplete ? (
-          <div className="card-grid home-mission-grid">
-            <article className="yard-start-card mission-card mission-card-map">
-              <span className="yard-start-index">🗺</span>
-              <div>
-                <strong>Mission Map</strong>
-                <p>The first three districts are live. More guided builds will appear here.</p>
-              </div>
-            </article>
-            <Link to="/build" className="yard-start-card mission-card mission-card-free">
-              <span className="yard-start-index">∞</span>
-              <div>
-                <strong>Free Build</strong>
-                <p>Open the yard and experiment without the guided path.</p>
-              </div>
-            </Link>
-          </div>
-        ) : null}
-        {homeLoading ? (
-          <div className="job-grid home-job-grid">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <article key={`job-skeleton-${index}`} className={`job-card featured home-loading-card ${index > 0 ? 'compact' : ''}`}>
-                <div className="skeleton-line skeleton-line-eyebrow" />
-                <div className="skeleton-line skeleton-line-title" />
-                <div className="skeleton-line skeleton-line-copy" />
-                <div className="skeleton-line skeleton-line-copy" />
-                <div className="skeleton-line skeleton-line-copy short" />
-              </article>
+        <div className="home-launcher-stage">
+          <aside className="home-mode-menu" aria-label="Game modes">
+            {modeButtons.map((mode) => (
+              <button
+                key={mode.id}
+                type="button"
+                className={`home-mode-button${selectedMode === mode.id ? ' is-selected' : ''}`}
+                onClick={() => setSelectedMode(mode.id)}
+              >
+                <span className="home-mode-icon" aria-hidden="true">{MODE_ICONS[mode.id]}</span>
+                <span className="home-mode-copy">
+                  <strong>{mode.label}</strong>
+                  <small>{mode.hint}</small>
+                </span>
+                <span className="home-mode-badge">{mode.badge}</span>
+              </button>
             ))}
-          </div>
-        ) : (
-          <div className="job-grid home-job-grid">
-            {orderedProjects.map((job, index) => (
-              <JobCard
-                key={job.jobId}
-                job={job}
-                completed={job.completed}
-                featured={index === 0}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+          </aside>
 
-      <section className="section-block" id="silly-scenes">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Silly Scenes</p>
-            <h2>Start from a playful setup</h2>
-          </div>
-        </div>
-        <div className="card-grid home-scene-grid">
-          {featuredScenes.map((scene) => (
-            <Link key={scene.id} to={`/build?scene=${scene.id}`} className="yard-start-card home-scene-card">
-              <p className="eyebrow">Silly Scene</p>
-              <strong>{scene.title}</strong>
-              <p>{scene.description}</p>
-              <span>Load Scene</span>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="section-block two-col">
-        <div>
-          <div className="section-head">
-            <div>
-              <p className="eyebrow">Your Bench</p>
-              <h2>Your Latest Work</h2>
-            </div>
-          </div>
-
-          {!homeLoading && latestDraft ? (
-            <Link to={`/build/${latestDraft.draftId}`} className="yard-draft-card home-draft-card">
-              <p className="eyebrow">Latest Draft</p>
-              <strong>{latestDraft.manifest.metadata.title}</strong>
-              <p>{latestDraft.manifest.metadata.shortDescription}</p>
-              <span>Continue Working</span>
-            </Link>
-          ) : homeLoading ? (
-            <div className="empty-card home-loading-card">
-              <div className="skeleton-line skeleton-line-title" />
-              <div className="skeleton-line skeleton-line-copy" />
-              <div className="skeleton-line skeleton-line-copy short" />
-            </div>
-          ) : (
-            <div className="empty-card">
-              <h3>No Draft Yet</h3>
-              <p>Start the first project and the yard will remember where you stopped.</p>
-              <div className="home-empty-actions">
-                {guidedAction.to.startsWith('#') ? (
-                  <a href={guidedAction.to} className="home-inline-link">
-                    Start First Project
-                  </a>
-                ) : (
-                  <Link to={guidedAction.to} className="home-inline-link">
-                    Start First Project
-                  </Link>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <div className="section-head">
-            <div>
-              <p className="eyebrow">Saved Machines</p>
-              <h2>Machines Worth Keeping</h2>
-            </div>
-          </div>
-
-          {!homeLoading && honestMachines.length > 0 ? (
-            <div className="card-grid">
-              {honestMachines.slice(0, 4).map((machine) => (
-                <MachineCard key={machine.recordId} machine={machine} />
-              ))}
-            </div>
-          ) : homeLoading ? (
-            <div className="card-grid">
-              {Array.from({ length: 2 }).map((_, index) => (
-                <div key={`machine-skeleton-${index}`} className="machine-card home-loading-card">
-                  <div className="skeleton-line skeleton-line-eyebrow" />
-                  <div className="skeleton-line skeleton-line-title" />
-                  <div className="skeleton-line skeleton-line-copy" />
-                  <div className="skeleton-line skeleton-line-copy short" />
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="empty-card">
-              <h3>No saved machines yet</h3>
-              <p>Save the first machine that teaches you something real about motion or flow.</p>
-              <div className="home-empty-actions">
-                <Link to="/build" className="home-inline-link">
-                  Open Free Build
-                </Link>
-              </div>
-            </div>
-          )}
+          <section className="home-mode-preview" data-mode={selectedMode}>
+            {renderModePreview()}
+          </section>
         </div>
       </section>
     </div>
