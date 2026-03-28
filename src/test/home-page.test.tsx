@@ -49,16 +49,19 @@ describe('HomePage launcher', () => {
       expect(screen.getByRole('heading', { level: 1, name: /Mason's.*Engineering Lab/i })).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('button', { name: /Guided Build/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Engineering Workbook/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Challenges/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Silly Scenes/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Free Build/i })).toBeInTheDocument();
+    const modeButtons = screen.getAllByRole('button');
+    expect(modeButtons.some((button) => button.textContent?.includes('Guided Build'))).toBe(true);
+    expect(modeButtons.some((button) => button.textContent?.includes('Engineering Workbook'))).toBe(true);
+    expect(modeButtons.some((button) => button.textContent?.includes('Challenges'))).toBe(true);
+    expect(modeButtons.some((button) => button.textContent?.includes('Silly Scenes'))).toBe(true);
+    expect(modeButtons.some((button) => button.textContent?.includes('Free Build'))).toBe(true);
 
-    fireEvent.click(screen.getByRole('button', { name: /Challenges/i }));
+    const challengesButton = modeButtons.find((button) => button.textContent?.includes('Challenges'));
+    expect(challengesButton).toBeTruthy();
+    fireEvent.click(challengesButton!);
 
-    expect(screen.getByRole('heading', { name: /Ten featured medals to chase right now/i })).toBeInTheDocument();
-    expect(screen.getByText('First Spin')).toBeInTheDocument();
-    expect(screen.getByText('The Full Monty')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Ten puzzle levels to solve right now/i })).toBeInTheDocument();
+    expect(screen.getByText('Hook and Drop')).toBeInTheDocument();
+    expect(screen.getByText('Trampoline Bank Shot')).toBeInTheDocument();
   });
 });

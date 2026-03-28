@@ -2,16 +2,25 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { WinkyDog } from '../components/WinkyDog';
 import { useAppBoot } from '../lib/app-boot';
-import { FEATURED_CHALLENGE_LAUNCHER_CARDS } from '../lib/challenge-launcher';
 import { db } from '../lib/db';
 import { ENGINEERING_HANDBOOK_ENTRIES } from '../lib/engineering-handbook';
 import { markPerformance, measurePerformance } from '../lib/perf';
+import { PUZZLE_CHALLENGE_LAUNCHER_CARDS } from '../lib/puzzle-challenge-launcher';
 import { scheduleBuildPrefetch } from '../lib/route-preload';
 import { SILLY_SCENE_LAUNCHER_CARDS } from '../lib/silly-scene-launcher';
-import type { ChallengeProgressRecord, DraftRecord, JobProgressRecord, SavedExperimentRecord, SettingRecord, SiteJobDefinition } from '../lib/types';
+import type {
+  ChallengeProgressRecord,
+  DraftRecord,
+  JobProgressRecord,
+  PuzzleChallengeProgressRecord,
+  SavedExperimentRecord,
+  SettingRecord,
+  SiteJobDefinition,
+} from '../lib/types';
 import { TIER_NAMES, tierForXp } from '../lib/xp';
 
 type HomeMode = 'guided' | 'workbook' | 'challenges' | 'scenes' | 'free';
+const MEDAL_CHALLENGE_COUNT = 10;
 
 interface HomeSnapshot {
   challengeProgress: ChallengeProgressRecord[];
@@ -19,6 +28,7 @@ interface HomeSnapshot {
   draftCandidates: DraftRecord[];
   jobs: SiteJobDefinition[];
   machineCandidates: SavedExperimentRecord[];
+  puzzleChallengeProgress: PuzzleChallengeProgressRecord[];
   xpRecord?: SettingRecord;
 }
 
@@ -33,7 +43,7 @@ const MODE_ICONS: Record<HomeMode, string> = {
 const WINKY_HINTS: Record<HomeMode, string> = {
   guided: 'Winky says: start with the guided builds first and the whole yard makes more sense.',
   workbook: 'Winky says: recipes are the fastest way to learn what a weird part can actually do.',
-  challenges: 'Winky says: medals pop when your machine really works, not when it only looks busy.',
+  challenges: 'Winky says: puzzle levels are for focused tinkering, and medals still pop in the normal yard when the machine honestly works.',
   scenes: 'Winky says: silly scenes are best when you remix them instead of leaving them alone.',
   free: 'Winky says: free build is where the giant ridiculous inventions happen.',
 };
@@ -48,20 +58,28 @@ export function HomePage() {
     let cancelled = false;
 
     if (boot.status === 'pending') {
-      setHomeSnapshot(null);
       return () => {
         cancelled = true;
       };
     }
 
     void (async () => {
-      const [draftCandidates, machineCandidates, jobs, completedProgress, xpRecord, challengeProgress] = await Promise.all([
+      const [
+        draftCandidates,
+        machineCandidates,
+        jobs,
+        completedProgress,
+        xpRecord,
+        challengeProgress,
+        puzzleChallengeProgress,
+      ] = await Promise.all([
         db.drafts.orderBy('updatedAt').reverse().limit(6).toArray(),
         db.machines.orderBy('updatedAt').reverse().limit(12).toArray(),
         db.jobs.orderBy('tier').limit(8).toArray(),
         db.jobProgress.toCollection().filter((progress) => progress.completed).limit(12).toArray(),
         db.settings.get('xp'),
         db.challengeProgress.toArray(),
+        db.puzzleChallengeProgress.toArray(),
       ]);
 
       if (cancelled) {
@@ -74,6 +92,7 @@ export function HomePage() {
         draftCandidates,
         jobs,
         machineCandidates,
+        puzzleChallengeProgress,
         xpRecord: xpRecord ?? undefined,
       });
     })();
@@ -88,6 +107,7 @@ export function HomePage() {
   const draftCandidates = homeSnapshot?.draftCandidates;
   const jobs = homeSnapshot?.jobs;
   const machineCandidates = homeSnapshot?.machineCandidates;
+  const puzzleChallengeProgress = homeSnapshot?.puzzleChallengeProgress;
   const xpRecord = homeSnapshot?.xpRecord;
 
   const completedJobIds = useMemo(
@@ -121,10 +141,14 @@ export function HomePage() {
     [nextProject, projects],
   );
 
-  const challengeProgressCount = useMemo(() => {
-    const featuredIds = new Set(FEATURED_CHALLENGE_LAUNCHER_CARDS.map((challenge) => challenge.id));
-    return (challengeProgress ?? []).filter((entry) => entry.completed && featuredIds.has(entry.challengeId)).length;
-  }, [challengeProgress]);
+  const puzzleProgressCount = useMemo(
+    () => (puzzleChallengeProgress ?? []).filter((entry) => entry.completed).length,
+    [puzzleChallengeProgress],
+  );
+  const medalProgressCount = useMemo(
+    () => (challengeProgress ?? []).filter((entry) => entry.completed).length,
+    [challengeProgress],
+  );
 
   const xp = xpRecord ? Number(xpRecord.value) : 0;
   const tier = tierForXp(xp);
@@ -197,8 +221,8 @@ export function HomePage() {
     {
       id: 'challenges',
       label: 'Challenges',
-      hint: 'Earn medals for honest machine behavior.',
-      badge: `${challengeProgressCount ?? 0}/${FEATURED_CHALLENGE_LAUNCHER_CARDS.length} featured`,
+      hint: 'Solve authored puzzle levels, then keep earning medals in free build.',
+      badge: `${puzzleProgressCount}/${PUZZLE_CHALLENGE_LAUNCHER_CARDS.length} cleared`,
     },
     {
       id: 'scenes',
@@ -277,25 +301,39 @@ export function HomePage() {
           <>
             <div className="home-preview-head">
               <p className="eyebrow">Challenges</p>
-              <h2>Ten featured medals to chase right now</h2>
-              <p>Challenges unlock automatically while you build. Nothing is scripted. The machine has to really do the thing.</p>
+              <h2>Ten puzzle levels to solve right now</h2>
+              <p>These open as fresh drafts with a focused goal and a curated part shelf. Medal challenges still unlock quietly in the normal yard while you build.</p>
             </div>
             <div className="home-preview-actions">
-              <Link to={freeBuildTarget} className="home-preview-primary">
-                Open Build and Earn Medals
+              <Link to={`/build?challengeLevel=${PUZZLE_CHALLENGE_LAUNCHER_CARDS[0]?.id ?? ''}`} className="home-preview-primary">
+                Open First Puzzle
               </Link>
             </div>
             <div className="home-preview-grid home-preview-grid-challenges">
-              {FEATURED_CHALLENGE_LAUNCHER_CARDS.map((challenge) => (
-                <article key={challenge.id} className="home-preview-card home-challenge-card">
+              {PUZZLE_CHALLENGE_LAUNCHER_CARDS.map((challenge) => {
+                const completed = (puzzleChallengeProgress ?? []).some(
+                  (entry) => entry.puzzleChallengeId === challenge.id && entry.completed,
+                );
+                return (
+                  <Link key={challenge.id} to={`/build?challengeLevel=${challenge.id}`} className="home-preview-card home-challenge-card">
                   <div className="home-preview-card-top">
-                    <span className={`home-preview-badge challenge-tier-${challenge.tier}`}>{challenge.tier}</span>
+                    <span className="home-preview-scene-emoji" aria-hidden="true">{challenge.emoji}</span>
+                    <span className={`home-preview-badge ${completed ? 'home-preview-badge-green' : 'home-preview-badge-blue'}`}>
+                      {completed ? 'Solved' : 'Puzzle'}
+                    </span>
                     <strong>{challenge.title}</strong>
                   </div>
                   <p>{challenge.description}</p>
-                  <small>{challenge.category}</small>
-                </article>
-              ))}
+                  <small>{challenge.objective}</small>
+                  <span>{completed ? 'Replay Puzzle' : 'Load Puzzle'}</span>
+                  </Link>
+                );
+              })}
+            </div>
+            <div className="home-preview-actions">
+              <span className="home-preview-badge">
+                {medalProgressCount}/{MEDAL_CHALLENGE_COUNT} medals earned in build mode
+              </span>
             </div>
           </>
         );
@@ -372,8 +410,8 @@ export function HomePage() {
             <strong>{homeLoading ? '…' : `${completedProjects}/${projects.length || 3}`}</strong>
           </div>
           <div className="home-hud-pill">
-            <span>Medals</span>
-            <strong>{homeLoading ? '…' : `${challengeProgressCount ?? 0}/${FEATURED_CHALLENGE_LAUNCHER_CARDS.length}`}</strong>
+            <span>Puzzles</span>
+            <strong>{homeLoading ? '…' : `${puzzleProgressCount}/${PUZZLE_CHALLENGE_LAUNCHER_CARDS.length}`}</strong>
           </div>
           <div className="home-hud-pill">
             <span>XP</span>
@@ -391,7 +429,7 @@ export function HomePage() {
               </h1>
             </div>
             <p className="home-launcher-tagline">
-              Build ridiculous machines, earn medals, and learn how every real part behaves.
+              Build ridiculous machines, solve focused puzzles, and learn how every real part behaves.
             </p>
             {homeDegraded ? (
               <p className="builder-status builder-status-warning home-boot-status">

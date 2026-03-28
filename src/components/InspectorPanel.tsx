@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ExperimentManifest, PrimitiveInstance, PrimitiveKind } from '../lib/types';
 
 interface InspectorPanelProps {
@@ -76,12 +76,6 @@ export function InspectorPanel({
   onClose,
 }: InspectorPanelProps) {
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!primitive) {
-      setOpen(false);
-    }
-  }, [primitive?.id]);
 
   const customFields = primitive ? (CUSTOM_NUMBER_FIELDS[primitive.kind] ?? []) : [];
   const hiddenKeys = new Set<string>(customFields.map((field) => field.key));
@@ -231,7 +225,7 @@ export function InspectorPanel({
   return (
     <details
       className="panel small-panel disclosure-panel inspector-panel builder-utility-panel"
-      open={open}
+      open={Boolean(primitive) && open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="disclosure-summary utility-summary">

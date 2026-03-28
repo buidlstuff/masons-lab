@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { mountBlueprintToManifest } from './blueprints';
 import { buildStarterDraft, createEmptyManifest } from './manifest-factories';
 import { createDraftPlayState } from './play-state';
+import { createPuzzleChallengeManifest } from './puzzle-challenges';
 import { createSillySceneManifest } from './silly-scenes';
 import type {
   DraftRecord,
@@ -73,6 +74,20 @@ export function createDraftFromSillyScene(sceneId: string): DraftRecord | null {
   if (!manifest) {
     return null;
   }
+  return {
+    draftId: nanoid(),
+    manifest,
+    playState: createDraftPlayState(undefined, manifest),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function createDraftFromPuzzleChallenge(challengeId: string): DraftRecord | null {
+  const manifest = createPuzzleChallengeManifest(challengeId);
+  if (!manifest) {
+    return null;
+  }
+
   return {
     draftId: nanoid(),
     manifest,

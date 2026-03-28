@@ -22,7 +22,6 @@ export function useHomeSummary(enabled = true) {
     let cancelled = false;
 
     if (!enabled) {
-      setSummary(null);
       return () => {
         cancelled = true;
       };
@@ -68,5 +67,5 @@ export function useHomeSummary(enabled = true) {
     };
   }, [enabled]);
 
-  return summary;
+  return enabled ? summary : null;
 }

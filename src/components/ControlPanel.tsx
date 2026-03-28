@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ControlSpec } from '../lib/types';
 
 interface ControlPanelProps {
@@ -17,12 +17,6 @@ export function ControlPanel({
   onClose,
 }: ControlPanelProps) {
   const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (controls.length === 0) {
-      setOpen(false);
-    }
-  }, [controls.length]);
 
   const content = (
     <div className="control-panel-body">
@@ -93,7 +87,7 @@ export function ControlPanel({
   return (
     <details
       className="panel small-panel disclosure-panel control-panel builder-utility-panel"
-      open={open}
+      open={controls.length > 0 && open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="disclosure-summary utility-summary">

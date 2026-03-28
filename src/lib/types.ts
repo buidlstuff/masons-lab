@@ -297,6 +297,7 @@ export interface LocomotiveConfig {
   progress: number;
   speed: number;
   drivePartId?: string;
+  enabled?: boolean;
 }
 
 export interface WagonConfig {
@@ -757,6 +758,12 @@ export interface ChallengeProgressRecord {
   completedAt?: number;
 }
 
+export interface PuzzleChallengeProgressRecord {
+  puzzleChallengeId: string;
+  completed: boolean;
+  completedAt?: number;
+}
+
 export interface DraftPlayState {
   jobId?: string;
   latchedStepIds: string[];
@@ -854,7 +861,6 @@ export const SLICE_PARTS: PrimitiveKind[] = [
   'water',
   'ball',
   'rock',
-  'hinge',
   'chute',
   'silo-bin',
   'tunnel',
@@ -862,7 +868,7 @@ export const SLICE_PARTS: PrimitiveKind[] = [
 ];
 
 export const PART_CATEGORIES: Array<{ label: string; kinds: PrimitiveKind[] }> = [
-  { label: 'Structure', kinds: ['node', 'wheel', 'axle', 'chassis', 'ramp', 'platform', 'wall', 'hinge', 'chute', 'tunnel', 'trampoline'] },
+  { label: 'Structure', kinds: ['node', 'wheel', 'axle', 'chassis', 'ramp', 'platform', 'wall', 'chute', 'tunnel', 'trampoline'] },
   { label: 'Power', kinds: ['motor', 'gear', 'pulley', 'chain-sprocket', 'flywheel', 'gearbox', 'piston', 'rack', 'spring-linear', 'crane-arm', 'counterweight', 'bucket', 'winch', 'hook'] },
   { label: 'Rail', kinds: ['rail-segment', 'rail-switch', 'locomotive', 'wagon', 'station-zone'] },
   { label: 'Processing', kinds: ['conveyor', 'hopper', 'cargo-block', 'material-pile', 'water', 'ball', 'rock', 'silo-bin'] },

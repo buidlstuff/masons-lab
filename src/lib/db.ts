@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type {
   ChallengeProgressRecord,
   DraftRecord,
+  PuzzleChallengeProgressRecord,
   JobProgressRecord,
   SavedBlueprintRecord,
   SavedExperimentRecord,
@@ -16,6 +17,7 @@ export class MasonLabDatabase extends Dexie {
   jobs!: Table<SiteJobDefinition, string>;
   jobProgress!: Table<JobProgressRecord, string>;
   challengeProgress!: Table<ChallengeProgressRecord, string>;
+  puzzleChallengeProgress!: Table<PuzzleChallengeProgressRecord, string>;
   settings!: Table<SettingRecord, string>;
 
   constructor() {
@@ -35,6 +37,16 @@ export class MasonLabDatabase extends Dexie {
       jobs: 'jobId, tier',
       jobProgress: 'id, jobId, completed',
       challengeProgress: '&challengeId, completed, completedAt',
+      settings: 'key',
+    });
+    this.version(3).stores({
+      machines: 'recordId, featured, updatedAt',
+      blueprints: 'recordId, blueprint.category, updatedAt',
+      drafts: 'draftId, sourceMachineId, updatedAt',
+      jobs: 'jobId, tier',
+      jobProgress: 'id, jobId, completed',
+      challengeProgress: '&challengeId, completed, completedAt',
+      puzzleChallengeProgress: '&puzzleChallengeId, completed, completedAt',
       settings: 'key',
     });
   }

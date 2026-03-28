@@ -19,6 +19,12 @@
 
 import Matter from 'matter-js';
 import { getJointIsland, getPrimitiveAnchor as getConnectorAnchor } from './connectors';
+import {
+  getTrackPointFromPoints,
+  resolveRailRoute,
+  trackLengthFromPoints,
+  type RailSwitchBranch,
+} from './rail-routing';
 import type { CargoLifecycleState, ExperimentManifest, PrimitiveInstance, PrimitiveKind } from './types';
 
 // Must match MachineCanvas createCanvas(960, 560)
@@ -68,6 +74,8 @@ export interface PhysicsFrame {
   trainProgress: number;
   /** true when loco has passed 85% of track */
   wagonDelivered: boolean;
+  trainTrackId?: string;
+  switchStates: Record<string, RailSwitchBranch>;
   /** gear chain telemetry — null when no gears are being driven */
   gearTelemetry: { inputRpm: number; outputRpm: number; gearRatio: number } | null;
   cargoStates: Record<string, CargoLifecycleState>;
@@ -1014,6 +1022,41 @@ export function buildMatterWorld(
   let currentControls: Record<string, string | number | boolean> = {};
   let activeMotorIds = new Set<string>();
 
+  function readRailSwitchBranch(switchId: string): RailSwitchBranch {
+    const switchPrim = primitiveMap.get(switchId);
+    if (!switchPrim || switchPrim.kind !== 'rail-switch') {
+      return 'right';
+    }
+    const branchControl = manifest.controls.find(
+      (control) => control.bind?.targetId === switchId && control.bind?.path === 'branchRight',
+    );
+    const branchRight = branchControl
+      ? Boolean(
+        currentControls[branchControl.id]
+        ?? ((switchPrim.config as { branch?: RailSwitchBranch }).branch ?? 'right') === 'right',
+      )
+      : ((switchPrim.config as { branch?: RailSwitchBranch }).branch ?? 'right') === 'right';
+    return branchRight ? 'right' : 'left';
+  }
+
+  function readLocoState(locomotive: PrimitiveInstance) {
+    const cfg = locomotive.config as { speed: number; enabled?: boolean };
+    const enabledControl = manifest.controls.find(
+      (control) => control.bind?.targetId === locomotive.id && control.bind?.path === 'enabled',
+    );
+    const speedControl = manifest.controls.find(
+      (control) => control.bind?.targetId === locomotive.id && control.bind?.path === 'speed',
+    );
+    return {
+      enabled: enabledControl
+        ? Boolean(currentControls[enabledControl.id] ?? cfg.enabled ?? true)
+        : cfg.enabled ?? true,
+      speed: speedControl
+        ? Number(currentControls[speedControl.id] ?? cfg.speed)
+        : cfg.speed,
+    };
+  }
+
   // ── applyControls ─────────────────────────────────────────────────────────
   function applyControls(controlValues: Record<string, string | number | boolean>) {
     currentControls = controlValues;
@@ -1615,11 +1658,11 @@ export function buildMatterWorld(
     }
   }
 
-  function tickWagons(dt: number) {
+  function tickWagons(dt: number, routePoints: Array<{ x: number; y: number }>) {
     const wagonLoads: Record<string, number> = {};
     const wagonCargo: Record<string, string[]> = {};
     const wagons = manifest.primitives.filter((p) => p.kind === 'wagon');
-    if (wagons.length === 0) return { wagonLoads, wagonCargo };
+    if (wagons.length === 0 || routePoints.length < 2) return { wagonLoads, wagonCargo };
 
     for (const [cargoId, cooldown] of [...wagonCargoCooldowns.entries()]) {
       const nextCooldown = cooldown - dt;
@@ -1638,10 +1681,9 @@ export function buildMatterWorld(
     }
 
     for (const wagon of wagons) {
-      const cfg = wagon.config as { trackId: string; offset: number; capacity?: number };
-      const trackPrim = primitiveMap.get(cfg.trackId);
+      const cfg = wagon.config as { offset: number; capacity?: number };
       const wagonProgress = wrapUnitProgress(locoProgress + cfg.offset);
-      const wagonPos = trackPoint(trackPrim, wagonProgress);
+      const wagonPos = getTrackPointFromPoints(routePoints, wagonProgress);
       const capacity = cfg.capacity ?? 6;
       const loadStation = pointInsideStation(wagonPos, 'load');
       const unloadStation = pointInsideStation(wagonPos, 'unload');
@@ -1733,16 +1775,23 @@ export function buildMatterWorld(
   // ── tickLocomotive ────────────────────────────────────────────────────────
   // Advance loco + wagon positions along their track in free-build mode.
   // Returns updated locoProgress (0..1).
-  function tickLocomotive(dt: number, prevProgress: number): number {
+  function tickLocomotive(
+    dt: number,
+    prevProgress: number,
+    routePoints: Array<{ x: number; y: number }>,
+  ): number {
     if (!locoPrim) return prevProgress;
-    const cfg = locoPrim.config as { speed: number; trackId: string; drivePartId?: string };
-    const trackPrim = primitiveMap.get(cfg.trackId);
-    if (cfg.drivePartId && trackPrim) {
+    const cfg = locoPrim.config as { drivePartId?: string };
+    const locoState = readLocoState(locoPrim);
+    if (!locoState.enabled) {
+      return prevProgress;
+    }
+    if (cfg.drivePartId && routePoints.length >= 2) {
       const drivePrim = primitiveMap.get(cfg.drivePartId);
       const driveBody = drivePrim ? bodyMap.get(drivePrim.id) : null;
       if (drivePrim && driveBody && isRotatingPrimitiveKind(drivePrim.kind)) {
         const linearSpeed = Math.abs(driveBody.angularVelocity * rotatingRadius(drivePrim));
-        const delta = dt * (linearSpeed / Math.max(1, trackLength(trackPrim)));
+        const delta = dt * (linearSpeed / Math.max(1, trackLengthFromPoints(routePoints)));
         return wrapUnitProgress(prevProgress + delta);
       }
     }
@@ -1757,15 +1806,9 @@ export function buildMatterWorld(
         Number((motorPrim.config as { rpm?: number }).rpm ?? 0),
       );
     }
-    const speedControl = manifest.controls.find(
-      (c) => c.bind?.targetId === locoPrim.id && c.bind?.path === 'speed',
-    );
-    const speed = speedControl
-      ? Number(currentControls[speedControl.id] ?? cfg.speed)
-      : cfg.speed;
     const effectiveSpeed = motorRpm > 0
-      ? Math.max(Math.abs(speed), motorRpm * 0.005)
-      : Math.abs(speed);
+      ? Math.max(Math.abs(locoState.speed), motorRpm * 0.005)
+      : Math.abs(locoState.speed);
     return wrapUnitProgress(prevProgress + dt * effectiveSpeed * 0.35);
   }
 
@@ -1793,6 +1836,11 @@ export function buildMatterWorld(
     }
 
     const drivenVels = driveMotors();
+    const switchStates = Object.fromEntries(
+      manifest.primitives
+        .filter((primitive) => primitive.kind === 'rail-switch')
+        .map((primitive) => [primitive.id, readRailSwitchBranch(primitive.id)]),
+    ) as Record<string, RailSwitchBranch>;
     const inertiaDriven = new Map<string, number>();
     // Flywheel inertia: spinning flywheels keep driving nearby meshes after motor power drops.
     for (const prim of manifest.primitives.filter((p) => p.kind === 'flywheel')) {
@@ -1833,7 +1881,10 @@ export function buildMatterWorld(
     }
     // Advance loco early so wagon-carried cargo can interact with hoppers and other
     // systems during the current frame rather than one frame late.
-    locoProgress = tickLocomotive(_dt, prevTrainProgress);
+    const activeRoute = locoPrim
+      ? resolveRailRoute(manifest.primitives, (locoPrim.config as { trackId: string }).trackId, readRailSwitchBranch)
+      : null;
+    locoProgress = tickLocomotive(_dt, prevTrainProgress, activeRoute?.points ?? []);
 
     tickWinches(_dt);
     tickBoltLinks();
@@ -1844,7 +1895,7 @@ export function buildMatterWorld(
     const conveyorFrame = tickConveyors();
     tickWaterZones(conveyorFrame.supportedCargoIds);
     tickTrampolines(_dt);
-    const wagonFrame = tickWagons(_dt);
+    const wagonFrame = tickWagons(_dt, activeRoute?.points ?? []);
     const collectedThisTick = tickHopper();
     tickBuckets();
     recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
@@ -1881,14 +1932,20 @@ export function buildMatterWorld(
 
     // Virtual positions for loco + wagons (not real physics bodies)
     if (locoPrim) {
-      const trackPrim = primitiveMap.get((locoPrim.config as { trackId: string }).trackId);
-      const locoPos = trackPoint(trackPrim, locoProgress);
+      const routePoints = activeRoute?.points ?? [];
+      const locoPos = getTrackPointFromPoints(
+        routePoints.length >= 2 ? routePoints : [{ x: 0, y: 0 }, { x: 0, y: 0 }],
+        locoProgress,
+      );
       bodyPositions[locoPrim.id] = { x: locoPos.x, y: locoPos.y, angle: 0 };
 
       for (const wagon of manifest.primitives.filter((p) => p.kind === 'wagon')) {
         const wCfg = wagon.config as { offset: number };
         const wProgress = wrapUnitProgress(locoProgress + wCfg.offset);
-        const wPos = trackPoint(trackPrim, wProgress);
+        const wPos = getTrackPointFromPoints(
+          routePoints.length >= 2 ? routePoints : [{ x: 0, y: 0 }, { x: 0, y: 0 }],
+          wProgress,
+        );
         bodyPositions[wagon.id] = { x: wPos.x, y: wPos.y, angle: 0 };
       }
     }
@@ -1952,6 +2009,8 @@ export function buildMatterWorld(
       gearMeshes,
       trainProgress: locoProgress,
       wagonDelivered,
+      trainTrackId: activeRoute?.activeTrackId,
+      switchStates,
       gearTelemetry,
       cargoStates: Object.fromEntries(cargoStates.entries()),
       throughput: Number(throughput.toFixed(1)),
@@ -2046,36 +2105,6 @@ function closestPointOnPolyline(
 
 function wrapUnitProgress(value: number) {
   return ((value % 1) + 1) % 1;
-}
-
-/**
- * Interpolate a position along a rail-segment track at 0..1 progress.
- * Mirrors the logic in MachineCanvas getTrackPoint().
- */
-function trackPoint(
-  track: PrimitiveInstance | undefined,
-  progress: number,
-): { x: number; y: number } {
-  if (!track || track.kind !== 'rail-segment') return { x: 0, y: 0 };
-  const pts = (track.config as { points: Array<{ x: number; y: number }> }).points;
-  if (pts.length < 2) return pts[0] ?? { x: 0, y: 0 };
-  const clamped = Math.max(0, Math.min(0.999, progress));
-  const seg = Math.min(pts.length - 2, Math.floor(clamped * (pts.length - 1)));
-  const t = clamped * (pts.length - 1) - seg;
-  const a = pts[seg];
-  const b = pts[seg + 1];
-  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-}
-
-function trackLength(track: PrimitiveInstance | undefined): number {
-  if (!track || track.kind !== 'rail-segment') return 1;
-  const pts = (track.config as { points: Array<{ x: number; y: number }> }).points;
-  if (pts.length < 2) return 1;
-  let total = 0;
-  for (let index = 0; index < pts.length - 1; index += 1) {
-    total += Math.hypot(pts[index + 1].x - pts[index].x, pts[index + 1].y - pts[index].y);
-  }
-  return Math.max(1, total);
 }
 
 // ─── Body factory ─────────────────────────────────────────────────────────────

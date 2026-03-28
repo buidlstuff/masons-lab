@@ -11,6 +11,7 @@ export interface RuntimeSnapshot {
   hookY: number;
   trainProgress: number;
   trainDelivered: boolean;
+  trainTrackId?: string;
   hopperFill: number;
   throughput: number;
   telemetry: BuildTelemetry;
@@ -32,6 +33,7 @@ export interface RuntimeSnapshot {
   bucketStates: Record<string, 'collecting' | 'dumping'>;
   springCompressions: Record<string, number>;
   sandParticlePositions: Array<{ x: number; y: number }>;
+  switchStates?: Record<string, 'left' | 'right'>;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -165,6 +167,7 @@ export function useMachineSimulation(
           hookY: frame.hookY !== null ? frame.hookY : prev.hookY,
           hopperFill: frame.hopperFill !== null ? frame.hopperFill : prev.hopperFill,
           trainProgress: frame.trainProgress,
+          trainTrackId: frame.trainTrackId ?? prev.trainTrackId,
           bodyPositions: frame.bodyPositions,
           motorDrives: frame.motorDrives,
           gearMeshes: frame.gearMeshes,
@@ -180,6 +183,7 @@ export function useMachineSimulation(
           bucketStates: frame.bucketStates,
           springCompressions: frame.springCompressions,
           sandParticlePositions: frame.sandParticlePositions,
+          switchStates: frame.switchStates,
           telemetry: {
             ...prev.telemetry,
             hookHeight: frame.hookY !== null ? Math.round(frame.hookY) : prev.telemetry.hookHeight,
@@ -234,6 +238,15 @@ function createInitialSnapshot(manifest: ExperimentManifest | null): RuntimeSnap
   const hookY = hook && 'y' in hook.config ? (hook.config.y as number) : 0;
   const loco = primitives.find((primitive) => primitive.kind === 'locomotive');
   const trainProgress = loco && 'progress' in loco.config ? (loco.config.progress as number) : 0;
+  const trainTrackId = loco && 'trackId' in loco.config ? (loco.config.trackId as string) : undefined;
+  const switchStates = Object.fromEntries(
+    primitives
+      .filter((primitive) => primitive.kind === 'rail-switch')
+      .map((primitive) => [
+        primitive.id,
+        ((primitive.config as { branch?: 'left' | 'right' }).branch ?? 'right') as 'left' | 'right',
+      ]),
+  );
 
   return {
     time: 0,
@@ -242,6 +255,7 @@ function createInitialSnapshot(manifest: ExperimentManifest | null): RuntimeSnap
     hookY,
     trainProgress,
     trainDelivered: false,
+    trainTrackId,
     hopperFill: getInitialHopperFill(manifest),
     throughput: 0,
     cargoStates: {},
@@ -255,6 +269,7 @@ function createInitialSnapshot(manifest: ExperimentManifest | null): RuntimeSnap
     bucketStates: {},
     springCompressions: {},
     sandParticlePositions: [],
+    switchStates,
     telemetry: {},
   };
 }

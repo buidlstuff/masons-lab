@@ -17,6 +17,7 @@ import type { ExperimentManifest, PrimitiveConfig, PrimitiveInstance, PrimitiveK
 interface ConnectPrimitiveOptions {
   forceKind?: 'rope' | 'belt-link' | 'chain-link' | 'bolt-link' | 'hinge-link' | 'powered-hinge-link';
   motorId?: string;
+  viaIds?: string[];
 }
 
 function isLocomotiveDriverKind(kind: PrimitiveKind) {
@@ -158,7 +159,7 @@ export function connectPrimitives(
   }
 
   if (options.forceKind) {
-    return createConnectorPrimitive(manifest, source, target, options.forceKind, options.motorId);
+    return createConnectorPrimitive(manifest, source, target, options.forceKind, options.motorId, options.viaIds);
   }
 
   if (source.kind === 'node' && target.kind === 'node') {
@@ -299,6 +300,7 @@ function createConnectorPrimitive(
   target: PrimitiveInstance,
   kind: NonNullable<ConnectPrimitiveOptions['forceKind']>,
   motorId?: string,
+  viaIds: string[] = [],
 ): ExperimentManifest {
   if (kind === 'rope') {
     const winch = source.kind === 'winch' ? source : target.kind === 'winch' ? target : null;
@@ -317,7 +319,8 @@ function createConnectorPrimitive(
           config: {
             fromId: winch.id,
             toId: endpoint.id,
-            length: Math.max(120, measureConnectorPath(manifest, [winch.id, endpoint.id], 'rope')),
+            viaIds,
+            length: Math.max(120, measureConnectorPath(manifest, [winch.id, ...viaIds, endpoint.id], 'rope')),
           },
         },
       ],

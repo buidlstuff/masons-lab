@@ -426,6 +426,67 @@ describe('physics engine conveyor flow', () => {
     world.cleanup();
   });
 
+  it('propels a simple wheeled chassis when the motor is mounted on it', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'chassis-1',
+        kind: 'chassis',
+        label: 'Chassis',
+        config: { x: 260, y: 470, width: 180, height: 24 },
+      },
+      {
+        id: 'wheel-left',
+        kind: 'wheel',
+        label: 'Left Wheel',
+        config: {
+          x: 220,
+          y: 494,
+          radius: 28,
+          traction: 0.9,
+          attachedToId: 'chassis-1',
+          attachOffsetX: -40,
+          attachOffsetY: 24,
+        },
+      },
+      {
+        id: 'wheel-right',
+        kind: 'wheel',
+        label: 'Right Wheel',
+        config: {
+          x: 300,
+          y: 494,
+          radius: 28,
+          traction: 0.9,
+          attachedToId: 'chassis-1',
+          attachOffsetX: 40,
+          attachOffsetY: 24,
+        },
+      },
+      {
+        id: 'motor-1',
+        kind: 'motor',
+        label: 'Motor',
+        config: {
+          x: 260,
+          y: 442,
+          rpm: 90,
+          torque: 1,
+          powerState: true,
+          attachedToId: 'chassis-1',
+          attachOffsetX: 0,
+          attachOffsetY: -10,
+        },
+      },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 180);
+
+    expect(frame.bodyPositions['chassis-1']?.x ?? 0).toBeGreaterThan(500);
+    world.cleanup();
+  });
+
   it('loads wagon cargo and unloads it into a hopper downstream', () => {
     const manifest = createEmptyManifest();
     manifest.primitives = [
@@ -552,5 +613,79 @@ describe('physics engine conveyor flow', () => {
     expect(frame.wagonCargo['wagon-1'] ?? []).toHaveLength(0);
     expect(frame.bodyPositions['cargo-1']?.x).toBeGreaterThan(650);
     world.cleanup();
+  });
+
+  it('routes a locomotive onto the selected rail-switch branch', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      {
+        id: 'track-main',
+        kind: 'rail-segment',
+        label: 'Main Track',
+        config: { points: [{ x: 180, y: 260 }, { x: 500, y: 260 }], segmentType: 'straight' },
+      },
+      {
+        id: 'switch-1',
+        kind: 'rail-switch',
+        label: 'Switch',
+        config: { x: 500, y: 260, branch: 'right' },
+      },
+      {
+        id: 'track-left',
+        kind: 'rail-segment',
+        label: 'Left Branch',
+        config: { points: [{ x: 500, y: 260 }, { x: 760, y: 190 }], segmentType: 'straight' },
+      },
+      {
+        id: 'track-right',
+        kind: 'rail-segment',
+        label: 'Right Branch',
+        config: { points: [{ x: 500, y: 260 }, { x: 760, y: 340 }], segmentType: 'straight' },
+      },
+      {
+        id: 'loco-1',
+        kind: 'locomotive',
+        label: 'Locomotive',
+        config: { trackId: 'track-main', progress: 0, speed: 0.95, enabled: true },
+      },
+      {
+        id: 'wagon-1',
+        kind: 'wagon',
+        label: 'Wagon',
+        config: { trackId: 'track-main', offset: -0.08, capacity: 4 },
+      },
+    ];
+    manifest.controls = [
+      {
+        id: 'switch-1-branch-right',
+        kind: 'toggle',
+        label: 'Right Branch',
+        bind: { targetId: 'switch-1', path: 'branchRight' },
+        defaultValue: true,
+      },
+      {
+        id: 'loco-1-enabled',
+        kind: 'toggle',
+        label: 'Run',
+        bind: { targetId: 'loco-1', path: 'enabled' },
+        defaultValue: true,
+      },
+    ];
+
+    const leftWorld = buildMatterWorld(manifest);
+    leftWorld.applyControls({ 'switch-1-branch-right': false, 'loco-1-enabled': true });
+    const leftFrame = stepWorld(leftWorld, 180);
+
+    expect(leftFrame.trainTrackId).toBe('track-left');
+    expect(leftFrame.bodyPositions['loco-1']?.y ?? 999).toBeLessThan(250);
+    leftWorld.cleanup();
+
+    const rightWorld = buildMatterWorld(manifest);
+    rightWorld.applyControls({ 'switch-1-branch-right': true, 'loco-1-enabled': true });
+    const rightFrame = stepWorld(rightWorld, 180);
+
+    expect(rightFrame.trainTrackId).toBe('track-right');
+    expect(rightFrame.bodyPositions['loco-1']?.y ?? 0).toBeGreaterThan(280);
+    rightWorld.cleanup();
   });
 });

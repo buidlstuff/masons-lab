@@ -72,6 +72,7 @@ export function AppBootProvider({
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAppBoot() {
   return useContext(AppBootContext);
 }

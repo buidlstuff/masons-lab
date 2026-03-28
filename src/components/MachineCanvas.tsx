@@ -85,6 +85,19 @@ function connectorLabelPoint(points: Array<{ x: number; y: number }>) {
   };
 }
 
+interface MachineCanvasQuickAction {
+  id: string;
+  label: string;
+  active?: boolean;
+  onPress: () => void;
+}
+
+interface MachineCanvasQuickControls {
+  title: string;
+  subtitle?: string;
+  actions: MachineCanvasQuickAction[];
+}
+
 interface MachineCanvasProps {
   manifest: ExperimentManifest;
   runtime: RuntimeSnapshot;
@@ -111,6 +124,7 @@ interface MachineCanvasProps {
   onTelemetry: (telemetry: BuildTelemetry) => void;
   onConnectionFlash?: (ids: string[]) => void;
   onTogglePower?: (primitiveId: string) => void;
+  quickControls?: MachineCanvasQuickControls | null;
   onCanvasReady?: () => void;
 }
 
@@ -130,6 +144,7 @@ export function MachineCanvas({
   onTelemetry,
   onConnectionFlash,
   onTogglePower,
+  quickControls,
   onCanvasReady,
 }: MachineCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -410,20 +425,22 @@ export function MachineCanvas({
         return 'Station zone — wagons load or unload when they pass through this highlighted area';
       case 'trampoline':
         return 'Trampoline — drop a ball, cargo block, or rock onto it for a visible bounce';
-      case 'hinge':
-        return 'Hinge — a fixed pivot point for future structural connections';
+      case 'rail-switch':
+        return 'Rail switch — use quick controls or Machine Controls to choose the left or right branch before the train reaches it';
+      case 'locomotive':
+        return 'Locomotive — set its trackId, then use Run and Speed to send it down a real rail route';
+      case 'winch':
+        return 'Winch — rope it to a hook, bucket, crane arm, or cargo block, then use Up and Down to reel it in or out';
       case 'chute':
         return 'Chute — a static sloped guide for falling material';
       case 'silo-bin':
-        return 'Silo bin — a storage pocket that can open its floor gate';
+        return 'Silo bin — a storage pocket that can open or close its floor gate with quick controls';
       case 'tunnel':
         return 'Tunnel — a covered channel that keeps flow between two openings';
       case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
       case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
-      case 'winch':    return 'Winch — rope it to a hook, bucket, crane arm, or cargo block for lifting';
       case 'node':     return 'Node — place another Node, then Connect with Beam';
       case 'hook':     return 'Hook — connect it to a winch with Rope, then clip cargo blocks to the hook';
-      case 'locomotive': return 'Locomotive — set its trackId, then link it to a rotating drive part';
       default:         return `${sel.label ?? sel.kind} — drag to move · Inspector to adjust`;
     }
   })();
@@ -461,6 +478,26 @@ export function MachineCanvas({
               <div className="skeleton-line skeleton-line-eyebrow" />
               <div className="skeleton-line skeleton-line-copy" />
               <div className="skeleton-line skeleton-line-copy short" />
+            </div>
+          </div>
+        ) : null}
+        {quickControls && quickControls.actions.length > 0 ? (
+          <div className="canvas-quick-controls" role="group" aria-label={quickControls.title}>
+            <div className="canvas-quick-controls-copy">
+              <strong>{quickControls.title}</strong>
+              {quickControls.subtitle ? <span>{quickControls.subtitle}</span> : null}
+            </div>
+            <div className="canvas-quick-controls-row">
+              {quickControls.actions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  className={`canvas-quick-control-button${action.active ? ' is-active' : ''}`}
+                  onClick={action.onPress}
+                >
+                  {action.label}
+                </button>
+              ))}
             </div>
           </div>
         ) : null}
@@ -1955,7 +1992,9 @@ function drawPrimitive(
       break;
     }
     case 'rail-switch': {
-      const { x, y, branch } = primitive.config as { x: number; y: number; branch: 'left' | 'right' };
+      const { x, y } = primitive.config as { x: number; y: number; branch: 'left' | 'right' };
+      const branch = runtime.switchStates?.[primitive.id]
+        ?? ((primitive.config as { branch?: 'left' | 'right' }).branch ?? 'right');
       const color = branch === 'right' ? '#60a5fa' : '#f59e0b';
       instance.fill(selected ? '#fbbf24' : color);
       instance.stroke(selected ? '#fbbf24' : highlight);
@@ -1968,8 +2007,11 @@ function drawPrimitive(
       break;
     }
     case 'locomotive': {
-      const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
-      const point = getTrackPoint(track, runtime.trainProgress);
+      const point = runtime.bodyPositions?.[primitive.id]
+        ?? (() => {
+          const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
+          return { ...getTrackPoint(track, runtime.trainProgress), angle: 0 };
+        })();
       instance.fill(selected ? '#fbbf24' : '#ef7b45');
       instance.stroke(selected ? '#fbbf24' : highlight);
       instance.rect(point.x - 22, point.y - 18, 44, 24, 6);
@@ -1981,9 +2023,12 @@ function drawPrimitive(
       break;
     }
     case 'wagon': {
-      const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
-      const offset = (primitive.config as { offset: number }).offset;
-      const point = getTrackPoint(track, wrapUnitProgress(runtime.trainProgress + offset));
+      const point = runtime.bodyPositions?.[primitive.id]
+        ?? (() => {
+          const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
+          const offset = (primitive.config as { offset: number }).offset;
+          return { ...getTrackPoint(track, wrapUnitProgress(runtime.trainProgress + offset)), angle: 0 };
+        })();
       instance.fill(selected ? '#fbbf24' : '#94a3b8');
       instance.stroke(selected ? '#fbbf24' : highlight);
       instance.rect(point.x - 18, point.y - 16, 36, 20, 6);
@@ -2278,14 +2323,20 @@ function hitTest(
         return Math.abs(localX) <= (cfg.width ?? 100) / 2 && Math.abs(localY) <= 28;
       }
       case 'locomotive': {
-        const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
-        const point = getTrackPoint(track, runtime.trainProgress);
+        const point = runtime.bodyPositions?.[primitive.id]
+          ?? (() => {
+            const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
+            return { ...getTrackPoint(track, runtime.trainProgress), angle: 0 };
+          })();
         return Math.abs(point.x - x) < 26 && Math.abs(point.y - y) < 22;
       }
       case 'wagon': {
-        const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
-        const offset = (primitive.config as { offset: number }).offset;
-        const point = getTrackPoint(track, wrapUnitProgress(runtime.trainProgress + offset));
+        const point = runtime.bodyPositions?.[primitive.id]
+          ?? (() => {
+            const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
+            const offset = (primitive.config as { offset: number }).offset;
+            return { ...getTrackPoint(track, wrapUnitProgress(runtime.trainProgress + offset)), angle: 0 };
+          })();
         return Math.abs(point.x - x) < 22 && Math.abs(point.y - y) < 20;
       }
       default: {
@@ -2326,10 +2377,18 @@ function getPrimitiveAnchor(
     return averagePoint(points);
   }
   if (primitive.kind === 'locomotive') {
+    const point = runtime.bodyPositions?.[primitive.id];
+    if (point) {
+      return { x: point.x, y: point.y };
+    }
     const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
     return getTrackPoint(track, runtime.trainProgress);
   }
   if (primitive.kind === 'wagon') {
+    const point = runtime.bodyPositions?.[primitive.id];
+    if (point) {
+      return { x: point.x, y: point.y };
+    }
     const track = primitives.find((item) => item.id === (primitive.config as { trackId: string }).trackId);
     const offset = (primitive.config as { offset: number }).offset;
     return getTrackPoint(track, wrapUnitProgress(runtime.trainProgress + offset));
