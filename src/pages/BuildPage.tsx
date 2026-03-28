@@ -4,7 +4,6 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ControlPanel } from '../components/ControlPanel';
 import { ChallengeToast } from '../components/ChallengeToast';
 import { HudOverlay } from '../components/HudOverlay';
-import { StarterOverlay } from '../components/StarterOverlay';
 import { InspectorPanel } from '../components/InspectorPanel';
 import { MachineCanvas } from '../components/MachineCanvas';
 import { PartPalette } from '../components/PartPalette';
@@ -1085,6 +1084,9 @@ export function BuildPage() {
       ? `Connecting with ${labelForBuilderConnection(connectionKind)}. First part: ${labelForPrimitive(connectionSource.kind)}. Click the second part on the canvas.`
       : `Connecting with ${labelForBuilderConnection(connectionKind)}. Click the first part on the canvas.`
     : activeProjectStep?.instruction ?? builderFocus.description;
+  const compactCompletionHint = jobComplete && job
+    ? job.hints[0] ?? 'The machine works. Save it or go back to the yard.'
+    : null;
   const toolbarNotice = buildReadiness === 'loading-engine'
     ? { tone: 'info' as const, message: 'Loading the live engine and stage renderer.' }
     : statusNotice;
@@ -1153,6 +1155,24 @@ export function BuildPage() {
           </div>
         </div>
 
+        {jobComplete && job ? (
+          <div className="builder-toolbar-win">
+            <div className="builder-toolbar-win-copy">
+              <span className="builder-toolbar-win-star" aria-hidden="true">★</span>
+              <div>
+                <strong>{job.title} complete</strong>
+                <p>{compactCompletionHint}</p>
+              </div>
+            </div>
+            <div className="builder-toolbar-win-actions">
+              <button type="button" className="primary-link" onClick={handleSaveMachine}>
+                Save Machine
+              </button>
+              <Link to="/">Back to Yard</Link>
+            </div>
+          </div>
+        ) : null}
+
         <div className="builder-toolbar-status">
           <span className={`builder-chip ${placingKind ? 'is-active' : connectionKind ? 'is-success' : ''}`}>{builderModeLabel}</span>
           <span className={`builder-chip is-${machineActivity.tone}`}>{machineActivity.label}</span>
@@ -1166,27 +1186,23 @@ export function BuildPage() {
 
         {connectMenuOpen && !connectionKind ? (
           <div className="builder-connect-chooser">
-            <label className="builder-connect-field">
-              <span>Which connector?</span>
-              <select
-                className="builder-connect-select"
-                defaultValue=""
-                onChange={(event) => {
-                  const nextKind = event.target.value as BuilderConnectionKind | '';
-                  if (!nextKind) {
-                    return;
-                  }
-                  startConnectionMode(nextKind);
-                }}
-              >
-                <option value="" disabled>Choose one</option>
+            <div className="builder-connect-field">
+              <span>Pick a connector</span>
+              <div className="builder-connect-option-row">
                 {BUILDER_CONNECTION_OPTIONS.map((option) => (
-                  <option key={option.kind} value={option.kind}>
-                    {option.label}
-                  </option>
+                  <button
+                    key={option.kind}
+                    type="button"
+                    className="builder-connect-option"
+                    onClick={() => startConnectionMode(option.kind)}
+                    title={option.hint}
+                  >
+                    <strong>{option.label}</strong>
+                    <small>{option.hint}</small>
+                  </button>
                 ))}
-              </select>
-            </label>
+              </div>
+            </div>
             <p className="builder-connect-caption">
               Pick the connector first, then click the first part and the second part on the canvas.
             </p>
@@ -1327,18 +1343,6 @@ export function BuildPage() {
       <div className="build-layout build-layout-compact">
         <div className="canvas-column" style={{ position: 'relative' }}>
           <HudOverlay hud={manifest.hud} telemetry={telemetry} />
-          <StarterOverlay
-            visible={Boolean(job) && manifest.primitives.length === 0 && !placingKind}
-            title={job?.title}
-            summary={job?.summary}
-            steps={job?.steps?.map((step) => ({
-              num: String((job.steps?.findIndex((candidate) => candidate.stepId === step.stepId) ?? 0) + 1),
-              kind: step.allowedPartKinds[0],
-              label: step.title,
-              desc: step.instruction,
-            }))}
-            onSelectKind={handleSelectKind}
-          />
           {flashToast && (
             <div className="connection-toast" role="status" aria-live="polite">The machine is responding.</div>
           )}
@@ -1394,37 +1398,39 @@ export function BuildPage() {
             projectStepTitle={activeProjectStep?.title}
             onSelectKind={handleSelectKind}
           />
-          <InspectorPanel
-            primitive={selectedPrimitive}
-            manifest={manifest}
-            onDelete={(primitiveId) => {
-              void persistDraft(deletePrimitive(manifest, primitiveId), undefined, { recordHistory: true });
-              if (selectedPrimitiveId === primitiveId) {
-                setSelectedPrimitiveId(undefined);
-              }
-              showStatus('Part removed from the canvas.', 'info');
-            }}
-            onUpdateValue={(primitiveId, key, value) => {
-              const primitive = manifest.primitives.find((item) => item.id === primitiveId);
-              if (!primitive) {
-                return;
-              }
-              void persistDraft(updatePrimitive(manifest, primitiveId, { ...primitive.config, [key]: value }), undefined, { recordHistory: true });
-              if (key === 'powerState') {
-                playUiTone('power');
-                showStatus(value ? 'Motor powered ON.' : 'Motor powered OFF.', 'info');
-              }
-            }}
-          />
-          {manifest.controls.length > 0 ? (
-            <ControlPanel
-              controls={manifest.controls}
-              values={controlValues}
-              onChange={(controlId, value) => {
-                setControlValues((current) => ({ ...current, [controlId]: value }));
+          <div className="builder-utility-stack">
+            <InspectorPanel
+              primitive={selectedPrimitive}
+              manifest={manifest}
+              onDelete={(primitiveId) => {
+                void persistDraft(deletePrimitive(manifest, primitiveId), undefined, { recordHistory: true });
+                if (selectedPrimitiveId === primitiveId) {
+                  setSelectedPrimitiveId(undefined);
+                }
+                showStatus('Part removed from the canvas.', 'info');
+              }}
+              onUpdateValue={(primitiveId, key, value) => {
+                const primitive = manifest.primitives.find((item) => item.id === primitiveId);
+                if (!primitive) {
+                  return;
+                }
+                void persistDraft(updatePrimitive(manifest, primitiveId, { ...primitive.config, [key]: value }), undefined, { recordHistory: true });
+                if (key === 'powerState') {
+                  playUiTone('power');
+                  showStatus(value ? 'Motor powered ON.' : 'Motor powered OFF.', 'info');
+                }
               }}
             />
-          ) : null}
+            {manifest.controls.length > 0 ? (
+              <ControlPanel
+                controls={manifest.controls}
+                values={controlValues}
+                onChange={(controlId, value) => {
+                  setControlValues((current) => ({ ...current, [controlId]: value }));
+                }}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
 

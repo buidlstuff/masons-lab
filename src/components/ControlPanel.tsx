@@ -8,26 +8,28 @@ interface ControlPanelProps {
 }
 
 export function ControlPanel({ controls, values, onChange }: ControlPanelProps) {
-  const [open, setOpen] = useState(controls.length > 0);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (controls.length > 0) {
-      setOpen(true);
+    if (controls.length === 0) {
+      setOpen(false);
     }
   }, [controls.length]);
 
   return (
     <details
-      className="panel small-panel disclosure-panel control-panel"
+      className="panel small-panel disclosure-panel control-panel builder-utility-panel"
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary className="disclosure-summary">
-        <div>
+      <summary className="disclosure-summary utility-summary">
+        <div className="utility-summary-copy">
           <p className="eyebrow">Machine Controls</p>
-          <h3>Live tuning</h3>
+          <h3>Open tuning</h3>
         </div>
-        <span className="muted">{controls.length} control{controls.length === 1 ? '' : 's'}</span>
+        <span className={`utility-summary-pill ${controls.length > 0 ? 'is-live' : ''}`}>
+          {controls.length} control{controls.length === 1 ? '' : 's'}
+        </span>
       </summary>
 
       <div className="disclosure-content control-panel-body">

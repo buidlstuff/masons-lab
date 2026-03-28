@@ -40,9 +40,9 @@ export function PartPalette({
   projectStepTitle,
   onSelectKind,
 }: PartPaletteProps) {
-  const [compactMode, setCompactMode] = useState(() => {
+  const [expandedMode, setExpandedMode] = useState(() => {
     try {
-      return localStorage.getItem('mason-beginner-mode') !== 'false';
+      return localStorage.getItem('mason-parts-view') !== 'compact';
     } catch {
       return true;
     }
@@ -72,11 +72,29 @@ export function PartPalette({
       .map(([kind]) => kind as PrimitiveKind),
     [counts],
   );
+  const paletteHint = useMemo(() => {
+    if (selectedPrimitive && visibleSuggestions.length > 0) {
+      return `Good next matches: ${visibleSuggestions.slice(0, 3).map((suggestion) => labelForPart(suggestion.kind)).join(', ')}.`;
+    }
 
-  function setCompact(next: boolean) {
-    setCompactMode(next);
+    if (selectedPrimitive) {
+      return connectionHintForKind(selectedPrimitive.kind);
+    }
+
+    return activeJobHint ?? 'Keep the canvas in view. Scroll this shelf when you want the rest of the parts.';
+  }, [activeJobHint, selectedPrimitive, visibleSuggestions]);
+  const categoryPreview = useMemo(
+    () => PART_CATEGORIES.map((category) => ({
+      label: category.label,
+      count: category.kinds.length,
+    })),
+    [],
+  );
+
+  function setExpanded(next: boolean) {
+    setExpandedMode(next);
     try {
-      localStorage.setItem('mason-beginner-mode', String(next));
+      localStorage.setItem('mason-parts-view', next ? 'expanded' : 'compact');
     } catch {
       // Ignore storage failures.
     }
@@ -98,10 +116,15 @@ export function PartPalette({
 
   return (
     <section className="panel palette-panel">
-      <div className="panel-header compact">
+      <div className="panel-header compact palette-panel-head">
         <div>
           <p className="eyebrow">Parts</p>
-          <h3>{guidedKinds ? projectStepTitle ?? 'Parts for this step' : 'Pick, place, and build'}</h3>
+          <h3>{guidedKinds ? projectStepTitle ?? 'Step parts' : 'Parts Shelf'}</h3>
+          <p className="palette-panel-subtitle">
+            {guidedKinds
+              ? 'Only the useful parts for this step are shown here.'
+              : 'The canvas stays visible while this shelf handles the rest of the parts.'}
+          </p>
         </div>
         {selectedKind ? (
           <button type="button" className="ghost-button" onClick={() => onSelectKind(null)}>
@@ -114,10 +137,10 @@ export function PartPalette({
         <div className="palette-mode-toggle">
           <button
             type="button"
-            className={`palette-mode-btn ${compactMode ? 'active' : ''}`}
+            className={`palette-mode-btn ${!expandedMode ? 'active' : ''}`}
             onClick={() => {
-              if (!compactMode) {
-                setCompact(true);
+              if (expandedMode) {
+                setExpanded(false);
               }
             }}
           >
@@ -125,10 +148,10 @@ export function PartPalette({
           </button>
           <button
             type="button"
-            className={`palette-mode-btn ${!compactMode ? 'active' : ''}`}
+            className={`palette-mode-btn ${expandedMode ? 'active' : ''}`}
             onClick={() => {
-              if (compactMode) {
-                setCompact(false);
+              if (!expandedMode) {
+                setExpanded(true);
               }
             }}
           >
@@ -137,88 +160,95 @@ export function PartPalette({
         </div>
       ) : null}
 
-      <div className="palette-quick-section">
-        <div className="mini-head">
-          <p className="palette-category-label">{guidedKinds ? 'This Step' : 'Quick Parts'}</p>
-          <span className="palette-inline-hint">
-            {guidedKinds
-              ? 'Only the useful parts for this step are shown here.'
-              : compactMode
-                ? 'Core parts stay visible here. Expand categories below for the full shelf.'
-                : 'The full shelf is open below. Use these for the fastest starts.'}
-          </span>
-        </div>
-        <div className="palette-grid palette-grid-quick">
-          {quickPartKinds.map(renderPartTile)}
-        </div>
-      </div>
-
-      {guidedKinds ? (
-        <div className="palette-context-card compact">
-          <p className="palette-context-label">Project step</p>
-          <strong>{projectTitle ?? 'Starter project'} is focused on these parts right now</strong>
-          <p className="muted">
-            {activeJobHint ?? 'Finish this step first. More parts unlock after the project is actually working.'}
-          </p>
-        </div>
-      ) : (
-        <div className="palette-category-panels">
-          {PART_CATEGORIES.map((category) => {
-            const presentCount = category.kinds.reduce((total, kind) => total + counts[kind], 0);
-            return (
-              <details key={category.label} className="palette-category-panel" open={!compactMode}>
-                <summary className="palette-category-summary">
-                  <span>{category.label}</span>
-                  <span className="palette-category-summary-count">
-                    {presentCount > 0 ? `${presentCount} on canvas` : `${category.kinds.length} parts`}
-                  </span>
-                </summary>
-                <div className="palette-grid palette-grid-tight">
-                  {category.kinds.map(renderPartTile)}
-                </div>
-              </details>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="palette-context-card compact">
-        <p className="palette-context-label">{selectedPrimitive ? 'Selected part' : 'Build hint'}</p>
+      <div className="palette-selection-strip">
+        <p className="palette-selection-label">{selectedPrimitive ? 'Selected part' : 'Build hint'}</p>
         <strong>
           {selectedPrimitive
             ? `${labelForPart(selectedPrimitive.kind)} selected`
             : manifest.primitives.length === 0
               ? 'Start with one visible cause-and-effect part'
-              : 'Parts live here. Connections start from the big Connect Parts button above the canvas.'}
+              : 'Parts stay on the right. Connections start from the red Connect Parts button.'}
         </strong>
-        <p className="muted">
-          {selectedPrimitive
-            ? connectionHintForKind(selectedPrimitive.kind)
-            : activeJobHint ?? 'Motors, gears, conveyors, winches, and rails are the fastest ways to see motion.'}
-        </p>
+        <p className="muted">{paletteHint}</p>
       </div>
 
-      {selectedPrimitive && visibleSuggestions.length > 0 ? (
-        <div className="palette-suggestion-list compact">
-          {visibleSuggestions.slice(0, 2).map((suggestion) => (
-            <button
-              key={suggestion.kind}
-              type="button"
-              className={`palette-suggestion-card compact ${selectedKind === suggestion.kind ? 'active' : ''}`}
-              onClick={() => onSelectKind(selectedKind === suggestion.kind ? null : suggestion.kind)}
-            >
-              <span className="palette-suggestion-icon">{iconForPart(suggestion.kind)}</span>
-              <div className="palette-suggestion-copy">
-                <span className="palette-suggestion-label">{labelForPart(suggestion.kind)}</span>
-                <span className="palette-suggestion-reason">{suggestion.reason}</span>
-              </div>
-              {counts[suggestion.kind] ? (
-                <span className="palette-suggestion-count">x{counts[suggestion.kind]}</span>
-              ) : null}
-            </button>
-          ))}
+      <div className="palette-panel-body">
+        <div className="palette-quick-section">
+          <div className="mini-head">
+            <p className="palette-category-label">{guidedKinds ? 'This Step' : 'Quick Parts'}</p>
+            <span className="palette-inline-hint">
+              {guidedKinds
+                ? 'Use these first.'
+                : 'These stay visible so you can place parts without digging.'}
+            </span>
+          </div>
+          <div className="palette-grid palette-grid-quick">
+            {quickPartKinds.map(renderPartTile)}
+          </div>
         </div>
-      ) : null}
+
+        {guidedKinds ? (
+          <div className="palette-panel-scroll palette-panel-scroll-guided">
+            <div className="palette-category-block">
+              <div className="palette-category-title-row">
+                <strong>{projectTitle ?? 'Starter project'}</strong>
+                <span className="palette-category-summary-count">
+                  {quickPartKinds.length} part{quickPartKinds.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <p className="palette-inline-hint">{activeJobHint ?? 'Finish this step first, then the next group of parts will matter.'}</p>
+              <div className="palette-grid palette-grid-tight">
+                {quickPartKinds.map(renderPartTile)}
+              </div>
+            </div>
+          </div>
+        ) : expandedMode ? (
+          <div className="palette-panel-scroll">
+            <div className="palette-section-head">
+              <p className="palette-category-label">All Parts</p>
+              <span className="palette-inline-hint">Scroll the shelf to browse every category.</span>
+            </div>
+            <div className="palette-category-panels">
+              {PART_CATEGORIES.map((category) => {
+                const presentCount = category.kinds.reduce((total, kind) => total + counts[kind], 0);
+                return (
+                  <section key={category.label} className="palette-category-block">
+                    <div className="palette-category-title-row">
+                      <strong>{category.label}</strong>
+                      <span className="palette-category-summary-count">
+                        {presentCount > 0 ? `${presentCount} on canvas` : `${category.kinds.length} parts`}
+                      </span>
+                    </div>
+                    <div className="palette-grid palette-grid-tight">
+                      {category.kinds.map(renderPartTile)}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="palette-category-peek">
+            <div className="palette-section-head">
+              <p className="palette-category-label">All Parts</p>
+              <span className="palette-inline-hint">Open Expanded when you want the full scrollable shelf.</span>
+            </div>
+            <div className="palette-category-chip-row">
+              {categoryPreview.map((category) => (
+                <button
+                  key={category.label}
+                  type="button"
+                  className="palette-category-chip"
+                  onClick={() => setExpanded(true)}
+                >
+                  <span>{category.label}</span>
+                  <small>{category.count}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {canvasKinds.length > 0 ? (
         <div className="palette-presence">

@@ -66,10 +66,12 @@ function getCustomNumberFieldValue(primitive: PrimitiveInstance, key: string): n
 }
 
 export function InspectorPanel({ primitive, manifest, onDelete, onUpdateValue }: InspectorPanelProps) {
-  const [open, setOpen] = useState(Boolean(primitive));
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    setOpen(Boolean(primitive));
+    if (!primitive) {
+      setOpen(false);
+    }
   }, [primitive?.id]);
 
   const customFields = primitive ? (CUSTOM_NUMBER_FIELDS[primitive.kind] ?? []) : [];
@@ -103,16 +105,18 @@ export function InspectorPanel({ primitive, manifest, onDelete, onUpdateValue }:
 
   return (
     <details
-      className="panel small-panel disclosure-panel inspector-panel"
+      className="panel small-panel disclosure-panel inspector-panel builder-utility-panel"
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary className="disclosure-summary">
-        <div>
+      <summary className="disclosure-summary utility-summary">
+        <div className="utility-summary-copy">
           <p className="eyebrow">Inspector</p>
-          <h3>{primitive ? primitive.label ?? primitive.kind : 'Select a part'}</h3>
+          <h3>{primitive ? 'Adjust selected part' : 'Open inspector'}</h3>
         </div>
-        <span className="muted">{primitive ? primitive.kind : 'No part selected'}</span>
+        <span className={`utility-summary-pill ${primitive ? 'is-live' : ''}`}>
+          {primitive ? primitive.label ?? primitive.kind : 'Closed'}
+        </span>
       </summary>
 
       <div className="disclosure-content inspector-panel-body">
