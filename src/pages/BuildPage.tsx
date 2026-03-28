@@ -76,6 +76,7 @@ async function loadAssistantApi() {
 }
 
 type BuilderConnectionKind = ConnectorKind | 'beam';
+type BuildUtilityPanel = 'inspector' | 'controls';
 
 const BUILDER_CONNECTION_OPTIONS: Array<{
   kind: BuilderConnectionKind;
@@ -265,6 +266,7 @@ export function BuildPage() {
   const [connectMenuOpen, setConnectMenuOpen] = useState(false);
   const [connectionKind, setConnectionKind] = useState<BuilderConnectionKind | null>(null);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
+  const [openUtilityPanel, setOpenUtilityPanel] = useState<BuildUtilityPanel | null>(null);
   const [canvasReady, setCanvasReady] = useState(false);
   const [challengeToast, setChallengeToast] = useState<ChallengeDefinition | null>(null);
   const flashCountRef = useRef(0);
@@ -824,6 +826,7 @@ export function BuildPage() {
       setConnectionKind(null);
       setConnectionSourceId(null);
       setConnectMenuOpen(false);
+      setOpenUtilityPanel(null);
       if (kind) {
         setSelectedPrimitiveId(undefined);
         showStatus(`Place ${labelForPrimitive(kind)} on the canvas. Press Escape to cancel.`, 'info');
@@ -835,6 +838,7 @@ export function BuildPage() {
   const startConnectionMode = useCallback((kind: BuilderConnectionKind) => {
     setConnectMenuOpen(false);
     setHandbookOpen(false);
+    setOpenUtilityPanel(null);
     setPlacingKind(null);
     setSelectedPrimitiveId(undefined);
     setConnectionSourceId(null);
@@ -850,6 +854,11 @@ export function BuildPage() {
       showStatus(message, 'info');
     }
   }, [showStatus]);
+
+  const toggleUtilityPanel = useCallback((panel: BuildUtilityPanel) => {
+    setConnectMenuOpen(false);
+    setOpenUtilityPanel((current) => (current === panel ? null : panel));
+  }, []);
 
   const handleConnectPick = useCallback((primitiveId: string) => {
     if (!manifest || !connectionKind) {
@@ -1084,6 +1093,14 @@ export function BuildPage() {
       ? `Connecting with ${labelForBuilderConnection(connectionKind)}. First part: ${labelForPrimitive(connectionSource.kind)}. Click the second part on the canvas.`
       : `Connecting with ${labelForBuilderConnection(connectionKind)}. Click the first part on the canvas.`
     : activeProjectStep?.instruction ?? builderFocus.description;
+  const builderToolbarTitle = connectionKind
+    ? `Connect ${labelForBuilderConnection(connectionKind)}`
+    : activeProjectStep?.title ?? builderFocus.title;
+  const builderEyebrow = job
+    ? job.kind === 'starter-project'
+      ? 'Guided Build'
+      : 'Workshop'
+    : 'Free Build';
   const compactCompletionHint = jobComplete && job
     ? job.hints[0] ?? 'The machine works. Save it or go back to the yard.'
     : null;
@@ -1093,15 +1110,15 @@ export function BuildPage() {
 
   return (
     <div className="page page-build">
-      <section className="panel builder-toolbar">
-        <div className="builder-toolbar-main">
-          <div className="builder-toolbar-copy">
-            <p className="eyebrow">{manifest.metadata.title}</p>
-            <strong>{connectionKind ? `Connect ${labelForBuilderConnection(connectionKind)}` : activeProjectStep?.title ?? builderFocus.title}</strong>
+      <section className="panel builder-stage-shell">
+        <div className="builder-stage-topbar">
+          <div className="builder-stage-copy">
+            <p className="eyebrow">{builderEyebrow}</p>
+            <strong>{builderToolbarTitle}</strong>
             <p>{builderToolbarHint}</p>
           </div>
 
-          <div className="builder-toolbar-actions">
+          <div className="builder-stage-actions">
             {connectionKind ? (
               <button type="button" className="builder-connect-cta is-active" onClick={() => cancelConnectionMode()}>
                 Cancel {labelForBuilderConnection(connectionKind)}
@@ -1112,6 +1129,7 @@ export function BuildPage() {
                 className="builder-connect-cta"
                 onClick={() => {
                   setHandbookOpen(false);
+                  setOpenUtilityPanel(null);
                   setConnectMenuOpen((current) => !current);
                   setPlacingKind(null);
                 }}
@@ -1123,11 +1141,20 @@ export function BuildPage() {
               type="button"
               onClick={() => {
                 setConnectMenuOpen(false);
+                setOpenUtilityPanel(null);
                 setHandbookOpen((current) => !current);
               }}
             >
               {handbookOpen ? 'Hide Workbook' : 'Workbook'}
             </button>
+            <button type="button" onClick={() => toggleUtilityPanel('inspector')}>
+              {openUtilityPanel === 'inspector' ? 'Hide Inspector' : 'Inspector'}
+            </button>
+            {manifest.controls.length > 0 ? (
+              <button type="button" onClick={() => toggleUtilityPanel('controls')}>
+                {openUtilityPanel === 'controls' ? 'Hide Controls' : 'Controls'}
+              </button>
+            ) : null}
             {primaryStepKind && !placingKind && !connectionKind ? (
               <button type="button" onClick={() => handleSelectKind(primaryStepKind)}>
                 Place {labelForPrimitive(primaryStepKind)}
@@ -1155,25 +1182,7 @@ export function BuildPage() {
           </div>
         </div>
 
-        {jobComplete && job ? (
-          <div className="builder-toolbar-win">
-            <div className="builder-toolbar-win-copy">
-              <span className="builder-toolbar-win-star" aria-hidden="true">★</span>
-              <div>
-                <strong>{job.title} complete</strong>
-                <p>{compactCompletionHint}</p>
-              </div>
-            </div>
-            <div className="builder-toolbar-win-actions">
-              <button type="button" className="primary-link" onClick={handleSaveMachine}>
-                Save Machine
-              </button>
-              <Link to="/">Back to Yard</Link>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="builder-toolbar-status">
+        <div className="builder-stage-status">
           <span className={`builder-chip ${placingKind ? 'is-active' : connectionKind ? 'is-success' : ''}`}>{builderModeLabel}</span>
           <span className={`builder-chip is-${machineActivity.tone}`}>{machineActivity.label}</span>
           <span className="builder-chip">{manifest.primitives.length} part{manifest.primitives.length === 1 ? '' : 's'} on canvas</span>
@@ -1182,10 +1191,13 @@ export function BuildPage() {
               {goalProgress.met ? `${goalProgress.label}: done` : `${goalProgress.label}: ${goalProgress.current} / ${goalProgress.target}`}
             </span>
           ) : null}
+          {jobComplete && job ? (
+            <span className="builder-chip is-success">{job.title} complete</span>
+          ) : null}
         </div>
 
         {connectMenuOpen && !connectionKind ? (
-          <div className="builder-connect-chooser">
+          <div className="builder-connect-chooser builder-connect-chooser-inline">
             <div className="builder-connect-field">
               <span>Pick a connector</span>
               <div className="builder-connect-option-row">
@@ -1209,29 +1221,132 @@ export function BuildPage() {
           </div>
         ) : null}
 
+        {openUtilityPanel ? (
+          <div className="builder-utility-drawer">
+            {openUtilityPanel === 'inspector' ? (
+              <InspectorPanel
+                mode="panel"
+                primitive={selectedPrimitive}
+                manifest={manifest}
+                onClose={() => setOpenUtilityPanel(null)}
+                onDelete={(primitiveId) => {
+                  void persistDraft(deletePrimitive(manifest, primitiveId), undefined, { recordHistory: true });
+                  if (selectedPrimitiveId === primitiveId) {
+                    setSelectedPrimitiveId(undefined);
+                  }
+                  showStatus('Part removed from the canvas.', 'info');
+                }}
+                onUpdateValue={(primitiveId, key, value) => {
+                  const primitive = manifest.primitives.find((item) => item.id === primitiveId);
+                  if (!primitive) {
+                    return;
+                  }
+                  void persistDraft(updatePrimitive(manifest, primitiveId, { ...primitive.config, [key]: value }), undefined, { recordHistory: true });
+                  if (key === 'powerState') {
+                    playUiTone('power');
+                    showStatus(value ? 'Motor powered ON.' : 'Motor powered OFF.', 'info');
+                  }
+                }}
+              />
+            ) : (
+              <ControlPanel
+                mode="panel"
+                controls={manifest.controls}
+                values={controlValues}
+                onClose={() => setOpenUtilityPanel(null)}
+                onChange={(controlId, value) => {
+                  setControlValues((current) => ({ ...current, [controlId]: value }));
+                }}
+              />
+            )}
+          </div>
+        ) : null}
+
         {toolbarNotice ? (
           <p className={`builder-status builder-status-${toolbarNotice.tone}`} role="status" aria-live="polite">
             {toolbarNotice.message}
           </p>
         ) : null}
-      </section>
 
-      {jobComplete && job ? (
-        <section className="job-complete-card">
-          <div className="job-complete-star">★</div>
-          <div className="job-complete-content">
-            <h2>Project Complete</h2>
-            <p>You finished <strong>{job.title}</strong> with real machine feedback.</p>
-            <p className="muted">{job.hints[0] ?? 'Keep playing with the machine now that it works honestly.'}</p>
+        {jobComplete && job ? (
+          <div className="builder-stage-complete">
+            <div className="builder-stage-complete-copy">
+              <span className="builder-toolbar-win-star" aria-hidden="true">★</span>
+              <div>
+                <strong>Project complete</strong>
+                <p>{compactCompletionHint}</p>
+              </div>
+            </div>
+            <div className="builder-stage-complete-actions">
+              <button type="button" className="primary-link" onClick={handleSaveMachine}>
+                Save Machine
+              </button>
+              <Link to="/">Back to Yard</Link>
+            </div>
           </div>
-          <div className="job-complete-actions">
-            <button type="button" className="primary-link" onClick={handleSaveMachine}>
-              Save Machine
-            </button>
-            <Link to="/">Back to Yard</Link>
+        ) : null}
+
+        <div className="builder-workbench">
+          <div className="canvas-column builder-canvas-panel" style={{ position: 'relative' }}>
+            <HudOverlay hud={manifest.hud} telemetry={telemetry} />
+            {flashToast && (
+              <div className="connection-toast" role="status" aria-live="polite">The machine is responding.</div>
+            )}
+            <ChallengeToast challenge={challengeToast} onDismiss={() => setChallengeToast(null)} />
+            {stepCelebrating && !jobComplete && (
+              <div className="step-complete-toast">
+                <span className="step-complete-star">★</span>
+                Step complete!
+              </div>
+            )}
+            <MachineCanvas
+              manifest={manifest}
+              runtime={runtimeSnapshot}
+              selectedPrimitiveId={selectedPrimitiveId}
+              placingKind={placingKind}
+              connectionMode={connectionKind ? { kind: connectionKind, sourceId: connectionSourceId } : null}
+              activeJobHint={activeJobHint}
+              projectGuide={projectGuide}
+              onPlacePrimitive={handlePlacePrimitive}
+              onSelectPrimitive={handleSelectPrimitive}
+              onConnectPick={handleConnectPick}
+              onMovePrimitive={(primitiveId, x, y) => {
+                void persistDraft(movePrimitive(manifest, primitiveId, x, y), undefined, { recordHistory: true });
+              }}
+              onTelemetry={setTelemetry}
+              diagnosticsEnabled={Boolean(playState?.diagnosticsEnabled)}
+              onConnectionFlash={() => {
+                if (flashCountRef.current >= 3) return;
+                flashCountRef.current += 1;
+                setFlashToast(true);
+                setTimeout(() => setFlashToast(false), 2000);
+              }}
+              onTogglePower={(primitiveId) => {
+                const prim = manifest.primitives.find((p) => p.id === primitiveId);
+                if (!prim || prim.kind !== 'motor') return;
+                const current = (prim.config as { powerState?: boolean }).powerState ?? true;
+                void persistDraft(updatePrimitive(manifest, primitiveId, { ...prim.config, powerState: !current }), undefined, { recordHistory: true });
+                playUiTone('power');
+                showStatus(!current ? 'Motor ON.' : 'Motor OFF.', 'info');
+              }}
+              onCanvasReady={() => setCanvasReady(true)}
+            />
           </div>
-        </section>
-      ) : null}
+
+          <aside className="right-rail builder-parts-rail">
+            <PartPalette
+              manifest={manifest}
+              selectedPrimitive={selectedPrimitive}
+              selectedKind={placingKind}
+              activeJobHint={activeJobHint}
+              allowedKinds={!projectUnlocked ? activeProjectStep?.allowedPartKinds : undefined}
+              projectTitle={job?.title}
+              projectStepTitle={activeProjectStep?.title}
+              onSelectKind={handleSelectKind}
+            />
+          </aside>
+        </div>
+      </section>
 
       {assistantOpen ? (
         <section className="panel build-help-drawer">
@@ -1339,100 +1454,6 @@ export function BuildPage() {
           </div>
         </section>
       ) : null}
-
-      <div className="build-layout build-layout-compact">
-        <div className="canvas-column" style={{ position: 'relative' }}>
-          <HudOverlay hud={manifest.hud} telemetry={telemetry} />
-          {flashToast && (
-            <div className="connection-toast" role="status" aria-live="polite">The machine is responding.</div>
-          )}
-          <ChallengeToast challenge={challengeToast} onDismiss={() => setChallengeToast(null)} />
-          {stepCelebrating && !jobComplete && (
-            <div className="step-complete-toast">
-              <span className="step-complete-star">★</span>
-              Step complete!
-            </div>
-          )}
-          <MachineCanvas
-            manifest={manifest}
-            runtime={runtimeSnapshot}
-            selectedPrimitiveId={selectedPrimitiveId}
-            placingKind={placingKind}
-            connectionMode={connectionKind ? { kind: connectionKind, sourceId: connectionSourceId } : null}
-            activeJobHint={activeJobHint}
-            projectGuide={projectGuide}
-            onPlacePrimitive={handlePlacePrimitive}
-            onSelectPrimitive={handleSelectPrimitive}
-            onConnectPick={handleConnectPick}
-            onMovePrimitive={(primitiveId, x, y) => {
-              void persistDraft(movePrimitive(manifest, primitiveId, x, y), undefined, { recordHistory: true });
-            }}
-            onTelemetry={setTelemetry}
-            diagnosticsEnabled={Boolean(playState?.diagnosticsEnabled)}
-            onConnectionFlash={() => {
-              if (flashCountRef.current >= 3) return; // stop after 3 toasts
-              flashCountRef.current += 1;
-              setFlashToast(true);
-              setTimeout(() => setFlashToast(false), 2000);
-            }}
-            onTogglePower={(primitiveId) => {
-              const prim = manifest.primitives.find((p) => p.id === primitiveId);
-              if (!prim || prim.kind !== 'motor') return;
-              const current = (prim.config as { powerState?: boolean }).powerState ?? true;
-              void persistDraft(updatePrimitive(manifest, primitiveId, { ...prim.config, powerState: !current }), undefined, { recordHistory: true });
-              playUiTone('power');
-              showStatus(!current ? 'Motor ON.' : 'Motor OFF.', 'info');
-            }}
-            onCanvasReady={() => setCanvasReady(true)}
-          />
-        </div>
-
-        <div className="right-rail">
-          <PartPalette
-            manifest={manifest}
-            selectedPrimitive={selectedPrimitive}
-            selectedKind={placingKind}
-            activeJobHint={activeJobHint}
-            allowedKinds={!projectUnlocked ? activeProjectStep?.allowedPartKinds : undefined}
-            projectTitle={job?.title}
-            projectStepTitle={activeProjectStep?.title}
-            onSelectKind={handleSelectKind}
-          />
-          <div className="builder-utility-stack">
-            <InspectorPanel
-              primitive={selectedPrimitive}
-              manifest={manifest}
-              onDelete={(primitiveId) => {
-                void persistDraft(deletePrimitive(manifest, primitiveId), undefined, { recordHistory: true });
-                if (selectedPrimitiveId === primitiveId) {
-                  setSelectedPrimitiveId(undefined);
-                }
-                showStatus('Part removed from the canvas.', 'info');
-              }}
-              onUpdateValue={(primitiveId, key, value) => {
-                const primitive = manifest.primitives.find((item) => item.id === primitiveId);
-                if (!primitive) {
-                  return;
-                }
-                void persistDraft(updatePrimitive(manifest, primitiveId, { ...primitive.config, [key]: value }), undefined, { recordHistory: true });
-                if (key === 'powerState') {
-                  playUiTone('power');
-                  showStatus(value ? 'Motor powered ON.' : 'Motor powered OFF.', 'info');
-                }
-              }}
-            />
-            {manifest.controls.length > 0 ? (
-              <ControlPanel
-                controls={manifest.controls}
-                values={controlValues}
-                onChange={(controlId, value) => {
-                  setControlValues((current) => ({ ...current, [controlId]: value }));
-                }}
-              />
-            ) : null}
-          </div>
-        </div>
-      </div>
 
       {handbookOpen ? (
         <div className="modal-backdrop handbook-backdrop" onClick={() => setHandbookOpen(false)}>

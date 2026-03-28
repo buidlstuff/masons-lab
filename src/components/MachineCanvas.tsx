@@ -1308,16 +1308,16 @@ function toneColor(tone: 'good' | 'info' | 'warn') {
 function drawBackdrop(instance: p5) {
   const ctx = instance.drawingContext as CanvasRenderingContext2D;
   const sky = ctx.createLinearGradient(0, 0, 0, instance.height);
-  sky.addColorStop(0, '#dff6ff');
-  sky.addColorStop(0.58, '#f9fbef');
-  sky.addColorStop(1, '#f3e7c8');
+  sky.addColorStop(0, '#d2f2ff');
+  sky.addColorStop(0.56, '#fdf7d8');
+  sky.addColorStop(1, '#ebf4d4');
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, instance.width, instance.height);
 
   instance.noStroke();
-  instance.fill(255, 245, 196, 170);
+  instance.fill(255, 235, 133, 180);
   instance.circle(instance.width - 110, 92, 128);
-  instance.fill(197, 229, 208, 255);
+  instance.fill(191, 230, 198, 255);
   instance.rect(-20, instance.height - 130, instance.width + 40, 170);
 }
 

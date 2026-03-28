@@ -8,6 +8,10 @@ Important summary:
 - There are **no dangerous half-finished jobs** from the big expansion passes.
 - The repo is at a **clean checkpoint**.
 - The remaining items below are mostly **intentional deferrals**, not broken in-between states.
+- The latest active work has been **UI/UX restructuring**, especially:
+  - moving mode selection to the home launcher
+  - reducing build mode to `connect + canvas + parts`
+  - demoting inspector/tuning into optional utilities
 
 ---
 
@@ -167,6 +171,57 @@ Use:
 
 - `current_state.md` for product/system truth
 - this file for backlog / deferred-work truth
+
+---
+
+## Latest UX Pass Status
+
+### Builder UX work that is now done
+
+- `Connect Parts` is now a single explicit top-level action in the builder HUD
+- connector choice now happens from that menu, not from the parts shelf
+- the builder is now arranged as one workbench shell:
+  - top HUD
+  - large canvas
+  - persistent right-side parts shelf
+- the parts shelf is now the primary browsing surface and is meant to stay visible while building
+- inspector and machine controls are now optional dropdown utilities instead of always occupying large rail space
+- silly scenes / workshop shelf / challenge browsing were removed from the builder rail
+
+### Home / launcher work that is now done
+
+- the front page is now a focused game-style mode launcher
+- the five main options are:
+  1. Guided Build
+  2. Engineering Workbook
+  3. Challenges
+  4. Silly Scenes
+  5. Free Build
+- Winky is now part of the launcher presentation
+- the launcher uses a playful workshop / blueprint style instead of generic SaaS-like hero copy
+
+### What is still worth polishing
+
+These are **real product polish items**, not broken half-finished work:
+
+1. **Parts shelf feel**
+   - The biggest remaining UX sensitivity is still the exact feel of browsing lots of parts while keeping the canvas in view.
+   - The current direction is much better, but future refinement should stay first-principles:
+     - one obvious shelf
+     - one obvious scrollbar
+     - no nested scroll traps
+
+2. **Guided build density**
+   - Keep guidance lightweight.
+   - Avoid letting guided-build helper copy grow back into large banners or overlays above the canvas.
+
+3. **Connect flow polish**
+   - The current explicit `Connect Parts -> choose connector -> click part A -> click part B` flow is the right baseline.
+   - Future work should polish clarity and feedback, not replace it with hidden auto-connect behavior.
+
+4. **Home-page art polish**
+   - The launcher direction is now correct.
+   - Future work can improve illustration/detail quality, but should preserve the focused five-mode structure.
 
 ---
 

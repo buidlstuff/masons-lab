@@ -23,11 +23,11 @@ interface HomeSnapshot {
 }
 
 const MODE_ICONS: Record<HomeMode, string> = {
-  guided: '★',
-  workbook: '📘',
-  challenges: '🏅',
-  scenes: '🎈',
-  free: '∞',
+  guided: '⚙️',
+  workbook: '📖',
+  challenges: '🏆',
+  scenes: '🎉',
+  free: '🛠️',
 };
 
 const WINKY_HINTS: Record<HomeMode, string> = {
@@ -382,8 +382,8 @@ export function HomePage() {
         </div>
 
         <div className="home-launcher-hero">
-          <div className="home-launcher-title-wrap">
-            <p className="eyebrow">Workshop Mode Select</p>
+            <div className="home-launcher-title-wrap">
+            <p className="eyebrow">Welcome to the Yard</p>
             <div className="home-launcher-title">
               <h1 className="home-launcher-heading">
                 <span>Mason&apos;s</span>

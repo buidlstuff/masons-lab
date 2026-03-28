@@ -23,7 +23,7 @@ No fake preview parts. No purely decorative machine widgets.
 
 Repo: `buidlstuff/masons-lab`
 Default branch: `main`
-Recent head when this was updated: `4069790`
+Previous pushed checkpoint before this handoff: `55e081a`
 
 ---
 
@@ -156,16 +156,21 @@ Connectors are now explicit part kinds:
 - `rope`
 - `belt-link`
 - `chain-link`
+- `bolt-link`
+- `hinge-link`
+- `powered-hinge-link`
 
 Important design detail:
 
 - these are **not** placed like normal canvas parts
-- the drawer exposes public connector actions
-- those actions create a connector from existing compatible parts already on the canvas
+- the builder exposes a public `Connect Parts` action
+- that flow creates a connector from existing compatible parts already on the canvas
 
 Current UX behavior:
 
-- connector buttons are disabled until the needed compatible parts exist
+- `Connect Parts` stays in the main build HUD, not inside the parts shelf
+- clicking it opens a chooser for `Bolt`, `Hinge`, `Powered Hinge`, `Rope`, `Belt`, `Chain`, and `Beam`
+- after picking a connector, the user clicks the first part and then the second part on the canvas
 - on creation, the new connector is auto-selected
 - selected connectors render with stronger strokes, endpoint markers, and text labels
 
@@ -174,6 +179,9 @@ Connector rules today:
 - `rope` is primarily winch/hook lifting control
 - `belt-link` is for wheel/pulley/flywheel transmission
 - `chain-link` is for sprocket transmission
+- `bolt-link` is for rigid assemblies that should translate and rotate together
+- `hinge-link` is for free pivots between mechanical parts
+- `powered-hinge-link` is for motor-driven swinging joints with live controls
 - routed connectors use `viaIds`
 - ropes can be routed through pulleys
 
@@ -264,17 +272,28 @@ Key pieces:
 - `PartPalette`
 - `InspectorPanel`
 - `ControlPanel`
-- `StarterOverlay`
 - `HudOverlay`
-- `ChallengePanel`
-- `SillySceneSelector`
+- `ChallengeToast`
+- `HomePage`
+- `WinkyDog`
 
 Important current UX facts:
 
-- the starter overlay was recently lightened and clarified
-- the connector card is public and visible in the drawer
-- silly scenes expose `Reset Scene`
-- connector creation is now less "silent"
+- the home page is now a focused 5-mode launcher:
+  - Guided Build
+  - Engineering Workbook
+  - Challenges
+  - Silly Scenes
+  - Free Build
+- the launcher now has a playful workshop-sign / blueprint aesthetic and a visible Winky mascot
+- the build screen now reads as one attached workbench shell:
+  - top HUD with `Connect Parts`
+  - large central canvas
+  - persistent right-side parts shelf
+- the parts shelf is always expanded and meant to be the main browsing surface
+- `Inspector` and `Machine Controls` are now optional dropdown utilities, not permanent rail cards
+- guided build still constrains useful parts by step, but the full shelf remains visible
+- silly scenes and challenge browsing live on the launcher/home surface, not in the builder rail
 
 ---
 
@@ -312,7 +331,7 @@ These are real and currently acceptable:
 
 - train motion is progress-based, not rigid-body-on-track physics
 - connectors are explicit but the routing UX is still fairly lightweight
-- the public connector drawer creates the first connector from compatible nearby parts; it is not a full manual connector authoring tool
+- the public connector flow is still two-click explicit linking, not a full CAD-style connector editor
 - multiple motors competing for one driven system are still simplified
 - hopper slot staging is still not a polished multi-hopper system
 - recipe mode still exists but is not the main focus
@@ -408,11 +427,14 @@ Mason's Lab is now a fairly broad sandbox with:
 
 - stable starter projects
 - public connectors
+- rigid and joint connectors
 - drivetrain parts
 - lifting/linear parts
 - trains that actually tie into the machine graph
 - scenes
 - challenges
+- a game-style launcher that separates mode selection from the builder
+- a builder UI centered on `connect + canvas + parts`
 
 The next work should be **tightening clarity, polish, and reliability**, not exploding the part count much further.
 
