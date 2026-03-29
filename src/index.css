@@ -1106,6 +1106,8 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  position: relative;
+  z-index: 1;
 }
 
 .challenge-panel-summary h3 {
@@ -5141,6 +5143,7 @@ button:disabled {
 
 .home-mode-preview {
   position: relative;
+  isolation: isolate;
   min-height: 0;
   padding: 0.88rem 0.95rem 0.95rem;
   background:
@@ -5209,6 +5212,7 @@ button:disabled {
   min-height: 128px;
   padding: 0.78rem 0.84rem;
   gap: 0.32rem;
+  background: rgba(255, 255, 255, 0.97);
 }
 
 .home-preview-card strong {
@@ -5223,6 +5227,15 @@ button:disabled {
 
 .home-preview-card span:last-child {
   margin-top: 0.15rem;
+}
+
+.home-mode-preview[data-mode='challenges'] .challenge-panel-summary,
+.home-mode-preview[data-mode='challenges'] .challenge-group {
+  position: relative;
+  z-index: 1;
+  padding: 0.55rem 0.65rem;
+  border-radius: 18px;
+  background: rgba(248, 244, 237, 0.96);
 }
 
 @media (max-width: 960px) {
