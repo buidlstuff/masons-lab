@@ -1618,7 +1618,7 @@ export function BuildPage() {
     ? { tone: 'info' as const, message: 'Loading the live engine and stage renderer.' }
     : statusNotice;
   const showBuilderTopCopy = Boolean(connectionKind || activeProjectStep || activePuzzleChallenge);
-  const showBuilderStatusChips = Boolean(goalProgress || jobComplete);
+  const showBuilderStatusChips = Boolean(goalProgress || jobComplete || toolbarNotice);
   const desktopConnectOverlayOpen = connectMenuOpen && !connectionKind;
   const mobileConnectOverlayOpen = connectMenuOpen && !connectionKind;
   const renderConnectChooser = (className: string, id?: string) => (
@@ -1682,16 +1682,6 @@ export function BuildPage() {
             >
               Connect Parts
             </button>
-            {toolbarNotice ? (
-              <span
-                className={`builder-chip builder-chip-notice builder-chip-notice-${toolbarNotice.tone} builder-stage-inline-notice`}
-                role="status"
-                aria-live="polite"
-                title={toolbarNotice.message}
-              >
-                {toolbarNotice.message}
-              </span>
-            ) : null}
             <button
               type="button"
               className={`builder-tablet-parts-button${tabletPartsOpen ? ' is-active' : ''}`}
@@ -1754,6 +1744,16 @@ export function BuildPage() {
             ) : null}
             {jobComplete && job ? (
               <span className="builder-chip is-success">{job.title} complete</span>
+            ) : null}
+            {toolbarNotice ? (
+              <span
+                className={`builder-chip builder-chip-notice builder-chip-notice-${toolbarNotice.tone}`}
+                role="status"
+                aria-live="polite"
+                title={toolbarNotice.message}
+              >
+                {toolbarNotice.message}
+              </span>
             ) : null}
           </div>
         ) : null}
