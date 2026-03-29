@@ -537,44 +537,48 @@ export function HomePage() {
       <section className={`home-launcher-screen mode-${selectedMode}`}>
         <div className="home-launcher-hero">
           <div className="home-launcher-title-wrap">
-            <p className="eyebrow">Welcome to the Yard</p>
-            <div className="home-launcher-title">
-              <h1 className="home-launcher-heading">
-                <span>Mason&apos;s</span>
-                <strong>Engineering Lab</strong>
-              </h1>
-            </div>
-            <p className="home-launcher-tagline">
-              Build ridiculous machines, solve focused puzzles, and learn how every real part behaves.
-            </p>
-            {homeDegraded ? (
-              <p className="builder-status builder-status-warning home-boot-status">
-                {boot.message ?? 'Storage is limited, so the yard is running in reduced mode.'}
+            <div className="home-launcher-title-copy">
+              <p className="eyebrow">Welcome to the Yard</p>
+              <div className="home-launcher-title">
+                <h1 className="home-launcher-heading">
+                  <span>Mason&apos;s</span>
+                  <strong>Engineering Lab</strong>
+                </h1>
+              </div>
+              <p className="home-launcher-tagline">
+                Build ridiculous machines, solve focused puzzles, and learn how every real part behaves.
               </p>
-            ) : null}
-          </div>
-
-          <div className="home-launcher-hud" aria-label="Lab progress">
-            <div className="home-hud-pill">
-              <span>Projects</span>
-              <strong>{homeLoading ? '…' : `${completedProjects}/${projects.length || 3}`}</strong>
-            </div>
-            <div className="home-hud-pill">
-              <span>Puzzles</span>
-              <strong>{homeLoading ? '…' : `${puzzleProgressCount}/${VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.length}`}</strong>
-            </div>
-            <div className="home-hud-pill">
-              <span>XP</span>
-              <strong>{homeLoading ? '…' : `${xp} · ${tierName}`}</strong>
+              {homeDegraded ? (
+                <p className="builder-status builder-status-warning home-boot-status">
+                  {boot.message ?? 'Storage is limited, so the yard is running in reduced mode.'}
+                </p>
+              ) : null}
             </div>
           </div>
 
-          <div className="home-launcher-mascot">
-            <div className="home-winky-bubble">
-              <strong>Winky</strong>
-              <p>{WINKY_HINTS[selectedMode]}</p>
+          <div className="home-launcher-sidekick">
+            <div className="home-launcher-hud" aria-label="Lab progress">
+              <div className="home-hud-pill">
+                <span>Projects</span>
+                <strong>{homeLoading ? '…' : `${completedProjects}/${projects.length || 3}`}</strong>
+              </div>
+              <div className="home-hud-pill">
+                <span>Puzzles</span>
+                <strong>{homeLoading ? '…' : `${puzzleProgressCount}/${VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.length}`}</strong>
+              </div>
+              <div className="home-hud-pill">
+                <span>XP</span>
+                <strong>{homeLoading ? '…' : `${xp} · ${tierName}`}</strong>
+              </div>
             </div>
-            <WinkyDog className="home-winky-dog" />
+
+            <div className="home-launcher-mascot">
+              <div className="home-winky-bubble">
+                <strong>Winky</strong>
+                <p>{WINKY_HINTS[selectedMode]}</p>
+              </div>
+              <WinkyDog className="home-winky-dog" />
+            </div>
           </div>
         </div>
 
