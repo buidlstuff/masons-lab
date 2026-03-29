@@ -3030,6 +3030,11 @@ button:disabled {
   white-space: nowrap;
 }
 
+.builder-stage-inline-notice {
+  flex: 0 1 28rem;
+  align-self: center;
+}
+
 .builder-stage-shell .builder-chip.is-active,
 .builder-stage-shell .builder-chip.is-success {
   color: #216a57;
@@ -5496,6 +5501,10 @@ button:disabled {
   .builder-stage-status,
   .builder-stage-complete-actions {
     justify-content: flex-start;
+  }
+
+  .builder-stage-inline-notice {
+    flex-basis: 100%;
   }
 
   .parts-dock-panel .palette-grid,
