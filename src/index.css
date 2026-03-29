@@ -1103,6 +1103,7 @@ button:disabled {
 }
 
 .challenge-panel {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -5166,6 +5167,7 @@ button:disabled {
 .home-preview-head,
 .home-preview-actions,
 .home-preview-grid {
+  flex: 0 0 auto;
   position: relative;
   z-index: 1;
 }
