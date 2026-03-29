@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { createBrowserRouter, Link, Outlet, RouterProvider } from 'react-router-dom';
+import { createBrowserRouter, Link, Outlet, RouterProvider, useLocation } from 'react-router-dom';
 import { RouteSkeleton } from './components/RouteSkeleton';
 import { HomePage } from './pages/HomePage';
 import {
@@ -40,6 +40,8 @@ function withRouteFallback(node: ReactNode, variant: 'build' | 'detail' = 'detai
 function RootLayout() {
   const pressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
+  const location = useLocation();
+  const isBuildRoute = location.pathname.startsWith('/build');
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -77,8 +79,8 @@ function RootLayout() {
   }
 
   return (
-    <div className="app-shell">
-      <header className="site-header">
+    <div className={`app-shell${isBuildRoute ? ' is-build-route' : ''}`}>
+      <header className={`site-header${isBuildRoute ? ' is-build-route' : ''}`}>
         <Link
           to="/"
           className="brand-mark"
