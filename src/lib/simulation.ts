@@ -56,6 +56,8 @@ export function useMachineSimulation(
   const matterRef = useRef<MatterRuntime | null>(null);
   const snapshotRef = useRef<RuntimeSnapshot>(snapshot);
   const controlsRef = useRef(controlValues);
+  const hasLoadedWorldRef = useRef(false);
+  const loadSequenceRef = useRef(0);
   const manifestRef = useRef(manifest);
 
   useEffect(() => {
@@ -74,65 +76,89 @@ export function useMachineSimulation(
   // Rebuild the physics world whenever the manifest changes.
   // Recipe manifests (recipeId set) stay on the scripted simulation path.
   useEffect(() => {
-    let cancelled = false;
-    physicsRef.current?.cleanup();
-    physicsRef.current = null;
-    matterRef.current = null;
-
-    const initial = createInitialSnapshot(manifest);
-    snapshotRef.current = initial;
-    queueMicrotask(() => {
-      if (!cancelled) {
-        setSnapshot(initial);
-      }
-    });
+    const loadSequence = loadSequenceRef.current + 1;
+    loadSequenceRef.current = loadSequence;
 
     if (!options?.enabled || !manifest) {
+      physicsRef.current?.cleanup();
+      physicsRef.current = null;
+      matterRef.current = null;
+      hasLoadedWorldRef.current = false;
+      const initial = createInitialSnapshot(manifest);
+      snapshotRef.current = initial;
+      setSnapshot(initial);
       setStatus('loading');
-      return () => {
-        cancelled = true;
-        physicsRef.current?.cleanup();
-        physicsRef.current = null;
-        matterRef.current = null;
-      };
+      return;
     }
 
     const recipeId = manifest.metadata.recipeId;
     if (recipeId) {
-      setStatus('ready');
-      return () => {
-        cancelled = true;
-        physicsRef.current?.cleanup();
-        physicsRef.current = null;
-        matterRef.current = null;
-      };
-    }
-
-    setStatus('loading');
-    void Promise.all([import('./physics-engine'), import('matter-js')])
-      .then(([physicsModule, matterModule]) => {
-        if (cancelled) {
-          return;
-        }
-        physicsRef.current = physicsModule.buildMatterWorld(manifest, {
-          stableCargoSpawns: options?.stableCargoSpawns,
-        });
-        matterRef.current = (matterModule.default ?? matterModule) as MatterRuntime;
-        setStatus('ready');
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStatus('ready');
-        }
-      });
-
-    return () => {
-      cancelled = true;
       physicsRef.current?.cleanup();
       physicsRef.current = null;
       matterRef.current = null;
-    };
+      hasLoadedWorldRef.current = false;
+      const initial = createInitialSnapshot(manifest);
+      snapshotRef.current = initial;
+      setSnapshot(initial);
+      setStatus('ready');
+      return;
+    }
+
+    const shouldPrimeInitialSnapshot = !hasLoadedWorldRef.current || !physicsRef.current || !matterRef.current;
+    if (shouldPrimeInitialSnapshot) {
+      const initial = createInitialSnapshot(manifest);
+      snapshotRef.current = initial;
+      setSnapshot(initial);
+      setStatus('loading');
+    }
+
+    void Promise.all([import('./physics-engine'), import('matter-js')])
+      .then(([physicsModule, matterModule]) => {
+        const nextWorld = physicsModule.buildMatterWorld(manifest, {
+          stableCargoSpawns: options?.stableCargoSpawns,
+        });
+        nextWorld.applyControls(controlsRef.current);
+
+        if (loadSequenceRef.current !== loadSequence) {
+          nextWorld.cleanup();
+          return;
+        }
+
+        const previousWorld = physicsRef.current;
+        physicsRef.current = nextWorld;
+        matterRef.current = (matterModule.default ?? matterModule) as MatterRuntime;
+        hasLoadedWorldRef.current = true;
+        setStatus('ready');
+
+        if (previousWorld && previousWorld !== nextWorld) {
+          previousWorld.cleanup();
+        }
+      })
+      .catch((error) => {
+        if (loadSequenceRef.current !== loadSequence) {
+          return;
+        }
+
+        if (import.meta.env.DEV) {
+          console.warn('[simulation] Failed to rebuild physics world; keeping previous world active.', error);
+        }
+
+        if (!hasLoadedWorldRef.current || !physicsRef.current || !matterRef.current) {
+          setStatus('ready');
+        }
+      });
   }, [manifest, options?.enabled, options?.stableCargoSpawns]);
+
+  useEffect(
+    () => () => {
+      loadSequenceRef.current += 1;
+      physicsRef.current?.cleanup();
+      physicsRef.current = null;
+      matterRef.current = null;
+      hasLoadedWorldRef.current = false;
+    },
+    [],
+  );
 
   // Single rAF loop — never restarts, reads everything through refs.
   useEffect(() => {

@@ -19,8 +19,8 @@ function createGeneratedControls(primitive: PrimitiveInstance): ControlSpec[] {
         {
           id: `${primitive.id}-power`,
           kind: 'toggle',
-          label: 'Run',
-          description: 'Turns the motor on or off.',
+          label: 'Power',
+          description: 'Turns motor power on or off.',
           bind: { targetId: primitive.id, path: 'powerState' },
           defaultValue: Boolean((primitive.config as { powerState?: boolean }).powerState ?? true),
         },
@@ -55,7 +55,7 @@ function createGeneratedControls(primitive: PrimitiveInstance): ControlSpec[] {
         {
           id: `${primitive.id}-enabled`,
           kind: 'toggle',
-          label: 'Run',
+          label: 'Power',
           description: 'Turns the powered hinge on or off.',
           bind: { targetId: primitive.id, path: 'enabled' },
           defaultValue: Boolean((primitive.config as { enabled?: boolean }).enabled ?? true),
@@ -77,7 +77,7 @@ function createGeneratedControls(primitive: PrimitiveInstance): ControlSpec[] {
         {
           id: `${primitive.id}-enabled`,
           kind: 'toggle',
-          label: 'Run',
+          label: 'Power',
           description: 'Stops or starts the locomotive without deleting the setup.',
           bind: { targetId: primitive.id, path: 'enabled' },
           defaultValue: Number((primitive.config as { speed?: number }).speed ?? 0.18) > 0,

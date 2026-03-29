@@ -26,8 +26,16 @@ export interface ChallengeScratchState {
   previousRotations: Record<string, number>;
 }
 
-export const ACTIVE_CHALLENGE_LIMIT = 3;
+export interface SandboxChallengeRuntimeParams {
+  challengeProgressHydrated: boolean;
+  hasActivePuzzleChallenge?: boolean;
+  jobId?: string | null;
+  manifest?: ExperimentManifest | null;
+  simulationStatus: 'loading' | 'ready';
+}
+
 const GEAR_LIVE_THRESHOLD = 0.01;
+export const ACTIVE_CHALLENGE_LIMIT = 3;
 
 export function createChallengeScratchState(): ChallengeScratchState {
   return {
@@ -443,6 +451,42 @@ export const CHALLENGES: ChallengeDefinition[] = [
     },
   },
 ];
+
+export function getActiveChallenges(
+  completedChallengeIds: Iterable<string>,
+  limit = ACTIVE_CHALLENGE_LIMIT,
+) {
+  const completedSet = new Set(completedChallengeIds);
+  return CHALLENGES.filter((challenge) => !completedSet.has(challenge.id)).slice(0, limit);
+}
+
+export function getActiveChallengeIds(
+  completedChallengeIds: Iterable<string>,
+  limit = ACTIVE_CHALLENGE_LIMIT,
+) {
+  return getActiveChallenges(completedChallengeIds, limit).map((challenge) => challenge.id);
+}
+
+export function shouldEvaluateSandboxChallenges({
+  challengeProgressHydrated,
+  hasActivePuzzleChallenge,
+  jobId,
+  manifest,
+  simulationStatus,
+}: SandboxChallengeRuntimeParams) {
+  if (!challengeProgressHydrated || simulationStatus !== 'ready' || jobId || hasActivePuzzleChallenge || !manifest) {
+    return false;
+  }
+
+  const tags = manifest.metadata.tags ?? [];
+  if (manifest.metadata.recipeId) {
+    return false;
+  }
+
+  return !tags.includes('silly-scene')
+    && !tags.includes('puzzle-challenge')
+    && !tags.some((tag) => tag.startsWith('puzzle-challenge:'));
+}
 
 export function evaluateChallengeCompletion(
   challenge: ChallengeDefinition,

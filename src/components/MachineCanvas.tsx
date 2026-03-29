@@ -470,37 +470,40 @@ export function MachineCanvas({
           {activeJobHint}
         </div>
       )}
-      <div className="machine-canvas" ref={hostRef}>
-        {!canvasReady ? (
-          <div className="machine-canvas-loading" aria-hidden="true">
-            <div className="machine-canvas-loading-grid" />
-            <div className="machine-canvas-loading-copy">
-              <div className="skeleton-line skeleton-line-eyebrow" />
-              <div className="skeleton-line skeleton-line-copy" />
-              <div className="skeleton-line skeleton-line-copy short" />
+      <div className="machine-canvas">
+        <div className="machine-canvas-stage">
+          <div className="machine-canvas-stage-host" ref={hostRef} />
+          {!canvasReady ? (
+            <div className="machine-canvas-loading" aria-hidden="true">
+              <div className="machine-canvas-loading-grid" />
+              <div className="machine-canvas-loading-copy">
+                <div className="skeleton-line skeleton-line-eyebrow" />
+                <div className="skeleton-line skeleton-line-copy" />
+                <div className="skeleton-line skeleton-line-copy short" />
+              </div>
             </div>
-          </div>
-        ) : null}
-        {quickControls && quickControls.actions.length > 0 ? (
-          <div className="canvas-quick-controls" role="group" aria-label={quickControls.title}>
-            <div className="canvas-quick-controls-copy">
-              <strong>{quickControls.title}</strong>
-              {quickControls.subtitle ? <span>{quickControls.subtitle}</span> : null}
+          ) : null}
+          {quickControls && quickControls.actions.length > 0 ? (
+            <div className="canvas-quick-controls" role="group" aria-label={quickControls.title}>
+              <div className="canvas-quick-controls-copy">
+                <strong>{quickControls.title}</strong>
+                {quickControls.subtitle ? <span>{quickControls.subtitle}</span> : null}
+              </div>
+              <div className="canvas-quick-controls-row">
+                {quickControls.actions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    className={`canvas-quick-control-button${action.active ? ' is-active' : ''}`}
+                    onClick={action.onPress}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="canvas-quick-controls-row">
-              {quickControls.actions.map((action) => (
-                <button
-                  key={action.id}
-                  type="button"
-                  className={`canvas-quick-control-button${action.active ? ' is-active' : ''}`}
-                  onClick={action.onPress}
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -658,7 +661,7 @@ function drawConnectionOverlay(
         instance.fill(251, 191, 36, 200);
         instance.textSize(11);
         instance.textAlign(instance.CENTER, instance.BOTTOM);
-        instance.text('Motor is OFF — click to power on', x, y - 24);
+        instance.text('Motor power is OFF — click to turn it ON', x, y - 24);
       }
     }
 

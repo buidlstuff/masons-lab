@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AppBootProvider } from '../lib/app-boot';
+import { SANDBOX_CHALLENGE_CATALOG } from '../lib/challenge-launcher';
 import { db } from '../lib/db';
 import { ENGINEERING_HANDBOOK_ENTRIES } from '../lib/engineering-handbook';
 import { SILLY_SCENE_LAUNCHER_CARDS } from '../lib/silly-scene-launcher';
@@ -65,6 +66,9 @@ describe('HomePage launcher', () => {
     expect(screen.getByRole('heading', { name: /Ten puzzle levels to solve right now/i })).toBeInTheDocument();
     expect(screen.getByText('Hook and Drop')).toBeInTheDocument();
     expect(screen.getByText('Trampoline Bank Shot')).toBeInTheDocument();
+    expect(screen.getByText(`0/${SANDBOX_CHALLENGE_CATALOG.length} medals earned in free build`)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 3, name: `${0} of ${SANDBOX_CHALLENGE_CATALOG.length} complete` })).toBeInTheDocument();
+    expect(screen.getAllByText('First Spin').length).toBeGreaterThan(0);
 
     const workbookButton = modeButtons.find((button) => button.textContent?.includes('Engineering Workbook'));
     expect(workbookButton).toBeTruthy();

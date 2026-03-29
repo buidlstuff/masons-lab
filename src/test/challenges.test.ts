@@ -3,6 +3,8 @@ import {
   CHALLENGES,
   createChallengeScratchState,
   evaluateChallengeCompletion,
+  getActiveChallengeIds,
+  shouldEvaluateSandboxChallenges,
 } from '../lib/challenges';
 import { createEmptyManifest } from '../lib/seed-data';
 import type { RuntimeSnapshot } from '../lib/simulation';
@@ -92,5 +94,41 @@ describe('challenge evaluation', () => {
       expect(evaluateChallengeCompletion(challenge!, manifest, runtime, scratch, 0.5)).toBe(false);
     }
     expect(evaluateChallengeCompletion(challenge!, manifest, runtime, scratch, 0.5)).toBe(true);
+  });
+
+  it('only enables sandbox medals for hydrated free-build drafts', () => {
+    const manifest = createEmptyManifest();
+
+    expect(shouldEvaluateSandboxChallenges({
+      challengeProgressHydrated: false,
+      manifest,
+      simulationStatus: 'ready',
+    })).toBe(false);
+
+    expect(shouldEvaluateSandboxChallenges({
+      challengeProgressHydrated: true,
+      jobId: 'starter-project',
+      manifest,
+      simulationStatus: 'ready',
+    })).toBe(false);
+
+    manifest.metadata.tags = [...manifest.metadata.tags, 'silly-scene'];
+    expect(shouldEvaluateSandboxChallenges({
+      challengeProgressHydrated: true,
+      manifest,
+      simulationStatus: 'ready',
+    })).toBe(false);
+
+    manifest.metadata.tags = [];
+    expect(shouldEvaluateSandboxChallenges({
+      challengeProgressHydrated: true,
+      manifest,
+      simulationStatus: 'ready',
+    })).toBe(true);
+  });
+
+  it('computes the next three active medal ids from progress', () => {
+    expect(getActiveChallengeIds([])).toEqual(['first-spin', 'gear-head', 'delivery-boy']);
+    expect(getActiveChallengeIds(['first-spin', 'gear-head'])).toEqual(['delivery-boy', 'splash-zone', 'sand-castle']);
   });
 });

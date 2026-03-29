@@ -90,6 +90,19 @@ export function updateStableCargoSpawns(
   };
 }
 
+export function replaceStartCheckpoint(
+  playState: DraftPlayState,
+  manifest: ExperimentManifest,
+): DraftPlayState {
+  return {
+    ...playState,
+    stepCheckpointManifest: {
+      ...playState.stepCheckpointManifest,
+      [START_CHECKPOINT_ID]: structuredClone(manifest),
+    },
+  };
+}
+
 export function toggleDiagnostics(playState: DraftPlayState): DraftPlayState {
   return {
     ...playState,

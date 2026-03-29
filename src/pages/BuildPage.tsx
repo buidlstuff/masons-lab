@@ -20,10 +20,10 @@ import { db } from '../lib/db';
 import { ENGINEERING_RECIPES, getEngineeringRecipeBlueprints } from '../lib/engineering-recipes';
 import { addPrimitive, connectPrimitives, deletePrimitive, movePrimitive, updatePrimitive } from '../lib/editor';
 import {
-  ACTIVE_CHALLENGE_LIMIT,
-  CHALLENGES,
   createChallengeScratchState,
   evaluateChallengeCompletion,
+  getActiveChallenges,
+  shouldEvaluateSandboxChallenges,
   type ChallengeDefinition,
 } from '../lib/challenges';
 import {
@@ -37,6 +37,7 @@ import {
   ensureDraftPlayState,
   latchProjectSteps,
   latestCheckpointForJob,
+  replaceStartCheckpoint,
   START_CHECKPOINT_ID,
   toggleDiagnostics,
 } from '../lib/play-state';
@@ -315,6 +316,7 @@ export function BuildPage() {
   const runtimeSnapshotRef = useRef<RuntimeSnapshot>(createInitialRuntimeSnapshot());
   const challengeScratchRef = useRef(createChallengeScratchState());
   const completedChallengeIdsRef = useRef(new Set<string>());
+  const announcedChallengeIdsRef = useRef(new Set<string>());
   const challengeLastEvalAtRef = useRef<number>(Date.now());
   const builderMeasureRef = useRef(false);
   const shouldLoadBlueprints = assistantOpen;
@@ -347,6 +349,7 @@ export function BuildPage() {
     () => challengeProgressQuery ?? [],
     [challengeProgressQuery],
   );
+  const challengeProgressHydrated = challengeProgressQuery !== undefined;
   const puzzleChallengeProgress = useMemo(
     () => puzzleChallengeProgressQuery ?? [],
     [puzzleChallengeProgressQuery],
@@ -435,7 +438,10 @@ export function BuildPage() {
           const decoded = JSON.parse(decodeURIComponent(atob(shareParam))) as ExperimentManifest;
           const newDraft = createEmptyDraft();
           newDraft.manifest = decoded;
-          newDraft.playState = ensureDraftPlayState(newDraft.playState, jobId ?? undefined, decoded);
+          newDraft.playState = replaceStartCheckpoint(
+            ensureDraftPlayState(newDraft.playState, jobId ?? undefined, decoded),
+            decoded,
+          );
           await db.drafts.put(newDraft);
           setManifest(decoded);
           setPlayState(newDraft.playState);
@@ -537,6 +543,16 @@ export function BuildPage() {
       .map((record) => record.challengeId),
     [challengeProgress],
   );
+  const sandboxChallengeRuntimeEnabled = useMemo(
+    () => shouldEvaluateSandboxChallenges({
+      challengeProgressHydrated,
+      hasActivePuzzleChallenge: Boolean(activePuzzleChallenge),
+      jobId,
+      manifest,
+      simulationStatus,
+    }),
+    [activePuzzleChallenge, challengeProgressHydrated, jobId, manifest, simulationStatus],
+  );
   useEffect(() => {
     runtimeSnapshotRef.current = runtimeSnapshot;
   }, [runtimeSnapshot]);
@@ -551,21 +567,21 @@ export function BuildPage() {
   }, [manifest]);
 
   useEffect(() => {
-    if (!manifest) return undefined;
+    if (!manifest || !sandboxChallengeRuntimeEnabled) {
+      return undefined;
+    }
 
     const interval = window.setInterval(() => {
       const currentManifest = currentManifestRef.current;
       const currentRuntime = runtimeSnapshotRef.current;
-      if (!currentManifest || simulationStatus !== 'ready') return;
+      if (!currentManifest) return;
 
       const now = Date.now();
       const deltaSeconds = Math.min(2, Math.max(0.25, (now - challengeLastEvalAtRef.current) / 1000));
       challengeLastEvalAtRef.current = now;
 
       const completedIds = new Set(completedChallengeIdsRef.current);
-      const pendingChallenges = CHALLENGES
-        .filter((challenge) => !completedIds.has(challenge.id))
-        .slice(0, ACTIVE_CHALLENGE_LIMIT);
+      const pendingChallenges = getActiveChallenges(completedIds);
       const newlyCompleted = pendingChallenges.filter((challenge) =>
         evaluateChallengeCompletion(
           challenge,
@@ -580,7 +596,11 @@ export function BuildPage() {
 
       newlyCompleted.forEach((challenge) => completedIds.add(challenge.id));
       completedChallengeIdsRef.current = completedIds;
-      setChallengeToast((current) => current ?? newlyCompleted[0]);
+      const nextNotice = newlyCompleted.find((challenge) => !announcedChallengeIdsRef.current.has(challenge.id));
+      if (nextNotice) {
+        announcedChallengeIdsRef.current.add(nextNotice.id);
+        setChallengeToast((current) => current ?? nextNotice);
+      }
       void Promise.all(newlyCompleted.map((challenge) => db.challengeProgress.put({
         challengeId: challenge.id,
         completed: true,
@@ -589,7 +609,13 @@ export function BuildPage() {
     }, 500);
 
     return () => window.clearInterval(interval);
-  }, [manifest, simulationStatus]);
+  }, [manifest, sandboxChallengeRuntimeEnabled]);
+
+  useEffect(() => {
+    if (!sandboxChallengeRuntimeEnabled) {
+      setChallengeToast(null);
+    }
+  }, [sandboxChallengeRuntimeEnabled]);
 
   const completedPuzzleChallengeIds = useMemo(
     () => new Set(
@@ -691,7 +717,7 @@ export function BuildPage() {
         subtitle = `Drives nearby gears and wheels. Current speed ${Math.round(rpm)} rpm.`;
         actions.push({
           id: 'motor-run',
-          label: powered ? 'Stop' : 'Run',
+          label: powered ? 'Power OFF' : 'Power ON',
           active: powered,
           onPress: () => {
             setBoundControlValue(selectedPrimitive.id, 'powerState', !powered, powered);
@@ -778,7 +804,7 @@ export function BuildPage() {
         subtitle = `Powered swing. Target angle ${Math.round(angle)}°.`;
         actions.push({
           id: 'hinge-run',
-          label: enabled ? 'Stop' : 'Run',
+          label: enabled ? 'Power OFF' : 'Power ON',
           active: enabled,
           onPress: () => {
             setBoundControlValue(selectedPrimitive.id, 'enabled', !enabled, enabled);
@@ -831,7 +857,7 @@ export function BuildPage() {
           : 'Free body. Bolt on tools or add wheels and a motor if you want to drive it off rail.';
         actions.push({
           id: 'loco-run',
-          label: enabled ? 'Stop' : 'Run',
+          label: enabled ? 'Power OFF' : 'Power ON',
           active: enabled,
           onPress: () => {
             setBoundControlValue(selectedPrimitive.id, 'enabled', !enabled, enabled);
@@ -983,14 +1009,17 @@ export function BuildPage() {
     async (
       nextManifest: ExperimentManifest,
       nextPlayStateArg?: DraftPlayState | null,
-      options?: { recordHistory?: boolean },
+      options?: { recordHistory?: boolean; replaceBaseline?: boolean },
     ) => {
       const currentManifest = currentManifestRef.current;
       const currentPlayState = currentPlayStateRef.current;
-      const nextPlayState = normalizePlayStateForManifest(
+      let nextPlayState = normalizePlayStateForManifest(
         nextManifest,
         ensureDraftPlayState(nextPlayStateArg ?? currentPlayState ?? undefined, jobId ?? currentPlayState?.jobId, nextManifest),
       );
+      if (options?.replaceBaseline) {
+        nextPlayState = replaceStartCheckpoint(nextPlayState, nextManifest);
+      }
 
       if (options?.recordHistory && currentManifest) {
         undoStackRef.current = [
@@ -1138,7 +1167,10 @@ export function BuildPage() {
     const newDraft: DraftRecord = {
       draftId: crypto.randomUUID(),
       manifest: nextManifest,
-      playState: ensureDraftPlayState(playState ?? undefined, jobId ?? playState?.jobId, nextManifest),
+      playState: replaceStartCheckpoint(
+        ensureDraftPlayState(playState ?? undefined, jobId ?? playState?.jobId, nextManifest),
+        nextManifest,
+      ),
       updatedAt: new Date().toISOString(),
       sourceMachineId: draft?.sourceMachineId,
       sourceBlueprintId: draft?.sourceBlueprintId,
@@ -1310,10 +1342,15 @@ export function BuildPage() {
   }, [showStatus]);
 
   const toggleUtilityPanel = useCallback((panel: BuildUtilityPanel) => {
+    if (connectionKind) {
+      setConnectionKind(null);
+      setConnectionSourceId(null);
+      setConnectionViaIds([]);
+    }
     setConnectMenuOpen(false);
     setTabletPartsOpen(false);
     setOpenUtilityPanel((current) => (current === panel ? null : panel));
-  }, []);
+  }, [connectionKind]);
 
   const toggleConnectChooser = useCallback(() => {
     setHandbookOpen(false);
@@ -1505,6 +1542,41 @@ export function BuildPage() {
     showStatus('Undid the last change.', 'info');
   }, [persistDraft, showStatus]);
 
+  const handleClearBuild = useCallback(() => {
+    if (!manifest || !playState) {
+      showStatus('Nothing to clear yet.', 'warning');
+      return;
+    }
+
+    const baseline = playState.stepCheckpointManifest[START_CHECKPOINT_ID];
+    if (!baseline) {
+      showStatus('This draft is missing its starter layout checkpoint.', 'warning');
+      return;
+    }
+
+    if (manifestsMatch(manifest, baseline)) {
+      showStatus('Already back at the starter layout.', 'info');
+      return;
+    }
+
+    setSelectedPrimitiveId(undefined);
+    setPlacingKind(null);
+    setConnectionKind(null);
+    setConnectionSourceId(null);
+    setConnectionViaIds([]);
+    setConnectMenuOpen(false);
+    setTabletPartsOpen(false);
+    setOpenUtilityPanel(null);
+    setHandbookOpen(false);
+    setFlashToast(false);
+    setChallengeToast(null);
+    setPuzzleToast(null);
+    setStepCelebrating(false);
+    setSaveModal(null);
+    void persistDraft(structuredClone(baseline), playState, { recordHistory: true });
+    showStatus('Cleared the build back to its starter layout.', 'success');
+  }, [manifest, persistDraft, playState, showStatus]);
+
   const handleResetStep = useCallback(() => {
     if (!job || !playState) {
       showStatus('This draft is not in a guided project.', 'warning');
@@ -1538,7 +1610,7 @@ export function BuildPage() {
     setSelectedPrimitiveId(undefined);
     setPuzzleToast(null);
     setPlacingKind(activePuzzleChallenge?.allowedKinds[0] ?? job?.steps?.[0]?.allowedPartKinds[0] ?? null);
-    void persistDraft(resetManifest, resetPlayState);
+    void persistDraft(resetManifest, resetPlayState, { replaceBaseline: true });
     showStatus(activePuzzleChallenge ? 'Reset the puzzle back to its starting layout.' : 'Reset the draft back to the project start.', 'success');
   }, [activePuzzleChallenge, job?.steps, jobId, manifest, persistDraft, playState, showStatus]);
 
@@ -1580,7 +1652,6 @@ export function BuildPage() {
         ? 'Start mode'
         : 'Select mode';
   const goalProgress = job ? getGoalProgress(job, manifest, runtimeSnapshot, playState) : null;
-  const primaryStepKind = activeProjectStep?.allowedPartKinds[0] ?? null;
   const buildReadiness: 'loading-engine' | 'ready' = simulationStatus !== 'ready' || !canvasReady
     ? 'loading-engine'
     : 'ready';
@@ -1607,9 +1678,19 @@ export function BuildPage() {
   const toolbarNotice = buildReadiness === 'loading-engine'
     ? { tone: 'info' as const, message: 'Loading the live engine and stage renderer.' }
     : statusNotice;
+  const desktopConnectOverlayOpen = connectMenuOpen && !connectionKind;
   const mobileConnectOverlayOpen = connectMenuOpen && !connectionKind;
   const renderConnectChooser = (className: string, id?: string) => (
     <div id={id} className={className}>
+      <div className="builder-connect-head">
+        <div>
+          <p className="eyebrow">Connect Parts</p>
+          <strong>Pick the link you want to make</strong>
+        </div>
+        <button type="button" className="ghost-button" onClick={() => setConnectMenuOpen(false)}>
+          Close
+        </button>
+      </div>
       <div className="builder-connect-field">
         <span>Pick a connector</span>
         <div className="builder-connect-option-row">
@@ -1644,53 +1725,55 @@ export function BuildPage() {
           </div>
 
           <div className="builder-stage-actions">
-            {connectionKind ? (
-              <button type="button" className="builder-connect-cta is-active" onClick={() => cancelConnectionMode()}>
-                Cancel {labelForBuilderConnection(connectionKind)}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="builder-connect-cta"
-                onClick={toggleConnectChooser}
-              >
-                Connect Parts
-              </button>
-            )}
             <button
               type="button"
+              className={`builder-connect-cta${connectMenuOpen || connectionKind ? ' is-active' : ''}`}
+              aria-pressed={connectMenuOpen || Boolean(connectionKind)}
               onClick={() => {
+                if (connectionKind) {
+                  cancelConnectionMode('Connect cancelled. You are back in select mode.');
+                  return;
+                }
+                toggleConnectChooser();
+              }}
+            >
+              Connect Parts
+            </button>
+            <button
+              type="button"
+              aria-pressed={handbookOpen}
+              onClick={() => {
+                if (connectionKind) {
+                  setConnectionKind(null);
+                  setConnectionSourceId(null);
+                  setConnectionViaIds([]);
+                }
                 setTabletPartsOpen(false);
                 setConnectMenuOpen(false);
                 setOpenUtilityPanel(null);
                 setHandbookOpen((current) => !current);
               }}
             >
-              {handbookOpen ? 'Hide Workbook' : 'Workbook'}
+              Workbook
             </button>
-            <button type="button" onClick={() => toggleUtilityPanel('inspector')}>
-              {openUtilityPanel === 'inspector' ? 'Hide Inspector' : 'Inspector'}
+            <button
+              type="button"
+              aria-pressed={openUtilityPanel === 'inspector'}
+              onClick={() => toggleUtilityPanel('inspector')}
+            >
+              Inspector
             </button>
-            {mergedControls.length > 0 ? (
-              <button type="button" onClick={() => toggleUtilityPanel('controls')}>
-                {openUtilityPanel === 'controls' ? 'Hide Controls' : 'Controls'}
-              </button>
-            ) : null}
-            {primaryStepKind && !placingKind && !connectionKind ? (
-              <button type="button" onClick={() => handleSelectKind(primaryStepKind)}>
-                Place {labelForPrimitive(primaryStepKind)}
-              </button>
-            ) : null}
-            {!activeProjectStep && manifest.primitives.length === 0 && !placingKind && !connectionKind ? (
-              <button type="button" onClick={() => handleSelectKind('motor')}>
-                Start with Motor
-              </button>
-            ) : null}
-            {placingKind ? (
-              <button type="button" onClick={() => setPlacingKind(null)}>
-                Cancel Placement
-              </button>
-            ) : null}
+            <button
+              type="button"
+              aria-pressed={openUtilityPanel === 'controls'}
+              disabled={mergedControls.length === 0}
+              onClick={() => toggleUtilityPanel('controls')}
+            >
+              Controls
+            </button>
+            <button type="button" onClick={handleClearBuild}>
+              Clear Build
+            </button>
             <button type="button" onClick={handleUndo}>
               Undo
             </button>
@@ -1717,53 +1800,10 @@ export function BuildPage() {
           ) : null}
         </div>
 
-        {mobileConnectOverlayOpen ? (
-          renderConnectChooser('builder-connect-chooser builder-connect-chooser-inline')
-        ) : null}
-
-        {openUtilityPanel ? (
-          <div className="builder-utility-drawer">
-            {openUtilityPanel === 'inspector' ? (
-              <InspectorPanel
-                mode="panel"
-                primitive={selectedPrimitive}
-                manifest={manifest}
-                onClose={() => setOpenUtilityPanel(null)}
-                onDelete={(primitiveId) => {
-                  void persistDraft(deletePrimitive(manifest, primitiveId), undefined, { recordHistory: true });
-                  if (selectedPrimitiveId === primitiveId) {
-                    setSelectedPrimitiveId(undefined);
-                  }
-                  showStatus('Part removed from the canvas.', 'info');
-                }}
-                onUpdateValue={(primitiveId, key, value) => {
-                  const primitive = manifest.primitives.find((item) => item.id === primitiveId);
-                  if (!primitive) {
-                    return;
-                  }
-                  void persistDraft(updatePrimitive(manifest, primitiveId, { ...primitive.config, [key]: value }), undefined, { recordHistory: true });
-                  if (key === 'powerState') {
-                    playUiTone('power');
-                    showStatus(value ? 'Motor powered ON.' : 'Motor powered OFF.', 'info');
-                  }
-                }}
-              />
-            ) : (
-              <ControlPanel
-                mode="panel"
-                controls={mergedControls}
-                values={controlValues}
-                onClose={() => setOpenUtilityPanel(null)}
-                onChange={(controlId, value) => {
-                  setControlValues((current) => ({ ...current, [controlId]: value }));
-                }}
-              />
-            )}
-          </div>
-        ) : null}
-
         <div className="builder-status-slot">
-          {toolbarNotice ? (
+          {challengeToast ? (
+            <ChallengeToast challenge={challengeToast} onDismiss={() => setChallengeToast(null)} />
+          ) : toolbarNotice ? (
             <p className={`builder-status builder-status-${toolbarNotice.tone}`} role="status" aria-live="polite">
               {toolbarNotice.message}
             </p>
@@ -1855,11 +1895,55 @@ export function BuildPage() {
             {mobileConnectOverlayOpen ? (
               renderConnectChooser('builder-connect-chooser builder-mobile-overlay builder-mobile-connect-overlay', 'builder-mobile-connect')
             ) : null}
+            {desktopConnectOverlayOpen ? (
+              <div className="builder-desktop-overlay builder-connect-overlay-panel">
+                {renderConnectChooser('builder-connect-chooser builder-desktop-connect-overlay')}
+              </div>
+            ) : null}
+            {openUtilityPanel ? (
+              <div className="builder-desktop-overlay builder-utility-overlay-panel">
+                {openUtilityPanel === 'inspector' ? (
+                  <InspectorPanel
+                    mode="panel"
+                    primitive={selectedPrimitive}
+                    manifest={manifest}
+                    onClose={() => setOpenUtilityPanel(null)}
+                    onDelete={(primitiveId) => {
+                      void persistDraft(deletePrimitive(manifest, primitiveId), undefined, { recordHistory: true });
+                      if (selectedPrimitiveId === primitiveId) {
+                        setSelectedPrimitiveId(undefined);
+                      }
+                      showStatus('Part removed from the canvas.', 'info');
+                    }}
+                    onUpdateValue={(primitiveId, key, value) => {
+                      const primitive = manifest.primitives.find((item) => item.id === primitiveId);
+                      if (!primitive) {
+                        return;
+                      }
+                      void persistDraft(updatePrimitive(manifest, primitiveId, { ...primitive.config, [key]: value }), undefined, { recordHistory: true });
+                      if (key === 'powerState') {
+                        playUiTone('power');
+                        showStatus(value ? 'Motor power ON.' : 'Motor power OFF.', 'info');
+                      }
+                    }}
+                  />
+                ) : (
+                  <ControlPanel
+                    mode="panel"
+                    controls={mergedControls}
+                    values={controlValues}
+                    onClose={() => setOpenUtilityPanel(null)}
+                    onChange={(controlId, value) => {
+                      setControlValues((current) => ({ ...current, [controlId]: value }));
+                    }}
+                  />
+                )}
+              </div>
+            ) : null}
             <HudOverlay hud={manifest.hud} telemetry={telemetry} />
             {flashToast && (
               <div className="connection-toast" role="status" aria-live="polite">The machine is responding.</div>
             )}
-            <ChallengeToast challenge={challengeToast} onDismiss={() => setChallengeToast(null)} />
             {stepCelebrating && !jobComplete && (
               <div className="step-complete-toast">
                 <span className="step-complete-star">★</span>
@@ -1901,7 +1985,7 @@ export function BuildPage() {
                 ));
                 setBoundControlValue(primitiveId, 'powerState', !current, current);
                 playUiTone('power');
-                showStatus(!current ? 'Motor ON.' : 'Motor OFF.', 'info');
+                showStatus(!current ? 'Motor power ON.' : 'Motor power OFF.', 'info');
               }}
               onCanvasReady={() => setCanvasReady(true)}
             />
@@ -2189,6 +2273,10 @@ function normalizePlayStateForManifest(
       ...cargoSpawns,
     },
   };
+}
+
+function manifestsMatch(left: ExperimentManifest, right: ExperimentManifest) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function deriveMachineActivity(

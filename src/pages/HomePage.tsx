@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { WinkyDog } from '../components/WinkyDog';
 import { useAppBoot } from '../lib/app-boot';
+import {
+  ACTIVE_SANDBOX_CHALLENGE_LIMIT,
+  SANDBOX_CHALLENGE_CATALOG,
+  getActiveSandboxChallengeIds,
+} from '../lib/challenge-launcher';
 import { db } from '../lib/db';
 import { ENGINEERING_HANDBOOK_ENTRIES } from '../lib/engineering-handbook';
 import { markPerformance, measurePerformance } from '../lib/perf';
@@ -20,7 +25,7 @@ import type {
 import { TIER_NAMES, tierForXp } from '../lib/xp';
 
 type HomeMode = 'guided' | 'workbook' | 'challenges' | 'scenes' | 'free';
-const MEDAL_CHALLENGE_COUNT = 10;
+type HomeChallengeCategory = (typeof SANDBOX_CHALLENGE_CATALOG)[number]['category'];
 
 interface HomeSnapshot {
   challengeProgress: ChallengeProgressRecord[];
@@ -41,11 +46,27 @@ const MODE_ICONS: Record<HomeMode, string> = {
 };
 
 const WINKY_HINTS: Record<HomeMode, string> = {
-  guided: 'Winky says: start with the guided builds first and the whole yard makes more sense.',
-  workbook: 'Winky says: recipes are the fastest way to learn what a weird part can actually do.',
-  challenges: 'Winky says: puzzle levels are for focused tinkering, and medals still pop in the normal yard when the machine honestly works.',
+  guided: 'Winky says: start with the guided builds first and the whole yard makes more sense. Dad would probably still try the giant motor first.',
+  workbook: 'Winky says: recipes are the fastest way to learn what a weird part can actually do, and Mom would appreciate being able to read the cards now.',
+  challenges: 'Winky says: puzzle levels are for focused tinkering, and the medal board below tracks the real sandbox wins.',
   scenes: 'Winky says: silly scenes are best when you remix them instead of leaving them alone.',
-  free: 'Winky says: free build is where the giant ridiculous inventions happen.',
+  free: 'Winky says: free build is where the giant ridiculous inventions happen. Rose-grade chaos is absolutely allowed.',
+};
+
+const HOME_CHALLENGE_CATEGORY_ORDER: HomeChallengeCategory[] = [
+  'discovery',
+  'engineering',
+  'speed',
+  'efficiency',
+  'creative',
+];
+
+const HOME_CHALLENGE_CATEGORY_LABELS: Record<HomeChallengeCategory, string> = {
+  discovery: 'Discovery',
+  engineering: 'Engineering',
+  speed: 'Speed',
+  efficiency: 'Efficiency',
+  creative: 'Creative',
 };
 
 export function HomePage() {
@@ -150,6 +171,36 @@ export function HomePage() {
     () => (challengeProgress ?? []).filter((entry) => entry.completed).length,
     [challengeProgress],
   );
+  const completedChallengeIds = useMemo(
+    () => (challengeProgress ?? [])
+      .filter((entry) => entry.completed)
+      .map((entry) => entry.challengeId),
+    [challengeProgress],
+  );
+  const activeChallengeIds = useMemo(
+    () => getActiveSandboxChallengeIds(completedChallengeIds, ACTIVE_SANDBOX_CHALLENGE_LIMIT),
+    [completedChallengeIds],
+  );
+  const completedChallengeIdSet = useMemo(
+    () => new Set(completedChallengeIds),
+    [completedChallengeIds],
+  );
+  const activeChallengeIdSet = useMemo(
+    () => new Set(activeChallengeIds),
+    [activeChallengeIds],
+  );
+  const nextMedalChallenge = useMemo(
+    () => SANDBOX_CHALLENGE_CATALOG.find((challenge) => !completedChallengeIdSet.has(challenge.id)) ?? null,
+    [completedChallengeIdSet],
+  );
+  const groupedMedalChallenges = useMemo(() => {
+    const map = new Map<HomeChallengeCategory, typeof SANDBOX_CHALLENGE_CATALOG>();
+    HOME_CHALLENGE_CATEGORY_ORDER.forEach((category) => map.set(category, []));
+    SANDBOX_CHALLENGE_CATALOG.forEach((challenge) => {
+      map.get(challenge.category)?.push(challenge);
+    });
+    return map;
+  }, []);
 
   const xp = xpRecord ? Number(xpRecord.value) : 0;
   const tier = tierForXp(xp);
@@ -356,8 +407,51 @@ export function HomePage() {
             </div>
             <div className="home-preview-actions">
               <span className="home-preview-badge">
-                {medalProgressCount}/{MEDAL_CHALLENGE_COUNT} medals earned in build mode
+                {medalProgressCount}/{SANDBOX_CHALLENGE_CATALOG.length} medals earned in free build
               </span>
+            </div>
+            <div className="challenge-panel">
+              <div className="challenge-panel-summary">
+                <p className="eyebrow">Sandbox Medal Board</p>
+                <h3>{completedChallengeIds.length} of {SANDBOX_CHALLENGE_CATALOG.length} complete</h3>
+                {nextMedalChallenge ? (
+                  <p className="muted">
+                    Next up: <strong>{nextMedalChallenge.title}</strong>. {nextMedalChallenge.hint}
+                  </p>
+                ) : (
+                  <p className="muted">Every current medal is complete on this machine account.</p>
+                )}
+              </div>
+              {HOME_CHALLENGE_CATEGORY_ORDER.map((category) => {
+                const items = groupedMedalChallenges.get(category) ?? [];
+                if (items.length === 0) {
+                  return null;
+                }
+                return (
+                  <section key={category} className="challenge-group">
+                    <h4>{HOME_CHALLENGE_CATEGORY_LABELS[category]}</h4>
+                    <div className="challenge-card-list">
+                      {items.map((challenge) => {
+                        const completed = completedChallengeIdSet.has(challenge.id);
+                        const active = activeChallengeIdSet.has(challenge.id) && !completed;
+                        return (
+                          <article
+                            key={challenge.id}
+                            className={`challenge-card${completed ? ' complete' : ''}${active ? ' active' : ''}`}
+                          >
+                            <div className="challenge-card-header">
+                              <strong>{challenge.title}</strong>
+                              <span className={`challenge-tier challenge-tier-${challenge.tier}`}>{challenge.tier}</span>
+                            </div>
+                            <p>{challenge.description}</p>
+                            <p className="muted">{completed ? 'Completed' : challenge.hint}</p>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
             </div>
           </>
         );

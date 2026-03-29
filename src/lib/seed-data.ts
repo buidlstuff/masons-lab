@@ -25,20 +25,21 @@ export function createDraftFromMachine(machine: SavedExperimentRecord): DraftRec
 
 export function createDraftFromBlueprint(blueprint: SavedBlueprintRecord): DraftRecord {
   const mounted = mountBlueprintToManifest(createEmptyManifest(), blueprint.blueprint);
+  const manifest = {
+    ...mounted,
+    metadata: {
+      ...mounted.metadata,
+      title: `${blueprint.blueprint.title} Draft`,
+      shortDescription: blueprint.blueprint.summary,
+      tags: Array.from(new Set([...mounted.metadata.tags, ...blueprint.blueprint.tags])),
+    },
+  };
 
   return {
     draftId: nanoid(),
     sourceBlueprintId: blueprint.recordId,
-    manifest: {
-      ...mounted,
-      metadata: {
-        ...mounted.metadata,
-        title: `${blueprint.blueprint.title} Draft`,
-        shortDescription: blueprint.blueprint.summary,
-        tags: Array.from(new Set([...mounted.metadata.tags, ...blueprint.blueprint.tags])),
-      },
-    },
-    playState: createDraftPlayState(undefined, mounted),
+    manifest,
+    playState: createDraftPlayState(undefined, manifest),
     updatedAt: new Date().toISOString(),
   };
 }
