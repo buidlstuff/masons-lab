@@ -5190,10 +5190,9 @@ button:disabled {
 }
 
 .home-preview-grid {
-  flex: 1 1 auto;
   gap: 0.72rem;
   align-content: start;
-  overflow: auto;
+  overflow: visible;
 }
 
 .home-preview-grid-guided {
