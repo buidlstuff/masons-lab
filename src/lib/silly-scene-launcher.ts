@@ -5,6 +5,11 @@ export interface SillySceneLauncherCard {
   emoji: string;
 }
 
+const HIDDEN_PUBLIC_SILLY_SCENE_IDS = new Set([
+  'station-shuttle',
+  'wagon-wash',
+]);
+
 export const SILLY_SCENE_LAUNCHER_CARDS: SillySceneLauncherCard[] = [
   { id: 'moon-mode', title: 'Moon Mode', description: 'Low gravity turns a simple ramp drop into a floaty slow-motion mess.', emoji: '🌙' },
   { id: 'bowling', title: 'Bowling Alley', description: 'Roll a heavy ball down a ramp and smash a cargo pyramid.', emoji: '🎳' },
@@ -27,3 +32,7 @@ export const SILLY_SCENE_LAUNCHER_CARDS: SillySceneLauncherCard[] = [
   { id: 'wagon-wash', title: 'Wagon Wash', description: 'A little train shuttles cargo past a giant water tank and down the line.', emoji: '🫧' },
   { id: 'trampoline-mailroom', title: 'Trampoline Mailroom', description: 'Mailballs bounce across spring pads, bank off a wall, and try to hit the bucket.', emoji: '📬' },
 ];
+
+export const VISIBLE_SILLY_SCENE_LAUNCHER_CARDS = SILLY_SCENE_LAUNCHER_CARDS.filter(
+  (scene) => !HIDDEN_PUBLIC_SILLY_SCENE_IDS.has(scene.id),
+);

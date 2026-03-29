@@ -14,6 +14,14 @@ const QUICK_PARTS: PrimitiveKind[] = [
   'crane-arm',
 ];
 
+const HIDDEN_PUBLIC_PART_KINDS = new Set<PrimitiveKind>([
+  'rail-segment',
+  'rail-switch',
+  'locomotive',
+  'wagon',
+  'station-zone',
+]);
+
 interface PartPaletteProps {
   manifest: ExperimentManifest;
   selectedPrimitive?: PrimitiveInstance;
@@ -41,16 +49,30 @@ export function PartPalette({
   onSelectKind,
 }: PartPaletteProps) {
   const counts = useMemo(() => countKinds(manifest), [manifest]);
+  const visibleCategories = useMemo(
+    () => PART_CATEGORIES
+      .map((category) => ({
+        ...category,
+        kinds: category.kinds.filter((kind) => isPublicPartVisible(kind)),
+      }))
+      .filter((category) => category.kinds.length > 0),
+    [],
+  );
   const suggestions = useMemo(
     () => deriveSuggestions(manifest, selectedPrimitive),
     [manifest, selectedPrimitive],
   );
   const guidedKinds = useMemo(
-    () => (allowedKinds ? Array.from(new Set(allowedKinds)) : null),
+    () => (allowedKinds ? Array.from(new Set(allowedKinds.filter((kind) => isPublicPartVisible(kind)))) : null),
     [allowedKinds],
   );
   const visibleSuggestions = useMemo(
-    () => guidedKinds ? suggestions.filter((suggestion) => guidedKinds.includes(suggestion.kind)) : suggestions,
+    () => {
+      const publicSuggestions = suggestions.filter((suggestion) => isPublicPartVisible(suggestion.kind));
+      return guidedKinds
+        ? publicSuggestions.filter((suggestion) => guidedKinds.includes(suggestion.kind))
+        : publicSuggestions;
+    },
     [guidedKinds, suggestions],
   );
   const quickPartKinds = useMemo(
@@ -65,6 +87,7 @@ export function PartPalette({
   const canvasKinds = useMemo(
     () => Object.entries(counts)
       .filter(([, count]) => count > 0)
+      .filter(([kind]) => isPublicPartVisible(kind as PrimitiveKind))
       .sort((left, right) => right[1] - left[1])
       .map(([kind]) => kind as PrimitiveKind),
     [counts],
@@ -81,11 +104,11 @@ export function PartPalette({
     return activeJobHint ?? 'The full parts shelf stays here. Pick a part, then click the canvas to place it.';
   }, [activeJobHint, selectedPrimitive, visibleSuggestions]);
   const categoryAnchors = useMemo(
-    () => PART_CATEGORIES.map((category) => ({
+    () => visibleCategories.map((category) => ({
       label: category.label,
       anchorId: `parts-${category.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     })),
-    [],
+    [visibleCategories],
   );
 
   const isLimitedStep = Boolean(guidedKinds);
@@ -176,7 +199,7 @@ export function PartPalette({
           </span>
         </div>
         <div className="palette-category-panels">
-          {PART_CATEGORIES.map((category, index) => {
+          {visibleCategories.map((category, index) => {
             const presentCount = category.kinds.reduce((total, kind) => total + counts[kind], 0);
             const anchorId = categoryAnchors[index]?.anchorId ?? category.label;
             const hasStepPart = guidedKinds ? category.kinds.some((kind) => guidedKinds.includes(kind)) : false;
@@ -315,6 +338,10 @@ function deriveSuggestions(
   return [...suggestions.entries()]
     .map(([kind, reason]) => ({ kind, reason }))
     .slice(0, 5);
+}
+
+function isPublicPartVisible(kind: PrimitiveKind) {
+  return !HIDDEN_PUBLIC_PART_KINDS.has(kind);
 }
 
 function countKinds(manifest: ExperimentManifest) {

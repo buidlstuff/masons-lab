@@ -6,6 +6,8 @@ export interface PuzzleChallengeLauncherCard {
   objective: string;
 }
 
+const HIDDEN_PUBLIC_PUZZLE_CHALLENGE_IDS = new Set(['wagon-transfer']);
+
 export const PUZZLE_CHALLENGE_LAUNCHER_CARDS: PuzzleChallengeLauncherCard[] = [
   { id: 'hook-and-drop', title: 'Hook and Drop', emoji: '🪝', description: 'Carry the hooked cargo over the wall and lower it into the hopper.', objective: 'Use the winch, rope, and hook to get one real cargo block into the hopper.' },
   { id: 'pulley-detour', title: 'Pulley Detour', emoji: '🧵', description: 'Route the rope through an idler pulley so the bucket can lift onto the high shelf.', objective: 'Use the pulley as a real rope redirector and lift the bucket onto the upper platform.' },
@@ -18,3 +20,7 @@ export const PUZZLE_CHALLENGE_LAUNCHER_CARDS: PuzzleChallengeLauncherCard[] = [
   { id: 'counterweight-rescue', title: 'Counterweight Rescue', emoji: '⚖️', description: 'Use the counterweight to keep the arm calm enough to lift the load over the blocker.', objective: 'Lift the cargo above the blocker while the arm stays reasonably level.' },
   { id: 'trampoline-bank-shot', title: 'Trampoline Bank Shot', emoji: '🤾', description: 'Use the springy pads and walls to ricochet the ball into the bucket.', objective: 'Make the ball bank off the trampoline path and finish in the bucket.' },
 ];
+
+export const VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS = PUZZLE_CHALLENGE_LAUNCHER_CARDS.filter(
+  (challenge) => !HIDDEN_PUBLIC_PUZZLE_CHALLENGE_IDS.has(challenge.id),
+);

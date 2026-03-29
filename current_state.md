@@ -1,5 +1,5 @@
 # Mason's Lab — Current State
-*Last updated: March 28, 2026. This file is the handoff doc for future Codex sessions.*
+*Last updated: March 29, 2026. This file is the handoff doc for future Codex sessions.*
 
 ---
 
@@ -11,8 +11,8 @@ The product is no longer just "3 starter projects." The current surface is:
 
 1. **3 guided starter projects** that still anchor onboarding and progression
 2. **Free-build sandbox** with a much larger part set
-3. **25 sandbox challenges** (3 active at a time)
-4. **10 silly scenes** that load as fresh drafts
+3. **22 public sandbox challenges** (3 active at a time, with 3 train medals still left in code but hidden from the UI)
+4. **18 public silly scenes** that load as fresh drafts (20 scenes still exist in code, with 2 train scenes hidden from the UI)
 5. **Blueprint save/mount flow** for sub-machines
 
 Core rule remains unchanged:
@@ -24,6 +24,20 @@ No fake preview parts. No purely decorative machine widgets.
 Repo: `buidlstuff/masons-lab`
 Default branch: `main`
 Previous pushed checkpoint before this handoff: `55e081a`
+
+---
+
+## Reliability / UI Guardrails
+
+These are now important product rules, not optional polish ideas:
+
+- **The canvas should stay visually stable while editing.** Rebuilding physics is allowed; blinking the stage, clearing the snapshot between edits, or visibly "reloading" the canvas is not.
+- **Do not solve layout jitter by clipping the stage.** The canvas should stay full-size and visible. Reclaim space from headers, chrome, and helper copy before shrinking or cutting off the stage.
+- **Transient status signals should reuse existing chrome.** A short info/success/warning notice should appear as a small chip in an existing row or as an overlay. Do not insert a brand-new full-width layout row above the canvas for something like `Motor power ON.`.
+- **Overlays must float.** Inspector, controls, connect chooser, quick controls, and medal notices should not resize the workbench or parts rail.
+- **`Clear Build` means restore the starter baseline, not wipe everything.** The authoritative source is `START_CHECKPOINT_ID` in play state.
+- **Rail/train systems are still in the repo, but they are intentionally hidden from the public UI for now.** Keep the code, tests, and data, but do not surface train parts, train puzzle launchers, or train silly scenes until they are reliable enough to show again.
+- **AI help entry points are intentionally hidden.** Do not re-expose `Help` / `Ask` UI affordances until the assistant path is actually ready for users.
 
 ---
 
@@ -60,20 +74,25 @@ Free build now supports:
 
 - drivetrain parts
 - flow/processing parts
-- rail/train parts
 - connector creation
 - silly scenes
 - challenge evaluation
 
+Rail/train parts still exist in code, but the public-facing parts shelf currently hides them.
+
 ### Challenges
 
 - `src/lib/challenges.ts` currently defines **25** challenge medals
-- only **3** are active in the UI at once (`ACTIVE_CHALLENGE_LIMIT = 3`)
+- **22** are currently public in the UI
+- **3** train-themed medals are intentionally hidden from the public UI for now (`delivery-boy`, `express-train`, `full-monty`)
+- only **3** public medals are active in the UI at once (`ACTIVE_CHALLENGE_LIMIT = 3`)
 - challenge progress is persisted in Dexie via `challengeProgress`
 
 ### Silly scenes
 
-- `src/lib/silly-scenes.ts` currently defines **10** scenes
+- `src/lib/silly-scenes.ts` currently defines **20** scenes
+- **18** are currently visible in the launcher
+- `station-shuttle` and `wagon-wash` are intentionally hidden from the public launcher for now
 - scenes load as **fresh drafts**
 - scene cargo is intentionally allowed to stay where physics leaves it
 - the UI exposes **Reset Scene** instead of silently respawning loose cargo

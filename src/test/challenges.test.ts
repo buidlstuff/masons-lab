@@ -128,7 +128,7 @@ describe('challenge evaluation', () => {
   });
 
   it('computes the next three active medal ids from progress', () => {
-    expect(getActiveChallengeIds([])).toEqual(['first-spin', 'gear-head', 'delivery-boy']);
-    expect(getActiveChallengeIds(['first-spin', 'gear-head'])).toEqual(['delivery-boy', 'splash-zone', 'sand-castle']);
+    expect(getActiveChallengeIds([])).toEqual(['first-spin', 'gear-head', 'splash-zone']);
+    expect(getActiveChallengeIds(['first-spin', 'gear-head'])).toEqual(['splash-zone', 'sand-castle', 'rube-goldberg']);
   });
 });

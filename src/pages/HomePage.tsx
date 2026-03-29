@@ -10,9 +10,9 @@ import {
 import { db } from '../lib/db';
 import { ENGINEERING_HANDBOOK_ENTRIES } from '../lib/engineering-handbook';
 import { markPerformance, measurePerformance } from '../lib/perf';
-import { PUZZLE_CHALLENGE_LAUNCHER_CARDS } from '../lib/puzzle-challenge-launcher';
+import { VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS } from '../lib/puzzle-challenge-launcher';
 import { scheduleBuildPrefetch } from '../lib/route-preload';
-import { SILLY_SCENE_LAUNCHER_CARDS } from '../lib/silly-scene-launcher';
+import { VISIBLE_SILLY_SCENE_LAUNCHER_CARDS } from '../lib/silly-scene-launcher';
 import type {
   ChallengeProgressRecord,
   DraftRecord,
@@ -164,15 +164,28 @@ export function HomePage() {
   );
 
   const puzzleProgressCount = useMemo(
-    () => (puzzleChallengeProgress ?? []).filter((entry) => entry.completed).length,
+    () => {
+      const visiblePuzzleIds = new Set(VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.map((challenge) => challenge.id));
+      return (puzzleChallengeProgress ?? [])
+        .filter((entry) => visiblePuzzleIds.has(entry.puzzleChallengeId))
+        .filter((entry) => entry.completed)
+        .length;
+    },
     [puzzleChallengeProgress],
   );
   const medalProgressCount = useMemo(
-    () => (challengeProgress ?? []).filter((entry) => entry.completed).length,
+    () => {
+      const visibleChallengeIds = new Set(SANDBOX_CHALLENGE_CATALOG.map((challenge) => challenge.id));
+      return (challengeProgress ?? [])
+        .filter((entry) => visibleChallengeIds.has(entry.challengeId))
+        .filter((entry) => entry.completed)
+        .length;
+    },
     [challengeProgress],
   );
   const completedChallengeIds = useMemo(
     () => (challengeProgress ?? [])
+      .filter((entry) => SANDBOX_CHALLENGE_CATALOG.some((challenge) => challenge.id === entry.challengeId))
       .filter((entry) => entry.completed)
       .map((entry) => entry.challengeId),
     [challengeProgress],
@@ -297,13 +310,13 @@ export function HomePage() {
       id: 'challenges',
       label: 'Challenges',
       hint: 'Solve authored puzzle levels, then keep earning medals in free build.',
-      badge: `${puzzleProgressCount}/${PUZZLE_CHALLENGE_LAUNCHER_CARDS.length} cleared`,
+      badge: `${puzzleProgressCount}/${VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.length} cleared`,
     },
     {
       id: 'scenes',
       label: 'Silly Scenes',
       hint: 'Load a goofy setup and remix the physics.',
-      badge: `${SILLY_SCENE_LAUNCHER_CARDS.length} scenes`,
+      badge: `${VISIBLE_SILLY_SCENE_LAUNCHER_CARDS.length} scenes`,
     },
     {
       id: 'free',
@@ -376,16 +389,16 @@ export function HomePage() {
           <>
             <div className="home-preview-head">
               <p className="eyebrow">Challenges</p>
-              <h2>Ten puzzle levels to solve right now</h2>
+              <h2>{VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.length} puzzle levels to solve right now</h2>
               <p>These open as fresh drafts with a focused goal and a curated part shelf. Medal challenges still unlock quietly in the normal yard while you build.</p>
             </div>
             <div className="home-preview-actions">
-              <Link to={`/build?challengeLevel=${PUZZLE_CHALLENGE_LAUNCHER_CARDS[0]?.id ?? ''}`} className="home-preview-primary">
+              <Link to={`/build?challengeLevel=${VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS[0]?.id ?? ''}`} className="home-preview-primary">
                 Open First Puzzle
               </Link>
             </div>
             <div className="home-preview-grid home-preview-grid-challenges">
-              {PUZZLE_CHALLENGE_LAUNCHER_CARDS.map((challenge) => {
+              {VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.map((challenge) => {
                 const completed = (puzzleChallengeProgress ?? []).some(
                   (entry) => entry.puzzleChallengeId === challenge.id && entry.completed,
                 );
@@ -464,7 +477,7 @@ export function HomePage() {
               <p>These load as fresh drafts so Mason can experiment immediately instead of building from zero.</p>
             </div>
             <div className="home-preview-grid home-preview-grid-scenes">
-              {SILLY_SCENE_LAUNCHER_CARDS.map((scene) => (
+              {VISIBLE_SILLY_SCENE_LAUNCHER_CARDS.map((scene) => (
                 <Link key={scene.id} to={`/build?scene=${scene.id}`} className="home-preview-card">
                   <div className="home-preview-card-top">
                     <span className="home-preview-scene-emoji" aria-hidden="true">{scene.emoji}</span>
@@ -504,7 +517,7 @@ export function HomePage() {
                   <span className="home-preview-badge home-preview-badge-green">Sandbox</span>
                   <strong>Full part drawer</strong>
                 </div>
-                <p>Motors, ropes, hinges, rails, pistons, buckets, springs, and the rest of the yard are ready.</p>
+                <p>Motors, ropes, hinges, pistons, buckets, springs, and the rest of the yard are ready.</p>
               </article>
               <article className="home-preview-card">
                 <div className="home-preview-card-top">
@@ -529,7 +542,7 @@ export function HomePage() {
           </div>
           <div className="home-hud-pill">
             <span>Puzzles</span>
-            <strong>{homeLoading ? '…' : `${puzzleProgressCount}/${PUZZLE_CHALLENGE_LAUNCHER_CARDS.length}`}</strong>
+            <strong>{homeLoading ? '…' : `${puzzleProgressCount}/${VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.length}`}</strong>
           </div>
           <div className="home-hud-pill">
             <span>XP</span>

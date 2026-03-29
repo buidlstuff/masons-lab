@@ -2999,6 +2999,13 @@ button:disabled {
   font-size: 0.74rem;
 }
 
+.builder-stage-shell .builder-chip-notice {
+  max-width: min(32rem, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .builder-stage-shell .builder-chip.is-active,
 .builder-stage-shell .builder-chip.is-success {
   color: #216a57;
@@ -3008,12 +3015,29 @@ button:disabled {
   color: #8a5a0a;
 }
 
+.builder-stage-shell .builder-chip-notice-info {
+  background: rgba(96, 165, 250, 0.1);
+  border-color: rgba(96, 165, 250, 0.22);
+  color: #245c9b;
+}
+
+.builder-stage-shell .builder-chip-notice-success {
+  background: rgba(71, 197, 165, 0.12);
+  border-color: rgba(71, 197, 165, 0.22);
+  color: #216a57;
+}
+
+.builder-stage-shell .builder-chip-notice-warning {
+  background: rgba(254, 200, 75, 0.12);
+  border-color: rgba(254, 200, 75, 0.22);
+  color: #8a5a0a;
+}
+
 .builder-stage-shell .builder-status {
   margin: 0;
 }
 
 .builder-stage-shell .builder-status-slot {
-  min-height: 1.15rem;
   display: flex;
   align-items: stretch;
 }

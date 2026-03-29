@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ControlPanel } from '../components/ControlPanel';
@@ -61,24 +61,12 @@ import type {
   ChallengeProgressRecord,
   DraftPlayState,
   DraftRecord,
-  EditExperimentResult,
   ExperimentManifest,
-  GenerateExperimentResult,
   PrimitiveConfig,
   PrimitiveKind,
   PrimitiveInstance,
   PuzzleChallengeProgressRecord,
-  SavedBlueprintRecord,
 } from '../lib/types';
-
-const LazyAssistantPanel = lazy(async () => {
-  const module = await import('../components/AssistantPanel');
-  return { default: module.AssistantPanel };
-});
-
-async function loadAssistantApi() {
-  return import('../lib/api');
-}
 
 type BuilderConnectionKind = ConnectorKind | 'beam';
 type BuildUtilityPanel = 'inspector' | 'controls';
@@ -286,14 +274,11 @@ export function BuildPage() {
   const [placingKind, setPlacingKind] = useState<PrimitiveKind | null>(null);
   const [controlValues, setControlValues] = useState<Record<string, string | number | boolean>>({});
   const [telemetry, setTelemetry] = useState<BuildTelemetry>({});
-  const [busy, setBusy] = useState(false);
   const [statusNotice, setStatusNotice] = useState<{ tone: NoticeTone; message: string } | null>(null);
   const [saveModal, setSaveModal] = useState<{ title: string; learned: string } | null>(null);
   const [xpToast, setXpToast] = useState<{ gained: number; newXp: number; tierName?: string } | null>(null);
   const [flashToast, setFlashToast] = useState(false);
   const [stepCelebrating, setStepCelebrating] = useState(false);
-  const [assistantPromptSeed, setAssistantPromptSeed] = useState<string | null>(null);
-  const [assistantOpen, setAssistantOpen] = useState(false);
   const [adultToolsOpen, setAdultToolsOpen] = useState(false);
   const [recipeShelfOpen, setRecipeShelfOpen] = useState(false);
   const [handbookOpen, setHandbookOpen] = useState(false);
@@ -319,24 +304,6 @@ export function BuildPage() {
   const announcedChallengeIdsRef = useRef(new Set<string>());
   const challengeLastEvalAtRef = useRef<number>(Date.now());
   const builderMeasureRef = useRef(false);
-  const shouldLoadBlueprints = assistantOpen;
-  const blueprints = useLiveQuery<SavedBlueprintRecord[]>(
-    () => (shouldLoadBlueprints
-      ? db.blueprints.orderBy('updatedAt').reverse().limit(8).toArray()
-      : []),
-    [shouldLoadBlueprints],
-  );
-  const availableBlueprints = useMemo(() => {
-    const merged = [...ENGINEERING_RECIPES.map((recipe) => recipe.blueprintRecord), ...(blueprints ?? [])];
-    const seen = new Set<string>();
-    return merged.filter((record) => {
-      if (seen.has(record.recordId)) {
-        return false;
-      }
-      seen.add(record.recordId);
-      return true;
-    });
-  }, [blueprints]);
   const challengeProgressQuery = useLiveQuery<ChallengeProgressRecord[]>(
     () => db.challengeProgress.toArray(),
     [],
@@ -1187,19 +1154,6 @@ export function BuildPage() {
     navigate(`/build/${newDraft.draftId}${query ? `?${query}` : ''}`);
   }
 
-  async function applyGenerated(result: GenerateExperimentResult) {
-    const nextManifest = result.experiment;
-    setControlValues(
-      Object.fromEntries(nextManifest.controls.map((control) => [control.id, control.defaultValue ?? false])),
-    );
-    await persistDraft(nextManifest, undefined, { recordHistory: true });
-  }
-
-  async function applyEdited(result: EditExperimentResult) {
-    const nextManifest = result.experiment;
-    await persistDraft(nextManifest, undefined, { recordHistory: true });
-  }
-
   function handleShare() {
     if (!manifest) return;
     try {
@@ -1247,15 +1201,6 @@ export function BuildPage() {
         description: 'Loading the current draft.',
         assistantPrompt: 'Explain how to get started in Mason\'s Lab.',
       };
-
-  const openAssistantWithPrompt = useCallback(
-    (prompt: string) => {
-      setAssistantPromptSeed(prompt);
-      setAssistantOpen(true);
-      showStatus('Loaded a prompt into the assistant.', 'info');
-    },
-    [showStatus],
-  );
 
   const handlePlacePrimitive = useCallback(
     (x: number, y: number) => {
@@ -1780,9 +1725,6 @@ export function BuildPage() {
             <button type="button" onClick={handleSaveMachine}>
               Save
             </button>
-            <button type="button" onClick={() => openAssistantWithPrompt(builderFocus.assistantPrompt)}>
-              Help
-            </button>
           </div>
         </div>
 
@@ -1798,17 +1740,23 @@ export function BuildPage() {
           {jobComplete && job ? (
             <span className="builder-chip is-success">{job.title} complete</span>
           ) : null}
-        </div>
-
-        <div className="builder-status-slot">
-          {challengeToast ? (
-            <ChallengeToast challenge={challengeToast} onDismiss={() => setChallengeToast(null)} />
-          ) : toolbarNotice ? (
-            <p className={`builder-status builder-status-${toolbarNotice.tone}`} role="status" aria-live="polite">
+          {toolbarNotice ? (
+            <span
+              className={`builder-chip builder-chip-notice builder-chip-notice-${toolbarNotice.tone}`}
+              role="status"
+              aria-live="polite"
+              title={toolbarNotice.message}
+            >
               {toolbarNotice.message}
-            </p>
+            </span>
           ) : null}
         </div>
+
+        {challengeToast ? (
+          <div className="builder-status-slot">
+            <ChallengeToast challenge={challengeToast} onDismiss={() => setChallengeToast(null)} />
+          </div>
+        ) : null}
 
         {jobComplete && job ? (
           <div className="builder-stage-complete">
@@ -2006,73 +1954,6 @@ export function BuildPage() {
         </div>
       </section>
 
-      {assistantOpen ? (
-        <section className="panel build-help-drawer">
-          <Suspense
-            fallback={(
-              <div className="assistant-panel assistant-skeleton" aria-hidden="true">
-                <div className="skeleton-line skeleton-line-eyebrow" />
-                <div className="skeleton-line skeleton-line-title" />
-                <div className="skeleton-line skeleton-line-copy" />
-                <div className="skeleton-line skeleton-line-copy" />
-                <div className="skeleton-line skeleton-line-copy short" />
-              </div>
-            )}
-          >
-            <LazyAssistantPanel
-              manifest={manifest}
-              busy={busy}
-              project={job ? {
-                title: job.title,
-                unlocked: projectUnlocked,
-                currentStepTitle: activeProjectStep?.title,
-                currentStepInstruction: activeProjectStep?.instruction,
-                assistantPrompt: activeProjectStep?.assistantPrompt,
-              } : undefined}
-              promptSeed={assistantPromptSeed}
-              onPromptSeedConsumed={() => setAssistantPromptSeed(null)}
-              blueprints={availableBlueprints}
-              onMount={(blueprintRecord) => {
-                void persistDraft(mountBlueprintToManifest(manifest, blueprintRecord.blueprint), undefined, { recordHistory: true });
-                showStatus(`Mounted ${blueprintRecord.blueprint.title}.`, 'success');
-              }}
-              onGenerate={async (prompt) => {
-                setBusy(true);
-                try {
-                  const { generateExperiment } = await loadAssistantApi();
-                  const result = await generateExperiment(prompt);
-                  await applyGenerated(result);
-                  return result;
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              onEdit={async (prompt) => {
-                setBusy(true);
-                try {
-                  const { editExperiment } = await loadAssistantApi();
-                  const result = await editExperiment(prompt, manifest);
-                  await applyEdited(result);
-                  return result;
-                } finally {
-                  setBusy(false);
-                }
-              }}
-              onExplain={async (prompt) => {
-                setBusy(true);
-                try {
-                  const { explainExperiment } = await loadAssistantApi();
-                  const result = await explainExperiment(prompt, manifest);
-                  return result.explanation.whatIsHappening;
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            />
-          </Suspense>
-        </section>
-      ) : null}
-
       {adultToolsOpen ? (
         <section className="panel adult-tools-panel">
           <div className="panel-header compact">
@@ -2153,12 +2034,6 @@ export function BuildPage() {
                       }}
                     >
                       Mount
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openAssistantWithPrompt(recipe.assistantPrompt)}
-                    >
-                      Ask
                     </button>
                   </div>
                 </article>

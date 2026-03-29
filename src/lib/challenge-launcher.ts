@@ -14,6 +14,11 @@ export interface SandboxChallengeCatalogEntry extends ChallengeLauncherCard {
 }
 
 export const ACTIVE_SANDBOX_CHALLENGE_LIMIT = 3;
+const HIDDEN_PUBLIC_SANDBOX_CHALLENGE_IDS = new Set([
+  'delivery-boy',
+  'express-train',
+  'full-monty',
+]);
 
 export const FEATURED_CHALLENGE_LAUNCHER_CARDS: ChallengeLauncherCard[] = [
   {
@@ -88,7 +93,7 @@ export const FEATURED_CHALLENGE_LAUNCHER_CARDS: ChallengeLauncherCard[] = [
   },
 ];
 
-export const SANDBOX_CHALLENGE_CATALOG: SandboxChallengeCatalogEntry[] = [
+const ALL_SANDBOX_CHALLENGE_CATALOG: SandboxChallengeCatalogEntry[] = [
   {
     id: 'first-spin',
     title: 'First Spin',
@@ -290,6 +295,10 @@ export const SANDBOX_CHALLENGE_CATALOG: SandboxChallengeCatalogEntry[] = [
     category: 'creative',
   },
 ];
+
+export const SANDBOX_CHALLENGE_CATALOG = ALL_SANDBOX_CHALLENGE_CATALOG.filter(
+  (challenge) => !HIDDEN_PUBLIC_SANDBOX_CHALLENGE_IDS.has(challenge.id),
+);
 
 export function getActiveSandboxChallengeIds(
   completedChallengeIds: Iterable<string>,

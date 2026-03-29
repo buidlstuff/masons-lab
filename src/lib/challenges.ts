@@ -36,6 +36,11 @@ export interface SandboxChallengeRuntimeParams {
 
 const GEAR_LIVE_THRESHOLD = 0.01;
 export const ACTIVE_CHALLENGE_LIMIT = 3;
+const HIDDEN_PUBLIC_SANDBOX_CHALLENGE_IDS = new Set([
+  'delivery-boy',
+  'express-train',
+  'full-monty',
+]);
 
 export function createChallengeScratchState(): ChallengeScratchState {
   return {
@@ -457,7 +462,10 @@ export function getActiveChallenges(
   limit = ACTIVE_CHALLENGE_LIMIT,
 ) {
   const completedSet = new Set(completedChallengeIds);
-  return CHALLENGES.filter((challenge) => !completedSet.has(challenge.id)).slice(0, limit);
+  return CHALLENGES
+    .filter((challenge) => !HIDDEN_PUBLIC_SANDBOX_CHALLENGE_IDS.has(challenge.id))
+    .filter((challenge) => !completedSet.has(challenge.id))
+    .slice(0, limit);
 }
 
 export function getActiveChallengeIds(

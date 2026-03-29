@@ -5,7 +5,8 @@ import { AppBootProvider } from '../lib/app-boot';
 import { SANDBOX_CHALLENGE_CATALOG } from '../lib/challenge-launcher';
 import { db } from '../lib/db';
 import { ENGINEERING_HANDBOOK_ENTRIES } from '../lib/engineering-handbook';
-import { SILLY_SCENE_LAUNCHER_CARDS } from '../lib/silly-scene-launcher';
+import { VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS } from '../lib/puzzle-challenge-launcher';
+import { VISIBLE_SILLY_SCENE_LAUNCHER_CARDS } from '../lib/silly-scene-launcher';
 import { HomePage } from '../pages/HomePage';
 import type { SiteJobDefinition } from '../lib/types';
 
@@ -63,7 +64,9 @@ describe('HomePage launcher', () => {
     expect(challengesButton).toBeTruthy();
     fireEvent.click(challengesButton!);
 
-    expect(screen.getByRole('heading', { name: /Ten puzzle levels to solve right now/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: new RegExp(`${VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.length} puzzle levels to solve right now`, 'i') }),
+    ).toBeInTheDocument();
     expect(screen.getByText('Hook and Drop')).toBeInTheDocument();
     expect(screen.getByText('Trampoline Bank Shot')).toBeInTheDocument();
     expect(screen.getByText(`0/${SANDBOX_CHALLENGE_CATALOG.length} medals earned in free build`)).toBeInTheDocument();
@@ -82,6 +85,6 @@ describe('HomePage launcher', () => {
     fireEvent.click(scenesButton!);
     expect(
       screen.getAllByRole('link').filter((link) => link.getAttribute('href')?.startsWith('/build?scene=')),
-    ).toHaveLength(SILLY_SCENE_LAUNCHER_CARDS.length);
+    ).toHaveLength(VISIBLE_SILLY_SCENE_LAUNCHER_CARDS.length);
   });
 });
