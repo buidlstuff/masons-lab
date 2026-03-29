@@ -446,21 +446,24 @@ export function MachineCanvas({
   })();
 
   const sunnyStatus = 'Sunny Workyard';
+  const canvasModeLabel = placingKind
+    ? `Place ${labelFor(placingKind)}`
+    : connectionMode?.kind
+      ? `Connect ${labelForConnectionMode(connectionMode.kind)}`
+      : selectedPrimitiveId
+        ? 'Selected part'
+        : null;
 
   return (
     <div className="machine-canvas-shell">
       <div className="machine-canvas-toolbar">
         <div className="canvas-toolbar-main">
           <span>{sunnyStatus}</span>
-          <span className={`canvas-mode-pill ${placingKind || connectionMode?.kind ? 'placing' : selectedPrimitiveId ? 'selected' : 'idle'}`}>
-            {placingKind
-              ? `Place ${labelFor(placingKind)}`
-              : connectionMode?.kind
-                ? `Connect ${labelForConnectionMode(connectionMode.kind)}`
-                : selectedPrimitiveId
-                  ? 'Selected part'
-                  : 'Select and drag'}
-          </span>
+          {canvasModeLabel ? (
+            <span className={`canvas-mode-pill ${placingKind || connectionMode?.kind ? 'placing' : 'selected'}`}>
+              {canvasModeLabel}
+            </span>
+          ) : null}
         </div>
         <span className="canvas-hint">{hint}</span>
       </div>
@@ -1021,13 +1024,16 @@ function drawInteractionOverlay(
       ? 'Dragging part'
       : selectedPrimitiveId
         ? 'Part selected'
-        : 'Select mode';
+        : null;
+  if (!modeText) {
+    return;
+  }
   drawModeChip(
     instance,
     16,
     16,
     modeText,
-    placingKind || connectionMode?.kind ? 'good' : selectedPrimitiveId ? 'info' : 'warn',
+    placingKind || connectionMode?.kind ? 'good' : 'info',
   );
 
   if (placingKind && mouseX >= 0 && mouseX <= instance.width && mouseY >= 0 && mouseY <= instance.height) {

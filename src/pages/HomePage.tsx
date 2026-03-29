@@ -535,23 +535,8 @@ export function HomePage() {
   return (
     <div className="page page-home">
       <section className={`home-launcher-screen mode-${selectedMode}`}>
-        <div className="home-launcher-hud" aria-label="Lab progress">
-          <div className="home-hud-pill">
-            <span>Projects</span>
-            <strong>{homeLoading ? '…' : `${completedProjects}/${projects.length || 3}`}</strong>
-          </div>
-          <div className="home-hud-pill">
-            <span>Puzzles</span>
-            <strong>{homeLoading ? '…' : `${puzzleProgressCount}/${VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.length}`}</strong>
-          </div>
-          <div className="home-hud-pill">
-            <span>XP</span>
-            <strong>{homeLoading ? '…' : `${xp} · ${tierName}`}</strong>
-          </div>
-        </div>
-
         <div className="home-launcher-hero">
-            <div className="home-launcher-title-wrap">
+          <div className="home-launcher-title-wrap">
             <p className="eyebrow">Welcome to the Yard</p>
             <div className="home-launcher-title">
               <h1 className="home-launcher-heading">
@@ -567,6 +552,21 @@ export function HomePage() {
                 {boot.message ?? 'Storage is limited, so the yard is running in reduced mode.'}
               </p>
             ) : null}
+          </div>
+
+          <div className="home-launcher-hud" aria-label="Lab progress">
+            <div className="home-hud-pill">
+              <span>Projects</span>
+              <strong>{homeLoading ? '…' : `${completedProjects}/${projects.length || 3}`}</strong>
+            </div>
+            <div className="home-hud-pill">
+              <span>Puzzles</span>
+              <strong>{homeLoading ? '…' : `${puzzleProgressCount}/${VISIBLE_PUZZLE_CHALLENGE_LAUNCHER_CARDS.length}`}</strong>
+            </div>
+            <div className="home-hud-pill">
+              <span>XP</span>
+              <strong>{homeLoading ? '…' : `${xp} · ${tierName}`}</strong>
+            </div>
           </div>
 
           <div className="home-launcher-mascot">

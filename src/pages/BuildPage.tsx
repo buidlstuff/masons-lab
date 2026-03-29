@@ -1589,13 +1589,6 @@ export function BuildPage() {
     );
   }
 
-  const builderModeLabel = placingKind
-    ? `Placing ${labelForPrimitive(placingKind)}`
-    : selectedPrimitive
-      ? `Inspecting ${selectedPrimitive.label ?? labelForPrimitive(selectedPrimitive.kind)}`
-      : manifest.primitives.length === 0
-        ? 'Start mode'
-        : 'Select mode';
   const goalProgress = job ? getGoalProgress(job, manifest, runtimeSnapshot, playState) : null;
   const buildReadiness: 'loading-engine' | 'ready' = simulationStatus !== 'ready' || !canvasReady
     ? 'loading-engine'
@@ -1608,10 +1601,11 @@ export function BuildPage() {
     ? connectionSource
       ? `Connecting with ${labelForBuilderConnection(connectionKind)}. First part: ${labelForPrimitive(connectionSource.kind)}. Click the second part on the canvas.`
       : `Connecting with ${labelForBuilderConnection(connectionKind)}. Click the first part on the canvas.`
-    : activeProjectStep?.instruction ?? builderFocus.description;
+    : activeProjectStep?.instruction ?? null;
   const builderToolbarTitle = connectionKind
     ? `Connect ${labelForBuilderConnection(connectionKind)}`
-    : activeProjectStep?.title ?? builderFocus.title;
+    : activeProjectStep?.title
+      ?? (placingKind || selectedPrimitive ? builderFocus.title : 'Free Build');
   const builderEyebrow = job
     ? job.kind === 'starter-project'
       ? 'Guided Build'
@@ -1623,6 +1617,8 @@ export function BuildPage() {
   const toolbarNotice = buildReadiness === 'loading-engine'
     ? { tone: 'info' as const, message: 'Loading the live engine and stage renderer.' }
     : statusNotice;
+  const showBuilderTopCopy = Boolean(connectionKind || activeProjectStep || activePuzzleChallenge);
+  const showBuilderStatusChips = Boolean(goalProgress || jobComplete || toolbarNotice);
   const desktopConnectOverlayOpen = connectMenuOpen && !connectionKind;
   const mobileConnectOverlayOpen = connectMenuOpen && !connectionKind;
   const renderConnectChooser = (className: string, id?: string) => (
@@ -1662,12 +1658,14 @@ export function BuildPage() {
   return (
     <div className="page page-build">
       <section className="panel builder-stage-shell">
-        <div className="builder-stage-topbar">
-          <div className="builder-stage-copy">
+        <div className={`builder-stage-topbar${showBuilderTopCopy ? '' : ' is-compact'}`}>
+          {showBuilderTopCopy ? (
+            <div className="builder-stage-copy">
             <p className="eyebrow">{builderEyebrow}</p>
             <strong>{builderToolbarTitle}</strong>
-            <p>{builderToolbarHint}</p>
-          </div>
+            {builderToolbarHint ? <p>{builderToolbarHint}</p> : null}
+            </div>
+          ) : null}
 
           <div className="builder-stage-actions">
             <button
@@ -1683,6 +1681,15 @@ export function BuildPage() {
               }}
             >
               Connect Parts
+            </button>
+            <button
+              type="button"
+              className={`builder-tablet-parts-button${tabletPartsOpen ? ' is-active' : ''}`}
+              aria-expanded={tabletPartsOpen}
+              aria-controls="builder-mobile-parts"
+              onClick={toggleTabletParts}
+            >
+              Parts
             </button>
             <button
               type="button"
@@ -1728,29 +1735,28 @@ export function BuildPage() {
           </div>
         </div>
 
-        <div className="builder-stage-status">
-          <span className={`builder-chip ${placingKind ? 'is-active' : connectionKind ? 'is-success' : ''}`}>{builderModeLabel}</span>
-          <span className={`builder-chip is-${machineActivity.tone}`}>{machineActivity.label}</span>
-          <span className="builder-chip">{manifest.primitives.length} part{manifest.primitives.length === 1 ? '' : 's'} on canvas</span>
-          {goalProgress && job ? (
-            <span className={`builder-chip ${goalProgress.met ? 'is-success' : ''}`}>
-              {goalProgress.met ? `${goalProgress.label}: done` : `${goalProgress.label}: ${goalProgress.current} / ${goalProgress.target}`}
-            </span>
-          ) : null}
-          {jobComplete && job ? (
-            <span className="builder-chip is-success">{job.title} complete</span>
-          ) : null}
-          {toolbarNotice ? (
-            <span
-              className={`builder-chip builder-chip-notice builder-chip-notice-${toolbarNotice.tone}`}
-              role="status"
-              aria-live="polite"
-              title={toolbarNotice.message}
-            >
-              {toolbarNotice.message}
-            </span>
-          ) : null}
-        </div>
+        {showBuilderStatusChips ? (
+          <div className="builder-stage-status">
+            {goalProgress && job ? (
+              <span className={`builder-chip ${goalProgress.met ? 'is-success' : ''}`}>
+                {goalProgress.met ? `${goalProgress.label}: done` : `${goalProgress.label}: ${goalProgress.current} / ${goalProgress.target}`}
+              </span>
+            ) : null}
+            {jobComplete && job ? (
+              <span className="builder-chip is-success">{job.title} complete</span>
+            ) : null}
+            {toolbarNotice ? (
+              <span
+                className={`builder-chip builder-chip-notice builder-chip-notice-${toolbarNotice.tone}`}
+                role="status"
+                aria-live="polite"
+                title={toolbarNotice.message}
+              >
+                {toolbarNotice.message}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         {challengeToast ? (
           <div className="builder-status-slot">
@@ -1796,36 +1802,6 @@ export function BuildPage() {
 
         <div className="builder-workbench">
           <div className="canvas-column builder-canvas-panel" style={{ position: 'relative' }}>
-            <div className="builder-canvas-mobile-tools" role="toolbar" aria-label="Canvas build tools">
-              <button
-                type="button"
-                className={`builder-mobile-tool-button${tabletPartsOpen ? ' is-active' : ''}`}
-                aria-expanded={tabletPartsOpen}
-                aria-controls="builder-mobile-parts"
-                onClick={toggleTabletParts}
-              >
-                Parts
-              </button>
-              {connectionKind ? (
-                <button
-                  type="button"
-                  className="builder-connect-cta builder-mobile-tool-button builder-mobile-connect-button is-active"
-                  onClick={() => cancelConnectionMode('Connect cancelled. You are back in select mode.')}
-                >
-                  Cancel {labelForBuilderConnection(connectionKind)}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={`builder-connect-cta builder-mobile-tool-button builder-mobile-connect-button${mobileConnectOverlayOpen ? ' is-open' : ''}`}
-                  aria-expanded={mobileConnectOverlayOpen}
-                  aria-controls="builder-mobile-connect"
-                  onClick={toggleConnectChooser}
-                >
-                  Connect
-                </button>
-              )}
-            </div>
             {tabletPartsOpen ? (
               <div id="builder-mobile-parts" className="builder-mobile-overlay builder-mobile-parts-overlay">
                 <PartPalette
