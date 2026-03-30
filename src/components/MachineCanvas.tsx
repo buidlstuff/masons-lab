@@ -397,7 +397,7 @@ export function MachineCanvas({
       case 'gear':     return 'Gear — mesh it with another rotating part, or mount it onto a chassis as part of a drivetrain';
       case 'wheel':    return 'Wheel — inside Motor range it spins · touching a rotating part it meshes';
       case 'chassis':
-        return 'Chassis — mount wheels and a motor onto it to build a simple rolling machine';
+        return 'Chassis — use arrow keys to drive · mount wheels + motor to build a vehicle';
       case 'pulley':
       case 'chain-sprocket':
         return sel.kind === 'pulley'

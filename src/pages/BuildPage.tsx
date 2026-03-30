@@ -913,12 +913,71 @@ export function BuildPage() {
         });
         break;
       }
+      case 'chassis': {
+        // Find the motor attached to (or near) this chassis
+        const chassisId = selectedPrimitive.id;
+        const attachedMotor = manifest?.primitives.find(
+          (p) => p.kind === 'motor'
+            && (p.config as { attachedToId?: string }).attachedToId === chassisId,
+        );
+        if (!attachedMotor) {
+          subtitle = 'Mount a motor onto this chassis to make it driveable.';
+          break;
+        }
+        const motorPowered = Boolean(readControlValue(
+          mergedControls,
+          controlValues,
+          attachedMotor.id,
+          'powerState',
+          Boolean((attachedMotor.config as { powerState?: boolean }).powerState ?? false),
+        ));
+        const motorRpm = Number(readControlValue(
+          mergedControls,
+          controlValues,
+          attachedMotor.id,
+          'rpm',
+          Number((attachedMotor.config as { rpm?: number }).rpm ?? 60),
+        ));
+        subtitle = motorPowered
+          ? `Driving at ${Math.abs(Math.round(motorRpm))} rpm. Use arrow keys or buttons.`
+          : 'Press arrow keys or toggle Drive to start moving.';
+        actions.push({
+          id: 'chassis-drive',
+          label: motorPowered ? 'Stop' : 'Drive',
+          active: motorPowered,
+          onPress: () => {
+            setBoundControlValue(attachedMotor.id, 'powerState', !motorPowered, motorPowered);
+            playUiTone('power');
+          },
+        });
+        actions.push({
+          id: 'chassis-reverse',
+          label: 'Reverse',
+          onPress: () => {
+            setBoundControlValue(attachedMotor.id, 'rpm', -Math.abs(motorRpm), motorRpm);
+            if (!motorPowered) {
+              setBoundControlValue(attachedMotor.id, 'powerState', true, false);
+            }
+          },
+        });
+        actions.push({
+          id: 'chassis-forward',
+          label: 'Forward',
+          onPress: () => {
+            setBoundControlValue(attachedMotor.id, 'rpm', Math.abs(motorRpm), motorRpm);
+            if (!motorPowered) {
+              setBoundControlValue(attachedMotor.id, 'powerState', true, false);
+            }
+          },
+        });
+        break;
+      }
       default:
         return null;
     }
 
     return actions.length > 0 ? { title, subtitle, actions } : null;
-  }, [controlValues, mergedControls, runtimeSnapshot.trainTrackId, selectedPrimitive, setBoundControlValue]);
+  }, [controlValues, mergedControls, runtimeSnapshot.trainTrackId, selectedPrimitive, manifest, setBoundControlValue]);
 
   const projectState = useMemo(
     () => (job && manifest ? evaluateProject(job, manifest, runtimeSnapshot, playState) : null),
@@ -1465,6 +1524,72 @@ export function BuildPage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cancelConnectionMode, connectionKind, manifest, persistDraft, placingKind, selectedPrimitiveId, showStatus]);
+
+  // ── Keyboard vehicle driving ────────────────────────────────────────────
+  // Arrow keys drive a vehicle when a chassis (or its motor/wheel) is selected.
+  // Left/Right = drive, release = stop.
+  useEffect(() => {
+    if (!manifest) return;
+
+    // Find the chassis associated with the current selection
+    function findVehicleMotor(): PrimitiveInstance | null {
+      if (!manifest || !selectedPrimitiveId) return null;
+      const sel = manifest.primitives.find((p) => p.id === selectedPrimitiveId);
+      if (!sel) return null;
+
+      let chassisId: string | undefined;
+      if (sel.kind === 'chassis') {
+        chassisId = sel.id;
+      } else if (sel.kind === 'wheel' || sel.kind === 'motor') {
+        chassisId = (sel.config as { attachedToId?: string }).attachedToId;
+      }
+      if (!chassisId) return null;
+
+      // Verify it's actually a chassis with wheels (a vehicle)
+      const chassis = manifest.primitives.find((p) => p.id === chassisId && p.kind === 'chassis');
+      if (!chassis) return null;
+      const hasWheels = manifest.primitives.some(
+        (p) => p.kind === 'wheel' && (p.config as { attachedToId?: string }).attachedToId === chassisId,
+      );
+      if (!hasWheels) return null;
+
+      return manifest.primitives.find(
+        (p) => p.kind === 'motor' && (p.config as { attachedToId?: string }).attachedToId === chassisId,
+      ) ?? null;
+    }
+
+    function handleDriveKeyDown(event: KeyboardEvent) {
+      const tag = (event.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+
+      const motor = findVehicleMotor();
+      if (!motor) return;
+      event.preventDefault();
+
+      const baseRpm = Math.abs(Number((motor.config as { rpm?: number }).rpm ?? 60));
+      const rpm = event.key === 'ArrowLeft' ? -baseRpm : baseRpm;
+
+      setBoundControlValue(motor.id, 'rpm', rpm, baseRpm);
+      setBoundControlValue(motor.id, 'powerState', true, false);
+    }
+
+    function handleDriveKeyUp(event: KeyboardEvent) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+
+      const motor = findVehicleMotor();
+      if (!motor) return;
+
+      setBoundControlValue(motor.id, 'powerState', false, true);
+    }
+
+    window.addEventListener('keydown', handleDriveKeyDown);
+    window.addEventListener('keyup', handleDriveKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleDriveKeyDown);
+      window.removeEventListener('keyup', handleDriveKeyUp);
+    };
+  }, [manifest, selectedPrimitiveId, setBoundControlValue]);
 
   useEffect(() => {
     function handleAdultToolsToggle() {
