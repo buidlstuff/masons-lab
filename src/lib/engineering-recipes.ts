@@ -110,6 +110,8 @@ function createRecipes(): EngineeringRecipe[] {
               config: {
                 fromId: 'skid-chassis',
                 toId: 'skid-arm',
+                pivotX: 350,
+                pivotY: 426,
                 fromLocalX: -50,
                 fromLocalY: -14,
                 toLocalX: -50,
