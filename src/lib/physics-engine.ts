@@ -1288,11 +1288,21 @@ export function buildMatterWorld(
   }
 
   // ── driveMotors ───────────────────────────────────────────────────────────
-  // Sets angular velocity on gears and wheels driven by active motors.
-  // BFS propagates velocity through the gear/wheel mesh map.
+  // Applies torque toward target angular velocity on gears and wheels driven
+  // by active motors.  Instead of instantly setting angular velocity (which
+  // overrides all physics and causes wild behaviour when parts interact), we
+  // blend toward the target so parts accelerate gradually and can stall
+  // under heavy loads.
+  // BFS propagates target velocity through the gear/wheel mesh map.
   // Returns the driven map so tick() can compute gear telemetry.
+
+  /** How quickly driven parts reach target velocity (0 = frozen, 1 = instant). */
+  const MOTOR_BLEND = 0.12;
+  /** Max angular acceleration per tick (rad/s²-ish) — prevents sudden jumps. */
+  const MAX_ANGULAR_ACCEL = 0.35;
+
   function driveMotors(): Map<string, number> {
-    const driven = new Map<string, number>(); // id → angularVelocity
+    const driven = new Map<string, number>(); // id → target angularVelocity
     activeMotorIds = new Set<string>();
 
     for (const motor of manifest.primitives.filter((p) => p.kind === 'motor')) {
@@ -1332,10 +1342,20 @@ export function buildMatterWorld(
       hop += 1;
     }
 
-    // Apply velocities
-    for (const [id, angVel] of driven) {
+    // Apply velocities via gradual blend instead of instant override
+    for (const [id, targetAngVel] of driven) {
       const body = bodyMap.get(id);
-      if (body) Matter.Body.setAngularVelocity(body, angVel);
+      if (!body) continue;
+      const current = body.angularVelocity;
+      const diff = targetAngVel - current;
+      // Clamp the per-tick change to MAX_ANGULAR_ACCEL, then blend
+      const clamped = clampNumber(diff, -MAX_ANGULAR_ACCEL, MAX_ANGULAR_ACCEL);
+      const blended = current + clamped * MOTOR_BLEND + diff * MOTOR_BLEND;
+      // Ensure we never exceed the target magnitude (prevents overshoot)
+      const final = Math.abs(blended) > Math.abs(targetAngVel) && Math.sign(blended) === Math.sign(targetAngVel)
+        ? targetAngVel
+        : blended;
+      Matter.Body.setAngularVelocity(body, final);
     }
     return driven;
   }
@@ -1692,10 +1712,17 @@ export function buildMatterWorld(
             const clampedTarget = clampNumber(targetAngle, link.minAngle, link.maxAngle);
             const targetRelativeAngle = (clampedTarget * Math.PI) / 180;
             const deltaAngle = normalizeAngle(targetRelativeAngle - currentRelativeAngle);
-            maxRelativeVelocity = clampNumber(Math.abs(motorState.angVel) * 0.12, 0.45, 1.35);
-            const desiredRelativeVelocity = clampNumber(deltaAngle * 4.2, -maxRelativeVelocity, maxRelativeVelocity);
+            maxRelativeVelocity = clampNumber(Math.abs(motorState.angVel) * 0.12, 0.35, 0.9);
+            // PD controller: proportional + derivative damping for smooth motion
+            const pGain = 1.8;
+            const dGain = 0.35;
+            const desiredRelativeVelocity = clampNumber(
+              deltaAngle * pGain - currentRelativeVelocity * dGain,
+              -maxRelativeVelocity,
+              maxRelativeVelocity,
+            );
             commandedRelativeVelocity = clampNumber(
-              currentRelativeVelocity + (desiredRelativeVelocity - currentRelativeVelocity) * 0.22,
+              currentRelativeVelocity + (desiredRelativeVelocity - currentRelativeVelocity) * 0.38,
               -maxRelativeVelocity,
               maxRelativeVelocity,
             );
