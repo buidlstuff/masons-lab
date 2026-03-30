@@ -1369,42 +1369,52 @@ export function buildMatterWorld(
       hop += 1;
     }
 
-    // Apply velocities via gradual blend instead of instant override.
-    // Wheels use tangential force so friction can transmit to the chassis.
-    const WHEEL_DRIVE_FORCE = 0.0012;
-    const WHEEL_MAX_FORCE = 0.006;
+    // Apply velocities via gradual blend.
+    // Wheels: spin with angular velocity blend AND push their parent chassis
+    // directly so the vehicle actually moves.  Relying on friction-to-constraint
+    // force chains in Matter.js is too fragile for a kids' sandbox.
+    const CHASSIS_DRIVE_FORCE = 0.0008;
+    const chassisPushed = new Set<string>(); // avoid double-pushing
     for (const [id, targetAngVel] of driven) {
       const body = bodyMap.get(id);
       if (!body) continue;
       const prim = primitiveMap.get(id);
 
+      // Gradual angular velocity blend (same for all rotating parts)
+      const current = body.angularVelocity;
+      const diff = targetAngVel - current;
+      const clamped = clampNumber(diff, -MAX_ANGULAR_ACCEL, MAX_ANGULAR_ACCEL);
+      const blended = current + clamped * MOTOR_BLEND + diff * MOTOR_BLEND;
+      const final = Math.abs(blended) > Math.abs(targetAngVel) && Math.sign(blended) === Math.sign(targetAngVel)
+        ? targetAngVel
+        : blended;
+      Matter.Body.setAngularVelocity(body, final);
+
+      // For driven wheels attached to a chassis: directly push the chassis.
+      // The wheel spins (above), and this force makes the vehicle move.
       if (prim?.kind === 'wheel') {
-        // Force-based drive: apply tangential force at the bottom of the wheel
-        // so that ground friction creates a reaction force on the chassis.
-        const cfg = prim.config as { radius?: number };
-        const radius = cfg.radius ?? 28;
-        const diff = targetAngVel - body.angularVelocity;
-        const forceMag = clampNumber(
-          diff * body.mass * radius * WHEEL_DRIVE_FORCE,
-          -WHEEL_MAX_FORCE,
-          WHEEL_MAX_FORCE,
-        );
-        // Tangential force at wheel bottom (ground contact point)
-        Matter.Body.applyForce(
-          body,
-          { x: body.position.x, y: body.position.y + radius },
-          { x: forceMag, y: 0 },
-        );
-      } else {
-        // Gears, pulleys, etc: gradual angular velocity blend
-        const current = body.angularVelocity;
-        const diff = targetAngVel - current;
-        const clamped = clampNumber(diff, -MAX_ANGULAR_ACCEL, MAX_ANGULAR_ACCEL);
-        const blended = current + clamped * MOTOR_BLEND + diff * MOTOR_BLEND;
-        const final = Math.abs(blended) > Math.abs(targetAngVel) && Math.sign(blended) === Math.sign(targetAngVel)
-          ? targetAngVel
-          : blended;
-        Matter.Body.setAngularVelocity(body, final);
+        const cfg = prim.config as { radius?: number; attachedToId?: string };
+        const parentId = cfg.attachedToId;
+        if (parentId && !chassisPushed.has(parentId)) {
+          const parentBody = bodyMap.get(parentId);
+          const parentPrim = primitiveMap.get(parentId);
+          if (parentBody && parentPrim?.kind === 'chassis') {
+            // Push proportional to wheel spin speed, scaled by chassis mass
+            const spinSpeed = Math.abs(final);
+            const pushForce = clampNumber(
+              spinSpeed * parentBody.mass * CHASSIS_DRIVE_FORCE,
+              -0.08,
+              0.08,
+            );
+            // Direction: positive angular velocity = clockwise = push right
+            const direction = Math.sign(final);
+            Matter.Body.applyForce(parentBody, parentBody.position, {
+              x: pushForce * direction,
+              y: 0,
+            });
+            chassisPushed.add(parentId);
+          }
+        }
       }
     }
     return driven;

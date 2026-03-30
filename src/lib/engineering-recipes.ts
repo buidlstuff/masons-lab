@@ -56,10 +56,10 @@ function createRecipes(): EngineeringRecipe[] {
         ],
         fragment: {
           primitives: [
-            { id: 'car-chassis', kind: 'chassis', label: 'Chassis', config: { x: 400, y: 460, width: 160, height: 20 } },
-            { id: 'car-wheel-l', kind: 'wheel', label: 'Left Wheel', config: { x: 340, y: 490, radius: 28, traction: 0.9, attachedToId: 'car-chassis', attachOffsetX: -55, attachOffsetY: 18 } },
-            { id: 'car-wheel-r', kind: 'wheel', label: 'Right Wheel', config: { x: 460, y: 490, radius: 28, traction: 0.9, attachedToId: 'car-chassis', attachOffsetX: 55, attachOffsetY: 18 } },
-            { id: 'car-motor', kind: 'motor', label: 'Motor', config: { x: 400, y: 440, rpm: 60, torque: 1.0, powerState: true, attachedToId: 'car-chassis', attachOffsetX: 0, attachOffsetY: -15 } },
+            { id: 'car-chassis', kind: 'chassis', label: 'Chassis', config: { x: 300, y: 510, width: 160, height: 20 } },
+            { id: 'car-wheel-l', kind: 'wheel', label: 'Left Wheel', config: { x: 245, y: 530, radius: 28, traction: 0.9, attachedToId: 'car-chassis', attachOffsetX: -55, attachOffsetY: 20 } },
+            { id: 'car-wheel-r', kind: 'wheel', label: 'Right Wheel', config: { x: 355, y: 530, radius: 28, traction: 0.9, attachedToId: 'car-chassis', attachOffsetX: 55, attachOffsetY: 20 } },
+            { id: 'car-motor', kind: 'motor', label: 'Motor', config: { x: 300, y: 495, rpm: 60, torque: 1.0, powerState: true, attachedToId: 'car-chassis', attachOffsetX: 0, attachOffsetY: -15 } },
           ],
           behaviors: [],
           controls: [
@@ -95,13 +95,13 @@ function createRecipes(): EngineeringRecipe[] {
         ],
         fragment: {
           primitives: [
-            { id: 'skid-chassis', kind: 'chassis', label: 'Chassis', config: { x: 460, y: 460, width: 180, height: 22 } },
-            { id: 'skid-whl-front', kind: 'wheel', label: 'Front Wheel', config: { x: 385, y: 490, radius: 26, traction: 0.95, attachedToId: 'skid-chassis', attachOffsetX: -70, attachOffsetY: 18 } },
-            { id: 'skid-whl-rear', kind: 'wheel', label: 'Rear Wheel', config: { x: 535, y: 490, radius: 26, traction: 0.95, attachedToId: 'skid-chassis', attachOffsetX: 70, attachOffsetY: 18 } },
-            { id: 'skid-motor', kind: 'motor', label: 'Motor', config: { x: 490, y: 438, rpm: 50, torque: 1.5, powerState: true, attachedToId: 'skid-chassis', attachOffsetX: 30, attachOffsetY: -15 } },
-            { id: 'skid-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 530, y: 445, mass: 6, attachedToId: 'skid-chassis', attachOffsetX: 65, attachOffsetY: -12 } },
-            { id: 'skid-arm', kind: 'crane-arm', label: 'Boom Arm', config: { x: 380, y: 430, length: 110 } },
-            { id: 'skid-bucket', kind: 'bucket', label: 'Bucket', config: { x: 320, y: 440, width: 40, depth: 28, attachedToId: 'skid-arm' } },
+            { id: 'skid-chassis', kind: 'chassis', label: 'Chassis', config: { x: 300, y: 506, width: 180, height: 22 } },
+            { id: 'skid-whl-front', kind: 'wheel', label: 'Front Wheel', config: { x: 225, y: 530, radius: 26, traction: 0.95, attachedToId: 'skid-chassis', attachOffsetX: -70, attachOffsetY: 20 } },
+            { id: 'skid-whl-rear', kind: 'wheel', label: 'Rear Wheel', config: { x: 375, y: 530, radius: 26, traction: 0.95, attachedToId: 'skid-chassis', attachOffsetX: 70, attachOffsetY: 20 } },
+            { id: 'skid-motor', kind: 'motor', label: 'Motor', config: { x: 330, y: 486, rpm: 50, torque: 1.5, powerState: true, attachedToId: 'skid-chassis', attachOffsetX: 30, attachOffsetY: -15 } },
+            { id: 'skid-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 370, y: 490, mass: 6, attachedToId: 'skid-chassis', attachOffsetX: 65, attachOffsetY: -12 } },
+            { id: 'skid-arm', kind: 'crane-arm', label: 'Boom Arm', config: { x: 220, y: 480, length: 110 } },
+            { id: 'skid-bucket', kind: 'bucket', label: 'Bucket', config: { x: 160, y: 490, width: 40, depth: 28, attachedToId: 'skid-arm' } },
             {
               id: 'excavator-hinge',
               kind: 'powered-hinge-link',
@@ -109,8 +109,8 @@ function createRecipes(): EngineeringRecipe[] {
               config: {
                 fromId: 'skid-chassis',
                 toId: 'skid-arm',
-                pivotX: 390,
-                pivotY: 448,
+                pivotX: 230,
+                pivotY: 496,
                 fromLocalX: -65,
                 fromLocalY: -12,
                 toLocalX: -55,
@@ -158,15 +158,15 @@ function createRecipes(): EngineeringRecipe[] {
         ],
         fragment: {
           primitives: [
-            { id: 'crane-chassis', kind: 'chassis', label: 'Chassis', config: { x: 500, y: 460, width: 180, height: 22 } },
-            { id: 'crane-whl-l', kind: 'wheel', label: 'Left Wheel', config: { x: 435, y: 490, radius: 26, traction: 0.9, attachedToId: 'crane-chassis', attachOffsetX: -65, attachOffsetY: 18 } },
-            { id: 'crane-whl-r', kind: 'wheel', label: 'Right Wheel', config: { x: 565, y: 490, radius: 26, traction: 0.9, attachedToId: 'crane-chassis', attachOffsetX: 65, attachOffsetY: 18 } },
-            { id: 'crane-motor', kind: 'motor', label: 'Motor', config: { x: 530, y: 440, rpm: 45, torque: 1.0, powerState: true, attachedToId: 'crane-chassis', attachOffsetX: 30, attachOffsetY: -15 } },
-            { id: 'crane-winch', kind: 'winch', label: 'Winch', config: { x: 460, y: 420, speed: 25, ropeLength: 140, attachedToId: 'crane-chassis', attachOffsetX: -40, attachOffsetY: -30 } },
-            { id: 'crane-hook', kind: 'hook', label: 'Hook', config: { x: 460, y: 360 } },
-            { id: 'crane-rope', kind: 'rope', label: 'Crane Rope', config: { fromId: 'crane-winch', toId: 'crane-hook', length: 140 } },
-            { id: 'crane-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 560, y: 440, mass: 8, attachedToId: 'crane-chassis', attachOffsetX: 60, attachOffsetY: -15 } },
-            { id: 'crane-cargo', kind: 'cargo-block', label: 'Cargo', config: { x: 300, y: 480, weight: 1 } },
+            { id: 'crane-chassis', kind: 'chassis', label: 'Chassis', config: { x: 600, y: 506, width: 180, height: 22 } },
+            { id: 'crane-whl-l', kind: 'wheel', label: 'Left Wheel', config: { x: 535, y: 530, radius: 26, traction: 0.9, attachedToId: 'crane-chassis', attachOffsetX: -65, attachOffsetY: 20 } },
+            { id: 'crane-whl-r', kind: 'wheel', label: 'Right Wheel', config: { x: 665, y: 530, radius: 26, traction: 0.9, attachedToId: 'crane-chassis', attachOffsetX: 65, attachOffsetY: 20 } },
+            { id: 'crane-motor', kind: 'motor', label: 'Motor', config: { x: 630, y: 488, rpm: 45, torque: 1.0, powerState: true, attachedToId: 'crane-chassis', attachOffsetX: 30, attachOffsetY: -15 } },
+            { id: 'crane-winch', kind: 'winch', label: 'Winch', config: { x: 560, y: 470, speed: 25, ropeLength: 120, attachedToId: 'crane-chassis', attachOffsetX: -40, attachOffsetY: -30 } },
+            { id: 'crane-hook', kind: 'hook', label: 'Hook', config: { x: 560, y: 430 } },
+            { id: 'crane-rope', kind: 'rope', label: 'Crane Rope', config: { fromId: 'crane-winch', toId: 'crane-hook', length: 120 } },
+            { id: 'crane-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 660, y: 490, mass: 8, attachedToId: 'crane-chassis', attachOffsetX: 60, attachOffsetY: -15 } },
+            { id: 'crane-cargo', kind: 'cargo-block', label: 'Cargo', config: { x: 400, y: 530, weight: 1 } },
           ],
           behaviors: [],
           controls: [
