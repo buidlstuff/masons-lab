@@ -17,8 +17,8 @@ export const ENGINEERING_HANDBOOK_ENTRIES: EngineeringHandbookEntry[] = [
   {
     id: 'skid-steer',
     title: 'Skid Steer',
-    summary: 'A compact four-wheeled loader with a front bucket on a powered hinge.',
-    partList: ['Chassis', 'Wheel x4', 'Motor', 'Powered Hinge', 'Crane Arm', 'Bucket'],
+    summary: 'A compact loader with a front bucket on a powered hinge boom.',
+    partList: ['Chassis', 'Wheel x2', 'Motor', 'Powered Hinge', 'Crane Arm', 'Bucket', 'Counterweight'],
     blueprintId: 'starter-skid-steer',
   },
   {
