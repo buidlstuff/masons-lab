@@ -27,8 +27,166 @@ function createBlueprintRecord(blueprint: MachineBlueprint): SavedBlueprintRecor
 
 function createRecipes(): EngineeringRecipe[] {
   const poweredHingeControls = getPoweredHingeControls('powered-arm-hinge', 'Powered Hinge');
+  const excavatorHingeControls = getPoweredHingeControls('excavator-hinge', 'Boom');
 
   return [
+    // ── Vehicle recipes ──────────────────────────────────────────────────────
+    {
+      id: 'simple-car',
+      title: 'Simple Car',
+      summary: 'A motor-driven chassis with two wheels that rolls across the lab floor.',
+      partList: ['Chassis', 'Wheel x2', 'Motor'],
+      steps: [
+        'The chassis sits above the ground with two wheels underneath.',
+        'The motor is bolted on top and powers both wheels through proximity.',
+        'Toggle the motor on — the wheels push off the ground and the whole car rolls.',
+        'Use the speed slider to go faster or slower.',
+      ],
+      whyItWorks: 'The motor spins the wheels, the wheels push off the ground through friction, and the chassis rides along on the axle constraints.',
+      variation: 'Add a third wheel in front for a tricycle, or mount a crane arm on top for a mobile platform.',
+      assistantPrompt: 'Explain how the wheels transmit force to the chassis and what happens if you change wheel traction or motor speed.',
+      blueprintRecord: createBlueprintRecord({
+        blueprintId: 'starter-simple-car',
+        category: 'chassis',
+        title: 'Simple Car',
+        summary: 'A motor-driven two-wheeled chassis.',
+        tags: ['starter', 'recipe', 'vehicle', 'transport'],
+        ports: [
+          { portId: 'mount-top', kind: 'mount', label: 'Top Mount', compatibleWith: ['mount'] },
+        ],
+        fragment: {
+          primitives: [
+            { id: 'car-chassis', kind: 'chassis', label: 'Chassis', config: { x: 400, y: 460, width: 160, height: 20 } },
+            { id: 'car-wheel-l', kind: 'wheel', label: 'Left Wheel', config: { x: 340, y: 490, radius: 28, traction: 0.9, attachedToId: 'car-chassis', attachOffsetX: -55, attachOffsetY: 18 } },
+            { id: 'car-wheel-r', kind: 'wheel', label: 'Right Wheel', config: { x: 460, y: 490, radius: 28, traction: 0.9, attachedToId: 'car-chassis', attachOffsetX: 55, attachOffsetY: 18 } },
+            { id: 'car-motor', kind: 'motor', label: 'Motor', config: { x: 400, y: 440, rpm: 60, torque: 1.0, powerState: true, attachedToId: 'car-chassis', attachOffsetX: 0, attachOffsetY: -15 } },
+          ],
+          behaviors: [],
+          controls: [
+            { id: 'car-power', kind: 'toggle', label: 'Motor Power', bind: { targetId: 'car-motor', path: 'powerState' }, defaultValue: true },
+            { id: 'car-speed', kind: 'slider', label: 'Motor Speed', bind: { targetId: 'car-motor', path: 'rpm' }, defaultValue: 60, min: 10, max: 140, step: 5 },
+          ],
+          hud: [],
+        },
+      }),
+    },
+    {
+      id: 'skid-steer',
+      title: 'Skid Steer',
+      summary: 'A compact four-wheeled loader with a front bucket on a powered hinge.',
+      partList: ['Chassis', 'Wheel x4', 'Motor', 'Powered Hinge', 'Crane Arm', 'Bucket'],
+      steps: [
+        'Four wheels give the chassis extra grip and stability.',
+        'The motor powers all four wheels and drives the boom hinge.',
+        'Use the boom angle slider to scoop the bucket down or lift it up.',
+        'Drive into cargo blocks, scoop them up, and carry them across the lab.',
+      ],
+      whyItWorks: 'Four driven wheels give strong traction, and the powered hinge lets the boom lift loads while the vehicle keeps rolling.',
+      variation: 'Replace the bucket with a hook for a forklift, or add a counterweight on the back.',
+      assistantPrompt: 'Explain how the four wheels share traction, and why the powered hinge can lift loads without tipping the chassis.',
+      blueprintRecord: createBlueprintRecord({
+        blueprintId: 'starter-skid-steer',
+        category: 'chassis',
+        title: 'Skid Steer',
+        summary: 'A four-wheeled loader with a powered boom and bucket.',
+        tags: ['starter', 'recipe', 'vehicle', 'construction', 'loader'],
+        ports: [
+          { portId: 'mount-top', kind: 'mount', label: 'Top Mount', compatibleWith: ['mount'] },
+        ],
+        fragment: {
+          primitives: [
+            { id: 'skid-chassis', kind: 'chassis', label: 'Chassis', config: { x: 400, y: 440, width: 140, height: 22 } },
+            { id: 'skid-whl-fl', kind: 'wheel', label: 'Front Left', config: { x: 345, y: 470, radius: 22, traction: 0.95, attachedToId: 'skid-chassis', attachOffsetX: -55, attachOffsetY: 18 } },
+            { id: 'skid-whl-fr', kind: 'wheel', label: 'Front Right', config: { x: 345, y: 470, radius: 22, traction: 0.95, attachedToId: 'skid-chassis', attachOffsetX: -55, attachOffsetY: 18 } },
+            { id: 'skid-whl-rl', kind: 'wheel', label: 'Rear Left', config: { x: 455, y: 470, radius: 22, traction: 0.95, attachedToId: 'skid-chassis', attachOffsetX: 55, attachOffsetY: 18 } },
+            { id: 'skid-whl-rr', kind: 'wheel', label: 'Rear Right', config: { x: 455, y: 470, radius: 22, traction: 0.95, attachedToId: 'skid-chassis', attachOffsetX: 55, attachOffsetY: 18 } },
+            { id: 'skid-motor', kind: 'motor', label: 'Motor', config: { x: 420, y: 420, rpm: 50, torque: 1.5, powerState: true, attachedToId: 'skid-chassis', attachOffsetX: 20, attachOffsetY: -15 } },
+            { id: 'skid-arm', kind: 'crane-arm', label: 'Boom Arm', config: { x: 340, y: 420, length: 100 } },
+            { id: 'skid-bucket', kind: 'bucket', label: 'Bucket', config: { x: 290, y: 430, width: 38, depth: 26, attachedToId: 'skid-arm' } },
+            {
+              id: 'excavator-hinge',
+              kind: 'powered-hinge-link',
+              label: 'Boom Hinge',
+              config: {
+                fromId: 'skid-chassis',
+                toId: 'skid-arm',
+                fromLocalX: -50,
+                fromLocalY: -14,
+                toLocalX: -50,
+                toLocalY: 0,
+                minAngle: -45,
+                maxAngle: 60,
+                motorId: 'skid-motor',
+                targetAngle: 0,
+                enabled: true,
+              },
+            },
+          ],
+          behaviors: [],
+          controls: [
+            { id: 'skid-power', kind: 'toggle', label: 'Motor Power', bind: { targetId: 'skid-motor', path: 'powerState' }, defaultValue: true },
+            { id: 'skid-speed', kind: 'slider', label: 'Drive Speed', bind: { targetId: 'skid-motor', path: 'rpm' }, defaultValue: 50, min: 10, max: 120, step: 5 },
+            ...excavatorHingeControls,
+          ],
+          hud: [],
+        },
+      }),
+    },
+    {
+      id: 'mobile-crane',
+      title: 'Mobile Crane',
+      summary: 'A wheeled platform with a rope-and-winch crane for lifting cargo on the move.',
+      partList: ['Chassis', 'Wheel x2', 'Motor', 'Winch', 'Rope', 'Hook', 'Counterweight'],
+      steps: [
+        'The chassis rolls on two wheels with a motor driving them.',
+        'A winch is mounted on top with a rope hanging down to a hook.',
+        'A counterweight on the opposite side keeps the crane balanced.',
+        'Drive to the cargo, lower the hook, clip the load, and reel it up as you drive away.',
+      ],
+      whyItWorks: 'The rolling chassis carries the crane to the load site, the winch reels the rope, and the counterweight prevents tipping.',
+      variation: 'Replace the hook with a bucket for a mobile scoop, or add a boom arm for reach.',
+      assistantPrompt: 'Explain how the counterweight keeps the crane stable and what happens if the load is too heavy.',
+      blueprintRecord: createBlueprintRecord({
+        blueprintId: 'starter-mobile-crane',
+        category: 'chassis',
+        title: 'Mobile Crane',
+        summary: 'A wheeled crane platform with winch, rope, and hook.',
+        tags: ['starter', 'recipe', 'vehicle', 'crane', 'lifting'],
+        ports: [
+          { portId: 'mount-top', kind: 'mount', label: 'Top Mount', compatibleWith: ['mount'] },
+        ],
+        fragment: {
+          primitives: [
+            { id: 'crane-chassis', kind: 'chassis', label: 'Chassis', config: { x: 500, y: 460, width: 180, height: 22 } },
+            { id: 'crane-whl-l', kind: 'wheel', label: 'Left Wheel', config: { x: 435, y: 490, radius: 26, traction: 0.9, attachedToId: 'crane-chassis', attachOffsetX: -65, attachOffsetY: 18 } },
+            { id: 'crane-whl-r', kind: 'wheel', label: 'Right Wheel', config: { x: 565, y: 490, radius: 26, traction: 0.9, attachedToId: 'crane-chassis', attachOffsetX: 65, attachOffsetY: 18 } },
+            { id: 'crane-motor', kind: 'motor', label: 'Motor', config: { x: 530, y: 440, rpm: 45, torque: 1.0, powerState: true, attachedToId: 'crane-chassis', attachOffsetX: 30, attachOffsetY: -15 } },
+            { id: 'crane-winch', kind: 'winch', label: 'Winch', config: { x: 460, y: 420, speed: 25, ropeLength: 140, attachedToId: 'crane-chassis', attachOffsetX: -40, attachOffsetY: -30 } },
+            { id: 'crane-hook', kind: 'hook', label: 'Hook', config: { x: 460, y: 360 } },
+            { id: 'crane-rope', kind: 'rope', label: 'Crane Rope', config: { fromId: 'crane-winch', toId: 'crane-hook', length: 140 } },
+            { id: 'crane-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 560, y: 440, mass: 8, attachedToId: 'crane-chassis', attachOffsetX: 60, attachOffsetY: -15 } },
+            { id: 'crane-cargo', kind: 'cargo-block', label: 'Cargo', config: { x: 300, y: 480, weight: 1 } },
+          ],
+          behaviors: [],
+          controls: [
+            { id: 'crane-power', kind: 'toggle', label: 'Motor Power', bind: { targetId: 'crane-motor', path: 'powerState' }, defaultValue: true },
+            { id: 'crane-speed', kind: 'slider', label: 'Drive Speed', bind: { targetId: 'crane-motor', path: 'rpm' }, defaultValue: 45, min: 10, max: 100, step: 5 },
+            {
+              id: 'crane-rope-length',
+              kind: 'slider',
+              label: 'Rope Length',
+              description: 'Raise or lower the hook.',
+              bind: { targetId: 'crane-winch', path: 'ropeLength' },
+              defaultValue: 140,
+              min: 50,
+              max: 200,
+              step: 5,
+            },
+          ],
+          hud: [],
+        },
+      }),
+    },
     {
       id: 'hook-hoist',
       title: 'Hook Hoist',

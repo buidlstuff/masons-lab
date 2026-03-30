@@ -15,7 +15,7 @@ describe('database seed', () => {
     const jobs = await db.jobs.toArray();
 
     expect(machines.length).toBe(3);
-    expect(blueprints.length).toBe(6);
+    expect(blueprints.length).toBe(9);
     expect(jobs.length).toBe(3);
     expect(machines.every((machine) => !machine.experiment.metadata.recipeId)).toBe(true);
     expect(jobs.every((job) => job.kind === 'starter-project')).toBe(true);

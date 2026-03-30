@@ -718,7 +718,9 @@ export function buildMatterWorld(
 
     if (prim.kind === 'bolt-link') {
       const cfg = prim.config as { fromId: string; toId: string; offsetX: number; offsetY: number; angleOffset: number };
-      if (bodyMap.has(cfg.fromId) && bodyMap.has(cfg.toId)) {
+      const fromBody = bodyMap.get(cfg.fromId);
+      const toBody = bodyMap.get(cfg.toId);
+      if (fromBody && toBody) {
         boltLinks.push({
           primitiveId: prim.id,
           fromId: cfg.fromId,
@@ -727,6 +729,31 @@ export function buildMatterWorld(
           offsetY: cfg.offsetY,
           angleOffset: cfg.angleOffset,
         });
+        // Two-point constraint locking: one at the offset (translation) and one
+        // rotated 20px away (rotation), so the pair acts as a stiff rigid link
+        // instead of the old setPosition/setAngle override that killed physics.
+        const cos0 = Math.cos(cfg.angleOffset);
+        const sin0 = Math.sin(cfg.angleOffset);
+        Matter.World.add(engine.world, Matter.Constraint.create({
+          bodyA: fromBody,
+          pointA: { x: cfg.offsetX, y: cfg.offsetY },
+          bodyB: toBody,
+          pointB: { x: 0, y: 0 },
+          length: 0,
+          stiffness: 0.92,
+          damping: 0.3,
+          label: `bolt-pos-${prim.id}`,
+        }));
+        Matter.World.add(engine.world, Matter.Constraint.create({
+          bodyA: fromBody,
+          pointA: { x: cfg.offsetX + cos0 * 20, y: cfg.offsetY + sin0 * 20 },
+          bodyB: toBody,
+          pointB: { x: 20, y: 0 },
+          length: 0,
+          stiffness: 0.92,
+          damping: 0.3,
+          label: `bolt-rot-${prim.id}`,
+        }));
       }
     }
 
@@ -1342,20 +1369,43 @@ export function buildMatterWorld(
       hop += 1;
     }
 
-    // Apply velocities via gradual blend instead of instant override
+    // Apply velocities via gradual blend instead of instant override.
+    // Wheels use tangential force so friction can transmit to the chassis.
+    const WHEEL_DRIVE_FORCE = 0.0012;
+    const WHEEL_MAX_FORCE = 0.006;
     for (const [id, targetAngVel] of driven) {
       const body = bodyMap.get(id);
       if (!body) continue;
-      const current = body.angularVelocity;
-      const diff = targetAngVel - current;
-      // Clamp the per-tick change to MAX_ANGULAR_ACCEL, then blend
-      const clamped = clampNumber(diff, -MAX_ANGULAR_ACCEL, MAX_ANGULAR_ACCEL);
-      const blended = current + clamped * MOTOR_BLEND + diff * MOTOR_BLEND;
-      // Ensure we never exceed the target magnitude (prevents overshoot)
-      const final = Math.abs(blended) > Math.abs(targetAngVel) && Math.sign(blended) === Math.sign(targetAngVel)
-        ? targetAngVel
-        : blended;
-      Matter.Body.setAngularVelocity(body, final);
+      const prim = primitiveMap.get(id);
+
+      if (prim?.kind === 'wheel') {
+        // Force-based drive: apply tangential force at the bottom of the wheel
+        // so that ground friction creates a reaction force on the chassis.
+        const cfg = prim.config as { radius?: number };
+        const radius = cfg.radius ?? 28;
+        const diff = targetAngVel - body.angularVelocity;
+        const forceMag = clampNumber(
+          diff * body.mass * radius * WHEEL_DRIVE_FORCE,
+          -WHEEL_MAX_FORCE,
+          WHEEL_MAX_FORCE,
+        );
+        // Tangential force at wheel bottom (ground contact point)
+        Matter.Body.applyForce(
+          body,
+          { x: body.position.x, y: body.position.y + radius },
+          { x: forceMag, y: 0 },
+        );
+      } else {
+        // Gears, pulleys, etc: gradual angular velocity blend
+        const current = body.angularVelocity;
+        const diff = targetAngVel - current;
+        const clamped = clampNumber(diff, -MAX_ANGULAR_ACCEL, MAX_ANGULAR_ACCEL);
+        const blended = current + clamped * MOTOR_BLEND + diff * MOTOR_BLEND;
+        const final = Math.abs(blended) > Math.abs(targetAngVel) && Math.sign(blended) === Math.sign(targetAngVel)
+          ? targetAngVel
+          : blended;
+        Matter.Body.setAngularVelocity(body, final);
+      }
     }
     return driven;
   }
@@ -1521,6 +1571,28 @@ export function buildMatterWorld(
     return collectedThisTick;
   }
 
+  // ── Vehicle stabilization ──────────────────────────────────────────────────
+  // Gently correct chassis tilt toward horizontal when wheels are attached,
+  // preventing the common physics-sandbox problem where cars flip on every bump.
+  function tickVehicleStabilization() {
+    for (const prim of manifest.primitives) {
+      if (prim.kind !== 'chassis') continue;
+      const body = bodyMap.get(prim.id);
+      if (!body || body.isStatic) continue;
+      const hasWheels = manifest.primitives.some(
+        (p) => p.kind === 'wheel'
+          && (p.config as { attachedToId?: string }).attachedToId === prim.id,
+      );
+      if (!hasWheels) continue;
+      // Gentle tilt correction + angular damping
+      const tiltCorrection = -body.angle * 0.025;
+      Matter.Body.setAngularVelocity(
+        body,
+        body.angularVelocity * 0.92 + tiltCorrection,
+      );
+    }
+  }
+
   function recoverLostCargo(dt: number, supportedCargoIds: Set<string>) {
     const conveyors = manifest.primitives.filter((primitive) => primitive.kind === 'conveyor');
     const hoppers = manifest.primitives.filter((primitive) => primitive.kind === 'hopper');
@@ -1660,19 +1732,34 @@ export function buildMatterWorld(
   }
 
   function tickBoltLinks() {
+    // Soft correction: nudge bolted bodies toward their target position/angle
+    // using forces instead of teleporting.  The two-point constraints handle
+    // most of the rigidity; this cleanup pass prevents drift without killing
+    // external forces (wheel traction, collisions, gravity).
+    const BOLT_POS_STIFFNESS = 0.35;
+    const BOLT_ANGLE_STIFFNESS = 0.25;
     for (const link of boltLinks) {
       const fromBody = bodyMap.get(link.fromId);
       const toBody = bodyMap.get(link.toId);
       if (!fromBody || !toBody) continue;
       const cos = Math.cos(fromBody.angle);
       const sin = Math.sin(fromBody.angle);
-      Matter.Body.setPosition(toBody, {
-        x: fromBody.position.x + link.offsetX * cos - link.offsetY * sin,
-        y: fromBody.position.y + link.offsetX * sin + link.offsetY * cos,
+      const targetX = fromBody.position.x + link.offsetX * cos - link.offsetY * sin;
+      const targetY = fromBody.position.y + link.offsetX * sin + link.offsetY * cos;
+      const dx = targetX - toBody.position.x;
+      const dy = targetY - toBody.position.y;
+      // Positional correction via velocity nudge
+      Matter.Body.setVelocity(toBody, {
+        x: fromBody.velocity.x + dx * BOLT_POS_STIFFNESS,
+        y: fromBody.velocity.y + dy * BOLT_POS_STIFFNESS,
       });
-      Matter.Body.setAngle(toBody, fromBody.angle + link.angleOffset);
-      Matter.Body.setVelocity(toBody, { x: fromBody.velocity.x, y: fromBody.velocity.y });
-      Matter.Body.setAngularVelocity(toBody, fromBody.angularVelocity);
+      // Angular correction
+      const targetAngle = fromBody.angle + link.angleOffset;
+      const angleDiff = normalizeAngle(targetAngle - toBody.angle);
+      Matter.Body.setAngularVelocity(
+        toBody,
+        fromBody.angularVelocity + angleDiff * BOLT_ANGLE_STIFFNESS,
+      );
     }
   }
 
@@ -2132,6 +2219,7 @@ export function buildMatterWorld(
     tickWinches(_dt);
     tickBoltLinks();
     tickHinges(_dt);
+    tickVehicleStabilization();
     tickPistons(_dt);
     tickRacks();
     tickSprings();
@@ -2538,11 +2626,19 @@ function createBodyForPrimitive(
 
     case 'chassis': {
       const cfg = prim.config as { x: number; y: number; width?: number; height?: number };
+      // Check if this chassis has wheels attached — if so, use vehicle-friendly
+      // low friction; otherwise use high friction so it acts as a stable base
+      // (e.g. for the powered-arm recipe).
+      const hasWheels = primitives.some(
+        (p) => p.kind === 'wheel'
+          && (p.config as { attachedToId?: string }).attachedToId === prim.id,
+      );
       return Matter.Bodies.rectangle(cfg.x, cfg.y, cfg.width ?? 140, cfg.height ?? 20, {
         label: prim.id,
         density: 0.002,
-        friction: 0.7,
-        frictionAir: 0.02,
+        friction: hasWheels ? 0.3 : 0.9,
+        frictionStatic: hasWheels ? 0.2 : 1.2,
+        frictionAir: hasWheels ? 0.008 : 0.02,
         restitution: 0.05,
       });
     }

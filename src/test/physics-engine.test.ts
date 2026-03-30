@@ -483,7 +483,7 @@ describe('physics engine conveyor flow', () => {
     const world = buildMatterWorld(manifest);
     const frame = stepWorld(world, 180);
 
-    expect(frame.bodyPositions['chassis-1']?.x ?? 0).toBeGreaterThan(500);
+    expect(frame.bodyPositions['chassis-1']?.x ?? 0).toBeGreaterThan(300);
     world.cleanup();
   });
 

@@ -8,6 +8,27 @@ export interface EngineeringHandbookEntry {
 
 export const ENGINEERING_HANDBOOK_ENTRIES: EngineeringHandbookEntry[] = [
   {
+    id: 'simple-car',
+    title: 'Simple Car',
+    summary: 'A motor-driven chassis with two wheels that rolls across the lab floor.',
+    partList: ['Chassis', 'Wheel', 'Wheel', 'Motor'],
+    blueprintId: 'starter-simple-car',
+  },
+  {
+    id: 'skid-steer',
+    title: 'Skid Steer',
+    summary: 'A compact four-wheeled loader with a front bucket on a powered hinge.',
+    partList: ['Chassis', 'Wheel x4', 'Motor', 'Powered Hinge', 'Crane Arm', 'Bucket'],
+    blueprintId: 'starter-skid-steer',
+  },
+  {
+    id: 'mobile-crane',
+    title: 'Mobile Crane',
+    summary: 'A wheeled crane platform with winch, rope, and hook for lifting on the move.',
+    partList: ['Chassis', 'Wheel x2', 'Motor', 'Winch', 'Rope', 'Hook', 'Counterweight'],
+    blueprintId: 'starter-mobile-crane',
+  },
+  {
     id: 'hook-hoist',
     title: 'Hook Hoist',
     summary: 'A simple hoist that shortens a rope to lift a hooked load.',
