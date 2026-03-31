@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { PART_CATEGORIES, type ExperimentManifest, type PrimitiveInstance, type PrimitiveKind } from '../lib/types';
 
-const QUICK_PARTS: PrimitiveKind[] = [
+export const QUICK_PARTS: PrimitiveKind[] = [
   'motor',
   'gear',
   'wheel',
@@ -371,11 +371,11 @@ function deriveSuggestions(
     .slice(0, 5);
 }
 
-function isPublicPartVisible(kind: PrimitiveKind) {
+export function isPublicPartVisible(kind: PrimitiveKind) {
   return !HIDDEN_PUBLIC_PART_KINDS.has(kind);
 }
 
-function countKinds(manifest: ExperimentManifest) {
+export function countKinds(manifest: ExperimentManifest) {
   const counts: Record<PrimitiveKind, number> = {
     node: 0,
     beam: 0,
@@ -474,7 +474,7 @@ function connectionHintForKind(kind: PrimitiveKind) {
   }
 }
 
-function iconForPart(kind: PrimitiveKind): string {
+export function iconForPart(kind: PrimitiveKind): string {
   switch (kind) {
     case 'node':
       return 'O';
@@ -557,7 +557,7 @@ function iconForPart(kind: PrimitiveKind): string {
   }
 }
 
-function labelForPart(kind: PrimitiveKind): string {
+export function labelForPart(kind: PrimitiveKind): string {
   switch (kind) {
     case 'rail-segment':
       return 'Rail';

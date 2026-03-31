@@ -6,7 +6,7 @@ import { ChallengeToast } from '../components/ChallengeToast';
 import { HudOverlay } from '../components/HudOverlay';
 import { InspectorPanel } from '../components/InspectorPanel';
 import { MachineCanvas } from '../components/MachineCanvas';
-import { PartPalette } from '../components/PartPalette';
+import { ToolbarPartStrip } from '../components/ToolbarPartStrip';
 import { RouteSkeleton } from '../components/RouteSkeleton';
 import { createBlueprintFromExperiment, mountBlueprintToManifest } from '../lib/blueprints';
 import { useAppBoot } from '../lib/app-boot';
@@ -27,9 +27,6 @@ import {
   type ChallengeDefinition,
 } from '../lib/challenges';
 import {
-  countActiveCargo,
-  countActiveGearPairs,
-  countPoweredConveyors,
   evaluateProject,
   getGoalProgress,
 } from '../lib/jobs';
@@ -268,15 +265,6 @@ export function BuildPage() {
     [sourceBlueprintId],
   );
 
-  // Desktop detection for adaptive part controls
-  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 901px)').matches);
-  useEffect(() => {
-    const mql = window.matchMedia('(min-width: 901px)');
-    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
-
   const [manifest, setManifest] = useState<ExperimentManifest | null>(null);
   const [playState, setPlayState] = useState<DraftPlayState | null>(null);
   const [selectedPrimitiveId, setSelectedPrimitiveId] = useState<string>();
@@ -293,7 +281,6 @@ export function BuildPage() {
   const [recipeShelfOpen, setRecipeShelfOpen] = useState(false);
   const [handbookOpen, setHandbookOpen] = useState(false);
   const [connectMenuOpen, setConnectMenuOpen] = useState(false);
-  const [tabletPartsOpen, setTabletPartsOpen] = useState(false);
   const [connectionKind, setConnectionKind] = useState<BuilderConnectionKind | null>(null);
   const [connectionSourceId, setConnectionSourceId] = useState<string | null>(null);
   const [connectionViaIds, setConnectionViaIds] = useState<string[]>([]);
@@ -1290,17 +1277,6 @@ export function BuildPage() {
     : activePuzzleChallenge
       ? (puzzleComplete ? `${activePuzzleChallenge.title} solved. Remix it or load another puzzle.` : `${activePuzzleChallenge.objective} ${activePuzzleChallenge.hint}`)
       : projectGuide?.detail ?? activeProjectStep?.instruction ?? (jobComplete ? job?.hints[0] : undefined);
-  const machineActivity = manifest
-    ? deriveMachineActivity(manifest, runtimeSnapshot)
-    : { active: false, label: 'Preparing the canvas', tone: 'info' as NoticeTone };
-  const builderFocus = manifest
-    ? deriveBuilderFocus(manifest, placingKind, selectedPrimitive, activeProjectStep, machineActivity)
-    : {
-        title: 'Preparing the yard',
-        description: 'Loading the current draft.',
-        assistantPrompt: 'Explain how to get started in Mason\'s Lab.',
-      };
-
   const handlePlacePrimitive = useCallback(
     (x: number, y: number) => {
       if (!manifest || !placingKind) {
@@ -1349,7 +1325,6 @@ export function BuildPage() {
       }
 
       setPlacingKind(kind);
-      setTabletPartsOpen(false);
       setConnectionKind(null);
       setConnectionSourceId(null);
       setConnectionViaIds([]);
@@ -1357,15 +1332,14 @@ export function BuildPage() {
       setOpenUtilityPanel(null);
       if (kind) {
         setSelectedPrimitiveId(undefined);
-        showStatus(`Place ${labelForPrimitive(kind)} on the canvas. Click the same part tile or press Escape to stop placing.`, 'info');
       }
     },
-    [paletteAllowedKinds, showStatus],
+    [paletteAllowedKinds],
   );
 
   const startConnectionMode = useCallback((kind: BuilderConnectionKind) => {
     setConnectMenuOpen(false);
-    setTabletPartsOpen(false);
+
     setHandbookOpen(false);
     setOpenUtilityPanel(null);
     setPlacingKind(null);
@@ -1393,28 +1367,17 @@ export function BuildPage() {
       setConnectionViaIds([]);
     }
     setConnectMenuOpen(false);
-    setTabletPartsOpen(false);
+
     setOpenUtilityPanel((current) => (current === panel ? null : panel));
   }, [connectionKind]);
 
   const toggleConnectChooser = useCallback(() => {
     setHandbookOpen(false);
     setOpenUtilityPanel(null);
-    setTabletPartsOpen(false);
+
     setConnectMenuOpen((current) => !current);
     setPlacingKind(null);
   }, []);
-
-  const toggleTabletParts = useCallback(() => {
-    if (connectionKind) {
-      cancelConnectionMode('Connect cancelled. Opened the parts shelf.');
-    } else {
-      setConnectMenuOpen(false);
-    }
-    setHandbookOpen(false);
-    setOpenUtilityPanel(null);
-    setTabletPartsOpen((current) => !current);
-  }, [cancelConnectionMode, connectionKind]);
 
   const handleConnectPick = useCallback((primitiveId: string) => {
     if (!manifest || !connectionKind) {
@@ -1544,12 +1507,10 @@ export function BuildPage() {
         }
         if (placingKind) {
           setPlacingKind(null);
-          showStatus('Placement cancelled. You are back in select mode.', 'info');
           return;
         }
         if (selectedPrimitiveId) {
           setSelectedPrimitiveId(undefined);
-          showStatus('Selection cleared.', 'info');
         }
         return;
       }
@@ -1650,7 +1611,7 @@ export function BuildPage() {
     setConnectionSourceId(null);
     setConnectionViaIds([]);
     setConnectMenuOpen(false);
-    setTabletPartsOpen(false);
+
     setOpenUtilityPanel(null);
     setHandbookOpen(false);
     setFlashToast(false);
@@ -1734,33 +1695,14 @@ export function BuildPage() {
     ? 'loading-engine'
     : 'ready';
   const visibleRecipes = recipeShelfOpen ? ENGINEERING_RECIPES : ENGINEERING_RECIPES.slice(0, 3);
-  const connectionSource = connectionSourceId
-    ? manifest.primitives.find((primitive) => primitive.id === connectionSourceId)
-    : undefined;
-  const builderToolbarHint = connectionKind
-    ? connectionSource
-      ? `Connecting with ${labelForBuilderConnection(connectionKind)}. First part: ${labelForPrimitive(connectionSource.kind)}. Click the second part on the canvas.`
-      : `Connecting with ${labelForBuilderConnection(connectionKind)}. Click the first part on the canvas.`
-    : activeProjectStep?.instruction ?? null;
-  const builderToolbarTitle = connectionKind
-    ? `Connect ${labelForBuilderConnection(connectionKind)}`
-    : activeProjectStep?.title
-      ?? (placingKind || selectedPrimitive ? builderFocus.title : 'Free Build');
-  const builderEyebrow = job
-    ? job.kind === 'starter-project'
-      ? 'Guided Build'
-      : 'Workshop'
-    : 'Free Build';
   const compactCompletionHint = jobComplete && job
     ? job.hints[0] ?? 'The machine works. Save it or go back to the yard.'
     : null;
   const toolbarNotice = buildReadiness === 'loading-engine'
     ? { tone: 'info' as const, message: 'Loading the live engine and stage renderer.' }
     : statusNotice;
-  const showBuilderTopCopy = Boolean(connectionKind || activeProjectStep || activePuzzleChallenge);
   const showBuilderStatusChips = Boolean(goalProgress || jobComplete || toolbarNotice);
-  const desktopConnectOverlayOpen = connectMenuOpen && !connectionKind;
-  const mobileConnectOverlayOpen = connectMenuOpen && !connectionKind;
+  const connectOverlayOpen = connectMenuOpen && !connectionKind;
   const renderConnectChooser = (className: string, id?: string) => (
     <div id={id} className={className}>
       <div className="builder-connect-head">
@@ -1798,14 +1740,13 @@ export function BuildPage() {
   return (
     <div className="page page-build">
       <section className="panel builder-stage-shell">
-        <div className={`builder-stage-topbar${showBuilderTopCopy ? '' : ' is-compact'}`}>
-          {showBuilderTopCopy ? (
-            <div className="builder-stage-copy">
-            <p className="eyebrow">{builderEyebrow}</p>
-            <strong>{builderToolbarTitle}</strong>
-            {builderToolbarHint ? <p>{builderToolbarHint}</p> : null}
-            </div>
-          ) : null}
+        <div className="builder-stage-topbar is-unified">
+          <ToolbarPartStrip
+            manifest={manifest}
+            selectedKind={placingKind}
+            allowedKinds={paletteAllowedKinds}
+            onSelectKind={handleSelectKind}
+          />
 
           <div className="builder-stage-actions">
             <button
@@ -1826,17 +1767,6 @@ export function BuildPage() {
             </button>
             <button
               type="button"
-              className={`toolbar-btn builder-tablet-parts-button${tabletPartsOpen ? ' is-active' : ''}`}
-              aria-expanded={tabletPartsOpen}
-              aria-controls="builder-mobile-parts"
-              title="Parts"
-              onClick={toggleTabletParts}
-            >
-              <svg className="toolbar-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="3" width="5.5" height="5.5" rx="1"/><rect x="11.5" y="3" width="5.5" height="5.5" rx="1"/><rect x="3" y="11.5" width="5.5" height="5.5" rx="1"/><rect x="11.5" y="11.5" width="5.5" height="5.5" rx="1"/></svg>
-              <span className="toolbar-label">Parts</span>
-            </button>
-            <button
-              type="button"
               className="toolbar-btn"
               aria-pressed={handbookOpen}
               title="Workbook"
@@ -1846,7 +1776,7 @@ export function BuildPage() {
                   setConnectionSourceId(null);
                   setConnectionViaIds([]);
                 }
-                setTabletPartsOpen(false);
+            
                 setConnectMenuOpen(false);
                 setOpenUtilityPanel(null);
                 setHandbookOpen((current) => !current);
@@ -1958,26 +1888,9 @@ export function BuildPage() {
 
         <div className="builder-workbench">
           <div className="canvas-column builder-canvas-panel" style={{ position: 'relative' }}>
-            {tabletPartsOpen ? (
-              <div id="builder-mobile-parts" className="builder-mobile-overlay builder-mobile-parts-overlay">
-                <PartPalette
-                  manifest={manifest}
-                  selectedPrimitive={selectedPrimitive}
-                  selectedKind={placingKind}
-                  activeJobHint={activeJobHint}
-                  allowedKinds={paletteAllowedKinds}
-                  projectTitle={job?.title}
-                  projectStepTitle={activeProjectStep?.title}
-                  onSelectKind={handleSelectKind}
-                />
-              </div>
-            ) : null}
-            {mobileConnectOverlayOpen ? (
-              renderConnectChooser('builder-connect-chooser builder-mobile-overlay builder-mobile-connect-overlay', 'builder-mobile-connect')
-            ) : null}
-            {desktopConnectOverlayOpen ? (
-              <div className="builder-desktop-overlay builder-connect-overlay-panel">
-                {renderConnectChooser('builder-connect-chooser builder-desktop-connect-overlay')}
+            {connectOverlayOpen ? (
+              <div className="builder-connect-overlay-panel">
+                {renderConnectChooser('builder-connect-chooser')}
               </div>
             ) : null}
             {openUtilityPanel ? (
@@ -2038,7 +1951,7 @@ export function BuildPage() {
               connectionMode={connectionKind ? { kind: connectionKind, sourceId: connectionSourceId } : null}
               activeJobHint={activeJobHint}
               projectGuide={projectGuide}
-              quickControls={isDriveMode ? null : isDesktop ? null : selectedQuickControls}
+              quickControls={isDriveMode ? null : selectedQuickControls}
               driveMode={isDriveMode && driveableVehicle ? {
                 speed: Math.abs(Number(readControlValue(
                   mergedControls, controlValues,
@@ -2091,19 +2004,6 @@ export function BuildPage() {
             />
           </div>
 
-          <aside className="right-rail builder-parts-rail">
-            <PartPalette
-              manifest={manifest}
-              selectedPrimitive={selectedPrimitive}
-              selectedKind={placingKind}
-              activeJobHint={activeJobHint}
-              allowedKinds={paletteAllowedKinds}
-              projectTitle={job?.title}
-              projectStepTitle={activeProjectStep?.title}
-              partControls={isDesktop && !isDriveMode ? selectedQuickControls : null}
-              onSelectKind={handleSelectKind}
-            />
-          </aside>
         </div>
       </section>
 
@@ -2246,17 +2146,6 @@ export function BuildPage() {
 
 type NoticeTone = 'info' | 'success' | 'warning';
 
-interface MachineActivity {
-  active: boolean;
-  label: string;
-  tone: NoticeTone;
-}
-
-interface BuilderFocus {
-  title: string;
-  description: string;
-  assistantPrompt: string;
-}
 
 interface ProjectCanvasGuide {
   title: string;
@@ -2305,131 +2194,6 @@ function normalizePlayStateForManifest(
 
 function manifestsMatch(left: ExperimentManifest, right: ExperimentManifest) {
   return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function deriveMachineActivity(
-  manifest: ExperimentManifest,
-  runtime: RuntimeSnapshot,
-): MachineActivity {
-  const liveGearPairs = countActiveGearPairs(manifest, runtime);
-  if (liveGearPairs > 0) {
-    return {
-      active: true,
-      label: `${liveGearPairs} live gear mesh${liveGearPairs === 1 ? '' : 'es'}`,
-      tone: 'success',
-    };
-  }
-
-  const poweredConveyors = countPoweredConveyors(manifest);
-  const activeCargo = countActiveCargo(manifest, runtime);
-  if (activeCargo > 0) {
-    return {
-      active: true,
-      label: `${activeCargo} cargo block${activeCargo === 1 ? '' : 's'} riding the conveyor`,
-      tone: 'success',
-    };
-  }
-
-  if (runtime.beltPowered) {
-    return {
-      active: true,
-      label: `Loader powered at ${Math.round(runtime.throughput ?? 0)}/s`,
-      tone: 'success',
-    };
-  }
-
-  const hopperFill = runtime.hopperFill ?? 0;
-  if (hopperFill > 0) {
-    return {
-      active: true,
-      label: `Hopper fill at ${Math.round(hopperFill)}`,
-      tone: 'success',
-    };
-  }
-
-  if (poweredConveyors > 0) {
-    return {
-      active: true,
-      label: `${poweredConveyors} powered conveyor${poweredConveyors === 1 ? '' : 's'} ready`,
-      tone: 'success',
-    };
-  }
-
-  if ((runtime.telemetry.trainSpeed ?? 0) > 0) {
-    return {
-      active: true,
-      label: `Train moving at ${runtime.telemetry.trainSpeed}`,
-      tone: 'success',
-    };
-  }
-
-  if (manifest.primitives.length === 0) {
-    return {
-      active: false,
-      label: 'Empty canvas',
-      tone: 'info',
-    };
-  }
-
-  return {
-    active: false,
-    label: 'Nothing moving yet',
-    tone: 'warning',
-  };
-}
-
-function deriveBuilderFocus(
-  manifest: ExperimentManifest,
-  placingKind: PrimitiveKind | null,
-  selectedPrimitive: PrimitiveInstance | undefined,
-  activeProjectStep: { title: string; instruction: string; assistantPrompt: string } | null,
-  machineActivity: MachineActivity,
-): BuilderFocus {
-  if (placingKind) {
-    return {
-      title: `Place ${labelForPrimitive(placingKind)}`,
-      description: placementInstructionForKind(placingKind),
-      assistantPrompt: `I am placing a ${labelForPrimitive(placingKind)}. Tell me where it should go and what I should add next.`,
-    };
-  }
-
-  if (activeProjectStep) {
-    return {
-      title: activeProjectStep.title,
-      description: activeProjectStep.instruction,
-      assistantPrompt: activeProjectStep.assistantPrompt,
-    };
-  }
-
-  if (manifest.primitives.length === 0) {
-    return {
-      title: 'Build one thing that moves in under 30 seconds',
-      description: 'Start with a motor, then drop a gear or wheel inside its green ring so the canvas gives you immediate feedback.',
-      assistantPrompt: 'Build a simple motor and gear demo I can remix by hand.',
-    };
-  }
-
-  if (selectedPrimitive) {
-    return {
-      title: `Tune ${selectedPrimitive.label ?? labelForPrimitive(selectedPrimitive.kind)}`,
-      description: selectedInstructionForKind(selectedPrimitive.kind),
-      assistantPrompt: `Explain how a ${labelForPrimitive(selectedPrimitive.kind)} should behave in this machine and what I should connect to it next.`,
-    };
-  }
-
-  if (machineActivity.active) {
-    return {
-      title: 'The machine is alive',
-      description: 'Now tune it, extend it, or save it while the current idea is still working.',
-      assistantPrompt: 'Explain why this machine works and suggest the most useful next improvement.',
-    };
-  }
-
-  return {
-    title: 'Pick the next useful part',
-    description: 'Use the recommended drawer on the right. It now responds to what is already on the canvas.',
-    assistantPrompt: 'Look at my current machine and tell me the next part that will make it do something visible.',
-  };
 }
 
 function deriveProjectGuide(
@@ -2797,51 +2561,6 @@ function describePlacedPrimitive(
         message: `${labelForPrimitive(kind)} placed. Drag it to reposition or use the Inspector for safe edits.`,
         tone: 'info',
       };
-  }
-}
-
-function placementInstructionForKind(kind: PrimitiveKind) {
-  switch (kind) {
-    case 'gear':
-      return 'Drop it inside a motor ring or touching another gear if you want instant feedback.';
-    case 'wheel':
-      return 'Wheels respond best inside a motor ring or pressed against a powered gear.';
-    case 'conveyor':
-      return 'Conveyors come alive once cargo, a hopper, and a nearby motor join the setup.';
-    case 'rail-segment':
-      return 'Rails now grab nearby locomotives and wagons automatically when you place or drag them onto the line.';
-    case 'station-zone':
-      return 'Stations turn passing wagons into deliberate load or unload moments.';
-    case 'trampoline':
-      return 'Trampolines are clearest when something can fall straight onto them.';
-    case 'hook':
-      return 'Hooks work best when they sit below a winch so Connect → Rope can link them together.';
-    default:
-      return 'Place it on the canvas, then test what it changed right away.';
-  }
-}
-
-function selectedInstructionForKind(kind: PrimitiveKind) {
-  switch (kind) {
-    case 'motor':
-      return 'Motors only feel satisfying when a gear, wheel, or conveyor can actually pick up their power.';
-    case 'gear':
-      return 'Gears need either motor reach or contact with another gear. Bigger gears trade speed for force.';
-    case 'wheel':
-      return 'Wheels can be powered directly by a motor or indirectly by a gear mesh.';
-    case 'conveyor':
-      return 'Conveyors are best tested with cargo on top and a hopper waiting at the far end.';
-    case 'rail-segment':
-      return 'Rails drive snapped locomotives and wagons automatically, and switches decide which branch they take.';
-    case 'locomotive':
-    case 'wagon':
-      return 'Drag it onto a rail to snap it into train mode, or leave it free and bolt on wheels, motors, or tools like any other body.';
-    case 'station-zone':
-      return 'Set the station to load or unload, then run a wagon through its rectangle to see the transfer.';
-    case 'trampoline':
-      return 'Trampolines bounce loose parts best when something can drop onto the springy strip from above.';
-    default:
-      return 'Drag it to reposition it, or change its safe numeric fields in the Inspector.';
   }
 }
 

@@ -387,69 +387,14 @@ export function MachineCanvas({
   }, []); // intentionally empty
 
   const hint = (() => {
-    if (placingKind) return `Click canvas to place ${labelFor(placingKind)}`;
+    if (placingKind) return 'Esc to cancel';
     if (connectionMode?.kind) {
       const source = connectionMode.sourceId
         ? manifest.primitives.find((primitive) => primitive.id === connectionMode.sourceId)
         : undefined;
-      const connector = labelForConnectionMode(connectionMode.kind);
-      return source
-        ? `${connector} — ${labelFor(source.kind)} locked in. Click the second part.`
-        : `${connector} — click the first part, then the second part.`;
+      return source ? 'Click second part · Esc to cancel' : 'Click first part · Esc to cancel';
     }
-    const sel = manifest.primitives.find((p) => p.id === selectedPrimitiveId);
-    if (!sel) return 'Click a part to select · Drag to reposition';
-    switch (sel.kind) {
-      case 'motor':    return 'Motor — place a rotating part inside the green ring to drive it';
-      case 'gear':     return 'Gear — mesh it with another rotating part, or mount it onto a chassis as part of a drivetrain';
-      case 'wheel':    return 'Wheel — inside Motor range it spins · touching a rotating part it meshes';
-      case 'chassis':
-        return 'Chassis — use arrow keys to drive · mount wheels + motor to build a vehicle';
-      case 'pulley':
-      case 'chain-sprocket':
-        return sel.kind === 'pulley'
-          ? 'Pulley — use it as a rotating part, or use Connect to add a belt around matching parts'
-          : 'Chain sprocket — place it in a motor ring, touch another rotating part, or use Connect to add a chain';
-      case 'flywheel':
-        return 'Flywheel — feed it from a motor, gear train, or belt link to store motion';
-      case 'gearbox':
-        return 'Gearbox — place rotating parts on both sides to transmit a ratio change';
-      case 'piston':
-        return 'Piston — bring a motor nearby to extend and retract it';
-      case 'rack':
-        return 'Rack — place a rotating part near one end to drive linear motion';
-      case 'spring-linear':
-        return 'Linear spring — it stores stretch and compression between the anchor and plate';
-      case 'crane-arm':
-        return 'Crane arm — mount it to a chassis, hinge it to a base, or rope the tip to a winch';
-      case 'counterweight':
-        return 'Counterweight — a heavy block that can balance or collide with other parts';
-      case 'bucket':
-        return 'Bucket — hang it from a rope, bolt it to an arm, or let it collect nearby material';
-      case 'water':
-        return 'Water — bodies inside the pool slow down and get a buoyancy lift';
-      case 'station-zone':
-        return 'Station zone — wagons load or unload when they pass through this highlighted area';
-      case 'trampoline':
-        return 'Trampoline — drop a ball, cargo block, or rock onto it for a visible bounce';
-      case 'rail-switch':
-        return 'Rail switch — use quick controls or Machine Controls to choose the left or right branch before the train reaches it';
-      case 'locomotive':
-        return 'Locomotive — drag it onto rail to snap it in, or leave it free and bolt on wheels, tools, and cargo';
-      case 'winch':
-        return 'Winch — rope it to a hook, bucket, crane arm, or cargo block, then use Up and Down to reel it in or out';
-      case 'chute':
-        return 'Chute — a static sloped guide for falling material';
-      case 'silo-bin':
-        return 'Silo bin — a storage pocket that can open or close its floor gate with quick controls';
-      case 'tunnel':
-        return 'Tunnel — a covered channel that keeps flow between two openings';
-      case 'conveyor': return 'Conveyor — place Cargo Blocks on it · Motor within 300px boosts speed';
-      case 'hopper':   return 'Hopper — drop Cargo Blocks above it to fill up';
-      case 'node':     return 'Node — place another Node, then Connect with Beam';
-      case 'hook':     return 'Hook — connect it to a winch with Rope, then clip cargo blocks to the hook';
-      default:         return `${sel.label ?? sel.kind} — drag to move · Inspector to adjust`;
-    }
+    return null;
   })();
 
   const sunnyStatus = 'Sunny Workyard';
@@ -472,7 +417,7 @@ export function MachineCanvas({
             </span>
           ) : null}
         </div>
-        <span className="canvas-hint">{hint}</span>
+        {hint ? <span className="canvas-hint">{hint}</span> : null}
       </div>
       {activeJobHint && (
         <div className="canvas-job-hint">
