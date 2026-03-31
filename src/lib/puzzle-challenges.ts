@@ -257,51 +257,30 @@ export const PUZZLE_CHALLENGES: PuzzleChallengeDefinition[] = [
   },
   {
     id: 'powered-sweep',
-    title: 'Powered Sweep',
-    emoji: '🦾',
-    description: 'Drive the crane arm with a powered hinge and sweep the cargo into the hopper.',
-    objective: 'Create a real powered hinge, run it, and sweep one block into the hopper.',
-    hint: 'Use the chassis as the base, connect the arm to it with Powered Hinge, and keep the motor nearby.',
-    allowedKinds: ['motor', 'crane-arm', 'chassis', 'counterweight', 'bucket', 'cargo-block'],
+    title: 'Bowling Score',
+    emoji: '🎳',
+    description: 'Roll the ball down the ramp and knock the cargo blocks into the hopper.',
+    objective: 'Position the ramp so the ball smashes the blocks into the hopper in one shot.',
+    hint: 'A steeper ramp gives the ball more speed. Aim so the blocks scatter toward the hopper.',
+    allowedKinds: ['ramp', 'ball', 'wall', 'platform', 'cargo-block'],
     createParts: () => [
-      { id: 'powered-sweep-motor', kind: 'motor', label: 'Motor', config: { x: 160, y: 270, rpm: 90, torque: 1.2, powerState: true } },
-      { id: 'powered-sweep-base', kind: 'chassis', label: 'Base', config: { x: 310, y: 360, width: 200, height: 24 } },
-      { id: 'powered-sweep-arm', kind: 'crane-arm', label: 'Crane Arm', config: { x: 310, y: 340, length: 170 } },
-      { id: 'powered-sweep-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 260, y: 340, mass: 6, attachedToId: 'powered-sweep-arm' } },
-      { id: 'powered-sweep-cargo', kind: 'cargo-block', label: 'Cargo', config: { x: 525, y: 350, weight: 1 } },
-      { id: 'powered-sweep-hopper', kind: 'hopper', label: 'Hopper', config: { x: 730, y: 390, capacity: 8, releaseRate: 0, fill: 0 } },
+      { id: 'bowling-ramp', kind: 'ramp', label: 'Launch Ramp', config: { x: 220, y: 360, width: 240, angle: -18 } },
+      { id: 'bowling-ball', kind: 'ball', label: 'Bowling Ball', config: { x: 130, y: 260, radius: 18 } },
+      { id: 'bowling-cargo-a', kind: 'cargo-block', label: 'Block A', config: { x: 610, y: 490, weight: 0.6 } },
+      { id: 'bowling-cargo-b', kind: 'cargo-block', label: 'Block B', config: { x: 638, y: 490, weight: 0.6 } },
+      { id: 'bowling-cargo-c', kind: 'cargo-block', label: 'Block C', config: { x: 624, y: 464, weight: 0.6 } },
+      { id: 'bowling-hopper', kind: 'hopper', label: 'Hopper', config: { x: 740, y: 440, capacity: 8, releaseRate: 0, fill: 0 } },
     ],
-    successCheck: (manifest, runtime) => manifest.primitives.some((primitive) => primitive.kind === 'powered-hinge-link')
-      && ((runtime.hopperFill ?? 0) >= 1 || (runtime.bodyPositions?.['powered-sweep-cargo']?.x ?? 0) > 650),
+    successCheck: (_manifest, runtime) => (runtime.hopperFill ?? 0) >= 1,
     createSolvedCase: () => {
       const manifest = createPuzzleChallengeManifest('powered-sweep')!;
-      manifest.primitives.push({
-        id: 'powered-sweep-hinge',
-        kind: 'powered-hinge-link',
-        label: 'Powered Hinge',
-        config: {
-          fromId: 'powered-sweep-base',
-          toId: 'powered-sweep-arm',
-          pivotX: 310,
-          pivotY: 340,
-          fromLocalX: 0,
-          fromLocalY: -18,
-          toLocalX: -85,
-          toLocalY: 0,
-          minAngle: -55,
-          maxAngle: 65,
-          motorId: 'powered-sweep-motor',
-          targetAngle: 35,
-          enabled: true,
-        },
-      });
       return {
         manifest,
         runtime: createRuntimeSnapshot({
           hopperFill: 1,
           bodyPositions: {
-            'powered-sweep-arm': { x: 390, y: 330, angle: 0.45 },
-            'powered-sweep-cargo': { x: 710, y: 380, angle: 0 },
+            'bowling-ball': { x: 650, y: 480, angle: 0 },
+            'bowling-cargo-a': { x: 730, y: 430, angle: 0.3 },
           },
         }),
       };
@@ -317,7 +296,7 @@ export const PUZZLE_CHALLENGES: PuzzleChallengeDefinition[] = [
     allowedKinds: ['spring-linear', 'ball', 'bucket', 'wall', 'platform'],
     createParts: () => [
       { id: 'spring-mail-platform', kind: 'platform', label: 'Launch Platform', config: { x: 240, y: 360, width: 240 } },
-      { id: 'spring-mail-spring', kind: 'spring-linear', label: 'Spring', config: { x: 180, y: 300, orientation: 'vertical', restLength: 60, stiffness: 0.08 } },
+      { id: 'spring-mail-spring', kind: 'spring-linear', label: 'Spring', config: { x: 180, y: 300, orientation: 'vertical', restLength: 60, stiffness: 0.22 } },
       { id: 'spring-mail-ball', kind: 'ball', label: 'Ball', config: { x: 180, y: 185, radius: 14 } },
       { id: 'spring-mail-bucket', kind: 'bucket', label: 'Bucket', config: { x: 520, y: 250, width: 42, depth: 28 } },
       { id: 'spring-mail-wall', kind: 'wall', label: 'Guide Wall', config: { x: 380, y: 285, height: 130 } },
@@ -366,37 +345,35 @@ export const PUZZLE_CHALLENGES: PuzzleChallengeDefinition[] = [
   },
   {
     id: 'flywheel-nudge',
-    title: 'Flywheel Nudge',
-    emoji: '🌀',
-    description: 'Spin up the flywheel and let the stored motion finish the last push.',
-    objective: 'Use a belt-driven flywheel to keep the loader moving long enough to score.',
-    hint: 'The flywheel only helps once it is connected to the motor-driven side and can coast the last bit.',
-    allowedKinds: ['motor', 'pulley', 'flywheel', 'cargo-block', 'hopper', 'platform'],
+    title: 'Ramp Relay',
+    emoji: '🛝',
+    description: 'Guide the ball down through the obstacle course and into the bucket at the bottom.',
+    objective: 'Place ramps so the ball zig-zags all the way down into the bucket.',
+    hint: 'Alternate ramp angles left and right so the ball bounces from level to level.',
+    allowedKinds: ['ramp', 'platform', 'wall', 'ball', 'bucket'],
     createParts: () => [
-      { id: 'flywheel-nudge-motor', kind: 'motor', label: 'Motor', config: { x: 170, y: 280, rpm: 95, torque: 1.2, powerState: true } },
-      { id: 'flywheel-nudge-pulley', kind: 'pulley', label: 'Drive Pulley', config: { x: 260, y: 280, radius: 28 } },
-      { id: 'flywheel-nudge-flywheel', kind: 'flywheel', label: 'Flywheel', config: { x: 420, y: 280, radius: 38, mass: 6 } },
-      { id: 'flywheel-nudge-platform', kind: 'platform', label: 'Runway', config: { x: 520, y: 360, width: 420 } },
-      { id: 'flywheel-nudge-cargo', kind: 'cargo-block', label: 'Cargo', config: { x: 520, y: 320, weight: 1 } },
-      { id: 'flywheel-nudge-hopper', kind: 'hopper', label: 'Hopper', config: { x: 790, y: 360, capacity: 8, releaseRate: 0, fill: 0 } },
+      { id: 'relay-ball', kind: 'ball', label: 'Ball', config: { x: 160, y: 100, radius: 14 } },
+      { id: 'relay-wall-left', kind: 'wall', label: 'Left Wall', config: { x: 110, y: 300, height: 400 } },
+      { id: 'relay-wall-right', kind: 'wall', label: 'Right Wall', config: { x: 850, y: 300, height: 400 } },
+      { id: 'relay-shelf-a', kind: 'platform', label: 'Shelf A', config: { x: 500, y: 200, width: 160 } },
+      { id: 'relay-shelf-b', kind: 'platform', label: 'Shelf B', config: { x: 350, y: 340, width: 140 } },
+      { id: 'relay-bucket', kind: 'bucket', label: 'Bucket', config: { x: 750, y: 480, width: 48, depth: 32 } },
     ],
-    successCheck: (manifest, runtime) => manifest.primitives.some((primitive) => primitive.kind === 'flywheel')
-      && manifest.primitives.some((primitive) => primitive.kind === 'belt-link')
-      && (runtime.hopperFill ?? 0) >= 1,
+    successCheck: ballNearBucket,
     createSolvedCase: () => {
       const manifest = createPuzzleChallengeManifest('flywheel-nudge')!;
-      manifest.primitives.push({
-        id: 'flywheel-nudge-belt',
-        kind: 'belt-link',
-        label: 'Drive Belt',
-        config: { fromId: 'flywheel-nudge-pulley', toId: 'flywheel-nudge-flywheel', length: 160 },
-      });
+      manifest.primitives.push(
+        createPrimitive({ id: 'relay-ramp-1', kind: 'ramp', label: 'Ramp 1', config: { x: 280, y: 155, width: 200, angle: 12 } }),
+        createPrimitive({ id: 'relay-ramp-2', kind: 'ramp', label: 'Ramp 2', config: { x: 600, y: 290, width: 220, angle: -14 } }),
+        createPrimitive({ id: 'relay-ramp-3', kind: 'ramp', label: 'Ramp 3', config: { x: 520, y: 430, width: 240, angle: 10 } }),
+      );
       return {
         manifest,
         runtime: createRuntimeSnapshot({
-          hopperFill: 1,
-          rotations: { 'flywheel-nudge-flywheel': 1.6 },
-          bodyPositions: { 'flywheel-nudge-cargo': { x: 790, y: 350, angle: 0 } },
+          bodyPositions: {
+            'relay-ball': { x: 750, y: 480, angle: 0 },
+            'relay-bucket': { x: 750, y: 480, angle: 0 },
+          },
         }),
       };
     },
@@ -471,39 +448,32 @@ export const PUZZLE_CHALLENGES: PuzzleChallengeDefinition[] = [
   },
   {
     id: 'counterweight-rescue',
-    title: 'Counterweight Rescue',
-    emoji: '⚖️',
-    description: 'Use the counterweight to keep the arm calm enough to lift the load over the blocker.',
-    objective: 'Lift the cargo above the blocker while the arm stays reasonably level.',
-    hint: 'A calmer arm is easier to lift from. Balance first, then shorten the rope.',
-    allowedKinds: ['winch', 'crane-arm', 'counterweight', 'cargo-block', 'wall', 'platform'],
+    title: 'Chute Drop',
+    emoji: '📦',
+    description: 'Catch the falling cargo in a chute and slide it into the hopper.',
+    objective: 'Position chutes so the cargo tumbles from the high shelf into the hopper below.',
+    hint: 'Angle the first chute to catch the drop, then chain a second chute to redirect into the hopper.',
+    allowedKinds: ['chute', 'ramp', 'platform', 'wall', 'cargo-block'],
     createParts: () => [
-      { id: 'counterweight-rescue-winch', kind: 'winch', label: 'Winch', config: { x: 140, y: 120, speed: 28, ropeLength: 230 } },
-      { id: 'counterweight-rescue-platform', kind: 'platform', label: 'Base Platform', config: { x: 320, y: 390, width: 240 } },
-      { id: 'counterweight-rescue-arm', kind: 'crane-arm', label: 'Crane Arm', config: { x: 250, y: 320, length: 180 } },
-      { id: 'counterweight-rescue-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 220, y: 320, mass: 6, attachedToId: 'counterweight-rescue-arm' } },
-      { id: 'counterweight-rescue-cargo', kind: 'cargo-block', label: 'Cargo', config: { x: 360, y: 350, weight: 1 } },
-      { id: 'counterweight-rescue-wall', kind: 'wall', label: 'Blocker', config: { x: 540, y: 360, height: 180 } },
+      { id: 'chute-drop-shelf', kind: 'platform', label: 'High Shelf', config: { x: 200, y: 160, width: 160 } },
+      { id: 'chute-drop-cargo-a', kind: 'cargo-block', label: 'Cargo A', config: { x: 200, y: 130, weight: 1 } },
+      { id: 'chute-drop-cargo-b', kind: 'cargo-block', label: 'Cargo B', config: { x: 230, y: 130, weight: 1 } },
+      { id: 'chute-drop-wall', kind: 'wall', label: 'Divider', config: { x: 480, y: 350, height: 220 } },
+      { id: 'chute-drop-hopper', kind: 'hopper', label: 'Hopper', config: { x: 720, y: 440, capacity: 8, releaseRate: 0, fill: 0 } },
     ],
-    successCheck: (_manifest, runtime) => {
-      const cargoY = runtime.bodyPositions?.['counterweight-rescue-cargo']?.y ?? 999;
-      const armAngle = Math.abs(runtime.bodyPositions?.['counterweight-rescue-arm']?.angle ?? 1);
-      return cargoY < 220 && armAngle < 0.35;
-    },
+    successCheck: (_manifest, runtime) => (runtime.hopperFill ?? 0) >= 1,
     createSolvedCase: () => {
       const manifest = createPuzzleChallengeManifest('counterweight-rescue')!;
-      manifest.primitives.push({
-        id: 'counterweight-rescue-rope',
-        kind: 'rope',
-        label: 'Arm Rope',
-        config: { fromId: 'counterweight-rescue-winch', toId: 'counterweight-rescue-arm', length: 220 },
-      });
+      manifest.primitives.push(
+        createPrimitive({ id: 'chute-drop-chute-1', kind: 'chute', label: 'Chute 1', config: { x: 320, y: 220, length: 160, angle: 22 } }),
+        createPrimitive({ id: 'chute-drop-chute-2', kind: 'chute', label: 'Chute 2', config: { x: 600, y: 350, length: 140, angle: -18 } }),
+      );
       return {
         manifest,
         runtime: createRuntimeSnapshot({
+          hopperFill: 1,
           bodyPositions: {
-            'counterweight-rescue-arm': { x: 330, y: 290, angle: 0.08 },
-            'counterweight-rescue-cargo': { x: 630, y: 180, angle: 0 },
+            'chute-drop-cargo-a': { x: 720, y: 430, angle: 0.1 },
           },
         }),
       };

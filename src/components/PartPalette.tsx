@@ -5,6 +5,7 @@ const QUICK_PARTS: PrimitiveKind[] = [
   'motor',
   'gear',
   'wheel',
+  'chassis',
   'conveyor',
   'hopper',
   'winch',
