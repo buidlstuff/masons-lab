@@ -100,12 +100,12 @@ function createRecipes(): EngineeringRecipe[] {
             { id: 'skid-whl-rear', kind: 'wheel', label: 'Rear Wheel', config: { x: 375, y: 530, radius: 26, traction: 0.95, attachedToId: 'skid-chassis', attachOffsetX: 70, attachOffsetY: 20 } },
             { id: 'skid-motor', kind: 'motor', label: 'Motor', config: { x: 330, y: 486, rpm: 50, torque: 1.5, powerState: false, attachedToId: 'skid-chassis', attachOffsetX: 30, attachOffsetY: -15 } },
             { id: 'skid-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 370, y: 490, mass: 6, attachedToId: 'skid-chassis', attachOffsetX: 65, attachOffsetY: -12 } },
-            // Arm pivot: chassis fromLocalX=-65 means pivot is at chassis.x + (-65) = 235.
-            // Arm toLocalX is at the arm's left end.  Arm x should be placed so left end = pivot.
-            // Arm length=100, left end = arm.x - 50, so arm.x = 235 + 50 = 285.
-            // Arm y should match pivot y: chassis.y + (-12) = 494.
-            { id: 'skid-arm', kind: 'crane-arm', label: 'Boom Arm', config: { x: 285, y: 494, length: 100 } },
-            { id: 'skid-bucket', kind: 'bucket', label: 'Bucket', config: { x: 335, y: 494, width: 40, depth: 28, attachedToId: 'skid-arm' } },
+            // Arm pivot: chassis fromLocalX=-65 means pivot world X = chassis.x + (-65) = 235.
+            // crane-arm body center = cfg.x + length/2.  toLocalX=-50 is the arm's left end.
+            // For left end to land at pivot: cfg.x + length/2 - 50 = 235 → cfg.x = 235.
+            // Body center = 235 + 50 = 285.  Arm right tip = 285 + 50 = 335.
+            { id: 'skid-arm', kind: 'crane-arm', label: 'Boom Arm', config: { x: 235, y: 494, length: 100 } },
+            { id: 'skid-bucket', kind: 'bucket', label: 'Bucket', config: { x: 335, y: 480, width: 40, depth: 28, attachedToId: 'skid-arm', attachOffsetX: 50, attachOffsetY: 0 } },
             {
               id: 'excavator-hinge',
               kind: 'powered-hinge-link',

@@ -1,5 +1,5 @@
 # Mason's Lab — Current State
-*Last updated: March 29, 2026. This file is the handoff doc for future Codex sessions.*
+*Last updated: March 30, 2026. This file is the handoff doc for future Codex sessions.*
 
 ---
 
@@ -306,13 +306,16 @@ Important current UX facts:
   - Free Build
 - the launcher now has a playful workshop-sign / blueprint aesthetic and a visible Winky mascot
 - the build screen now reads as one attached workbench shell:
-  - top HUD with `Connect Parts`
-  - large central canvas
-  - persistent right-side parts shelf
+  - top HUD with icon-based toolbar buttons (Connect, Book, Inspect, Controls, Clear, Undo, Save)
+  - large central canvas (with drive HUD overlay when driving a vehicle)
+  - persistent right-side parts shelf (with inline part controls on desktop)
 - the parts shelf is always expanded and meant to be the main browsing surface
 - `Inspector` and `Machine Controls` are now optional dropdown utilities, not permanent rail cards
 - guided build still constrains useful parts by step, but the full shelf remains visible
 - silly scenes and challenge browsing live on the launcher/home surface, not in the builder rail
+- clicking a vehicle enters gamepad drive mode with a bottom HUD strip (arrow buttons + speed + exit)
+- part controls are adaptive: sidebar on desktop (≥901px), canvas overlay on mobile/iPad
+- drive mode suppresses part controls — only the drive HUD shows
 
 ---
 
@@ -341,6 +344,12 @@ These are still important and should be treated as hard guardrails:
 
 7. **Keep connector semantics explicit.**
    Do not collapse `rope`, `belt-link`, and `chain-link` back into one overloaded primitive.
+
+8. **Crane-arm body position must match the hinge pivot.**
+   `crane-arm` body creation uses `cfg.x + length/2` as the center. The hinge `toLocalX = -length/2` is the arm's left end. If a powered-hinge-link connects to the arm, `cfg.x` must be set so `cfg.x + length/2 - length/2 = pivot world X`. Wrong cfg.x causes a violent initial snap and instability.
+
+9. **Do not create duplicate constraints on crane-arms.**
+   If a hinge-link or powered-hinge-link already connects to a crane-arm (as `toId`), the arm-pivot world-point constraint must be skipped. Having both pins the assembly to world space, making vehicles float.
 
 ---
 
@@ -397,6 +406,8 @@ Challenge layer:
 - throttled evaluation
 - multiple categories
 - saved progress in Dexie
+- 10 puzzle challenges in `puzzle-challenges.ts` with `createParts()`, `successCheck()`, and `createSolvedCase()`
+- design principle: simple chain-reaction physics (ball → ramp → hopper), immediately understandable like Cut the Rope / Flappy Bird
 
 Scene layer:
 
@@ -440,6 +451,65 @@ That was needed during recent verification runs.
 
 ---
 
+## March 30 Session — Physics Fixes, UX Overhaul, Content Polish
+
+### Physics part fixes (physics-engine.ts)
+
+**Rack** — was drifting sideways and rotating. Fixed in `tickRacks()` by adding angle locking (zero angular velocity, clamp to nearest 0/90/180/270), and cross-axis position correction that prevents lateral slide.
+
+**Axle** — was inert (didn't connect to nearby rotating parts). Fixed by creating revolute joint constraints to nearby rotating parts (gears, pulleys, flywheels, wheels) within `rotatingRadius + 20` distance.
+
+**Spring-linear** — was too weak to bounce anything. Default stiffness bumped from 0.05 → 0.15, damping from 0.2 → 0.12.
+
+**Skid steer crane-arm floating** — the crane-arm code unconditionally pinned the arm to a fixed world point, even when a powered-hinge-link already provided the pivot. Added `hasHinge` check: if a hinge-link or powered-hinge-link targets the arm, skip the world-point constraint.
+
+**Skid steer arm position** — the arm `cfg.x` was 285 but body creation adds `length/2`, placing the body center at 335. The hinge pivot expected the arm left-end at 235, causing a 50px violent snap on spawn. Fixed `cfg.x` to 235 (body center 285, left end 235 = pivot). Also added `attachOffsetX: 50` to bucket so it attaches at the arm tip, not the arm center.
+
+### Puzzle challenge overhaul (puzzle-challenges.ts, puzzle-challenge-launcher.ts)
+
+Three broken puzzles replaced with simple chain-reaction designs:
+- **powered-sweep** → **Bowling Score** 🎳 — roll a ball down a ramp into a cargo pyramid
+- **flywheel-nudge** → **Ramp Relay** 🛝 — position ramps for a marble run into a bucket
+- **counterweight-rescue** → **Chute Drop** 📦 — chain chutes from a shelf over a wall into a hopper
+
+**spring-mail** stiffness fixed: 0.08 → 0.22 (spring was too weak to launch the ball).
+
+### Silly scene fixes (silly-scenes.ts)
+
+- **spring-circus** — all three springs stiffness bumped 0.08 → 0.22
+- **ice-rink** — added second ramp, boundary walls, more objects for better pinball action
+
+### Chassis in parts palette (PartPalette.tsx)
+
+Added `'chassis'` to the QUICK_PARTS array so users can drop a car chassis directly.
+
+### Drive mode — gamepad HUD (BuildPage.tsx, MachineCanvas.tsx)
+
+Clicking a complete vehicle (chassis + wheels + motor) now enters a non-blocking drive mode:
+- **Gamepad HUD**: centered-bottom translucent strip with ◀/▶ steering arrows (52px touch targets), live speed readout, Exit Drive button
+- **Pointer events**: `onPointerDown`/`onPointerUp`/`onPointerLeave` for touch+mouse support
+- **Keyboard**: Left/Right arrows steer, Escape exits drive mode
+- **`driveableVehicle` useMemo**: detects if selected part belongs to a complete vehicle, returns `{ chassisId, motorId, motor }` or null
+- **Auto-enter/exit**: drive mode activates when driveableVehicle is non-null, exits when null
+- **Suppresses popup**: the old blocking quick-controls card is hidden during drive mode
+
+### Toolbar icon simplification (BuildPage.tsx, index.css)
+
+All 8 toolbar buttons now use inline SVG icons + short labels (`Connect`, `Book`, `Inspect`, `Controls`, `Clear`, `Undo`, `Save`). Compact `.toolbar-btn` layout: flex column, 19px icon, 0.68rem label. On narrow screens labels can hide to icon-only with title tooltip.
+
+### Adaptive part controls (BuildPage.tsx, PartPalette.tsx, index.css)
+
+- **Desktop (≥901px)**: part controls render in the PartPalette sidebar instead of a canvas overlay
+- **Mobile/iPad (<901px)**: part controls render as the existing canvas overlay popup
+- **Drive mode**: both suppressed (HUD handles it)
+- Uses `window.matchMedia('(min-width: 901px)')` with change listener for responsive switching.
+
+### Known remaining issue: skid steer boom controls in drive mode
+
+When in drive mode, the quick controls are suppressed by the drive HUD. This means the boom hinge controls (Boom Run toggle, Boom Angle slider) are inaccessible during driving. A future improvement should surface boom controls alongside the drive HUD for vehicles that have additional articulated parts.
+
+---
+
 ## Short Summary Of Where We Are
 
 Mason's Lab is now a fairly broad sandbox with:
@@ -454,6 +524,9 @@ Mason's Lab is now a fairly broad sandbox with:
 - challenges
 - a game-style launcher that separates mode selection from the builder
 - a builder UI centered on `connect + canvas + parts`
+- **gamepad-style drive mode** for vehicles with touch/keyboard steering
+- **icon-based toolbar** replacing text-heavy buttons
+- **adaptive part controls** (sidebar on desktop, popup on mobile)
 
 The next work should be **tightening clarity, polish, and reliability**, not exploding the part count much further.
 
