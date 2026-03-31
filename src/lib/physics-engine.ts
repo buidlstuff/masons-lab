@@ -875,8 +875,8 @@ export function buildMatterWorld(
             bodyB: plateBody,
             pointB: { x: 0, y: 0 },
             length: cfg.restLength ?? 40,
-            stiffness: cfg.stiffness ?? 0.05,
-            damping: 0.2,
+            stiffness: cfg.stiffness ?? 0.15,
+            damping: 0.12,
             label: `spring-${prim.id}`,
           }),
         );
@@ -1100,6 +1100,36 @@ export function buildMatterWorld(
       if (Math.hypot(rackEndX - gCfg.x, rackEndY - gCfg.y) < radius + 30) {
         gearRackMap.set(rack.id, gear.id);
         break;
+      }
+    }
+  }
+
+  // ── Axle revolute joints ───────────────────────────────────────────────────
+  // Axles are static pivot points. Any rotating part (gear, wheel, pulley, etc.)
+  // whose center is within its radius + 20px gets pinned to the axle with a
+  // revolute joint so it can spin freely in place.
+  for (const axle of manifest.primitives.filter((p) => p.kind === 'axle')) {
+    const axleBody = bodyMap.get(axle.id);
+    if (!axleBody) continue;
+    const aCfg = axle.config as { x: number; y: number };
+    for (const rp of rotatingPrims) {
+      const rpBody = bodyMap.get(rp.id);
+      if (!rpBody) continue;
+      const rpCfg = rp.config as { x: number; y: number };
+      const dist = Math.hypot(rpCfg.x - aCfg.x, rpCfg.y - aCfg.y);
+      if (dist < rotatingRadius(rp) + 20) {
+        Matter.World.add(
+          engine.world,
+          Matter.Constraint.create({
+            bodyA: axleBody,
+            pointA: { x: 0, y: 0 },
+            bodyB: rpBody,
+            pointB: { x: 0, y: 0 },
+            length: 0,
+            stiffness: 1,
+            label: `axle-pivot-${axle.id}-${rp.id}`,
+          }),
+        );
       }
     }
   }
@@ -1708,11 +1738,25 @@ export function buildMatterWorld(
       if (!gearPrim) continue;
       const radius = rotatingRadius(gearPrim);
       const linearVel = gearBody.angularVelocity * radius;
-      const cfg = prim.config as { orientation?: string };
+      const cfg = prim.config as { x: number; y: number; orientation?: string };
+      const vertical = cfg.orientation === 'vertical';
+
+      // Drive rack along its axis from gear rotation
       Matter.Body.setVelocity(rackBody, {
-        x: cfg.orientation === 'vertical' ? 0 : linearVel,
-        y: cfg.orientation === 'vertical' ? linearVel : 0,
+        x: vertical ? 0 : linearVel,
+        y: vertical ? linearVel : 0,
       });
+
+      // Lock angle so rack stays straight
+      Matter.Body.setAngle(rackBody, 0);
+      Matter.Body.setAngularVelocity(rackBody, 0);
+
+      // Constrain cross-axis drift: keep rack on its original rail line
+      if (vertical) {
+        Matter.Body.setPosition(rackBody, { x: cfg.x, y: rackBody.position.y });
+      } else {
+        Matter.Body.setPosition(rackBody, { x: rackBody.position.x, y: cfg.y });
+      }
     }
   }
 
