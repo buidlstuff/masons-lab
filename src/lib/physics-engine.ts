@@ -152,7 +152,7 @@ export function buildMatterWorld(
     constraint: Matter.Constraint;
   }> = [];
   const cargoSpawnMap = new Map<string, { x: number; y: number }>();
-  const cargoIdleTimers = new Map<string, number>();
+  // cargo only respawns when truly out of bounds (off-screen)
   const cargoRespawnCounts = new Map<string, number>();
   const cargoStates = new Map<string, CargoLifecycleState>();
   const collectedCargoIds = new Set<string>();
@@ -1639,10 +1639,7 @@ export function buildMatterWorld(
     }
   }
 
-  function recoverLostCargo(dt: number, supportedCargoIds: Set<string>) {
-    const conveyors = manifest.primitives.filter((primitive) => primitive.kind === 'conveyor');
-    const hoppers = manifest.primitives.filter((primitive) => primitive.kind === 'hopper');
-    const stations = manifest.primitives.filter((primitive) => primitive.kind === 'station-zone');
+  function recoverLostCargo(_dt: number, supportedCargoIds: Set<string>) {
     const sceneKeepsLooseCargo = manifest.metadata.tags.includes('silly-scene');
 
     for (const cargo of manifest.primitives.filter((primitive) => MATERIAL_KINDS.includes(primitive.kind))) {
@@ -1651,39 +1648,12 @@ export function buildMatterWorld(
         continue;
       }
 
-      const nearConveyor = conveyors.some((conveyor) =>
-        distToPolyline(
-          (conveyor.config as { path: Array<{ x: number; y: number }> }).path,
-          body.position.x,
-          body.position.y,
-        ) <= 72,
-      );
-      const nearHopper = hoppers.some((hopper) => {
-        const cfg = hopper.config as { x: number; y: number };
-        return Math.hypot(cfg.x - body.position.x, cfg.y - body.position.y) <= 120;
-      });
-      const nearStation = stations.some((station) => {
-        const cfg = station.config as { x: number; y: number; width?: number; height?: number };
-        return Math.abs(cfg.x - body.position.x) <= (cfg.width ?? 120) / 2 + 24
-          && Math.abs(cfg.y - body.position.y) <= (cfg.height ?? 80) / 2 + 24;
-      });
       const inWater = bodyInsideWaterZone(body);
 
       if (supportedCargoIds.has(cargo.id) || inWater) {
-        cargoIdleTimers.set(cargo.id, 0);
         cargoStates.set(cargo.id, inWater && body.speed > 0.25 ? 'airborne' : 'supported');
         continue;
       }
-
-      const groundedAwayFromFlow = body.position.y > CANVAS_H - 24
-        && !nearConveyor
-        && !nearHopper
-        && !nearStation
-        && !inWater;
-      const idle = groundedAwayFromFlow && body.speed < 0.18
-        ? (cargoIdleTimers.get(cargo.id) ?? 0) + dt
-        : 0;
-      cargoIdleTimers.set(cargo.id, idle);
 
       if (sceneKeepsLooseCargo) {
         cargoStates.set(cargo.id, supportedCargoIds.has(cargo.id) ? 'supported' : body.speed > 0.25 ? 'airborne' : 'spawned');
@@ -1691,16 +1661,14 @@ export function buildMatterWorld(
       }
 
       const outOfBounds = body.position.y > CANVAS_H + 90 || body.position.x < -80 || body.position.x > CANVAS_W + 80;
-      const irrecoverable = groundedAwayFromFlow && idle > 1.25;
 
-      if (outOfBounds || irrecoverable) {
+      if (outOfBounds) {
         const respawn = cargoSpawnMap.get(cargo.id) ?? (cargo.config as { x: number; y: number });
         Matter.Body.setStatic(body, false);
         Matter.Body.setPosition(body, { x: respawn.x, y: respawn.y });
         Matter.Body.setVelocity(body, { x: 0, y: 0 });
         Matter.Body.setAngle(body, 0);
         Matter.Body.setAngularVelocity(body, 0);
-        cargoIdleTimers.set(cargo.id, 0);
         cargoRespawnCounts.set(cargo.id, (cargoRespawnCounts.get(cargo.id) ?? 0) + 1);
         cargoStates.set(cargo.id, 'respawned');
         lostCargoCount += 1;

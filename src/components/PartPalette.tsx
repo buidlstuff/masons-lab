@@ -477,81 +477,81 @@ function connectionHintForKind(kind: PrimitiveKind) {
 export function iconForPart(kind: PrimitiveKind): string {
   switch (kind) {
     case 'node':
-      return 'O';
+      return '⊙';
     case 'wheel':
-      return 'o';
+      return '◎';
     case 'chassis':
-      return 'U';
+      return '▬';
     case 'axle':
-      return '=';
+      return '⊷';
     case 'ramp':
-      return '/';
+      return '⟋';
     case 'platform':
-      return '_';
+      return '▭';
     case 'wall':
-      return '|';
+      return '▯';
     case 'motor':
-      return 'M';
+      return '⚙';
     case 'gear':
-      return '*';
+      return '⛭';
     case 'piston':
-      return 'T';
+      return '⇕';
     case 'rack':
-      return 'R';
+      return '⫼';
     case 'spring-linear':
-      return 'S';
+      return '⌇';
     case 'crane-arm':
-      return 'A';
+      return '⌐';
     case 'counterweight':
-      return 'C';
+      return '⏚';
     case 'bucket':
-      return 'B';
+      return '⊔';
     case 'pulley':
-      return 'P';
+      return '◉';
     case 'chain-sprocket':
-      return 'C';
+      return '⚙';
     case 'flywheel':
-      return 'F';
+      return '◉';
     case 'gearbox':
-      return 'G';
+      return '⚙';
     case 'winch':
-      return 'W';
+      return '⟳';
     case 'hook':
-      return 'J';
+      return '⌒';
     case 'rail-segment':
-      return '=';
+      return '╌';
     case 'rail-switch':
-      return 'Y';
+      return '⑂';
     case 'locomotive':
-      return 'L';
+      return '🚂';
     case 'wagon':
-      return 'U';
+      return '🚃';
     case 'station-zone':
-      return 'Z';
+      return '🚏';
     case 'conveyor':
-      return '>';
+      return '⇢';
     case 'hopper':
-      return 'V';
+      return '▽';
     case 'cargo-block':
-      return '#';
+      return '▣';
     case 'material-pile':
-      return '^';
+      return '⛰';
     case 'water':
-      return '~';
+      return '≋';
     case 'hinge':
-      return 'H';
+      return '⊹';
     case 'chute':
-      return '/';
+      return '⟋';
     case 'silo-bin':
-      return 'S';
+      return '⊡';
     case 'tunnel':
-      return 'T';
+      return '⊓';
     case 'ball':
-      return '0';
+      return '●';
     case 'rock':
-      return '@';
+      return '⬟';
     case 'trampoline':
-      return 'T';
+      return '⌣';
     default:
       return '+';
   }

@@ -386,22 +386,13 @@ export function MachineCanvas({
     };
   }, []); // intentionally empty
 
-  const hint = (() => {
-    if (placingKind) return 'Esc to cancel';
-    if (connectionMode?.kind) {
-      const source = connectionMode.sourceId
-        ? manifest.primitives.find((primitive) => primitive.id === connectionMode.sourceId)
-        : undefined;
-      return source ? 'Click second part · Esc to cancel' : 'Click first part · Esc to cancel';
-    }
-    return null;
-  })();
-
   const sunnyStatus = 'Sunny Workyard';
   const canvasModeLabel = placingKind
-    ? `Place ${labelFor(placingKind)}`
+    ? `Place ${labelFor(placingKind)} · Esc cancel`
     : connectionMode?.kind
-      ? `Connect ${labelForConnectionMode(connectionMode.kind)}`
+      ? connectionMode.sourceId
+        ? `Click second part · Esc cancel`
+        : `Click first part · Esc cancel`
       : selectedPrimitiveId
         ? 'Selected part'
         : null;
@@ -417,7 +408,6 @@ export function MachineCanvas({
             </span>
           ) : null}
         </div>
-        {hint ? <span className="canvas-hint">{hint}</span> : null}
       </div>
       {activeJobHint && (
         <div className="canvas-job-hint">
