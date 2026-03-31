@@ -457,22 +457,17 @@ export function MachineCanvas({
             </div>
           ) : quickControls && quickControls.actions.length > 0 ? (
             <div className="canvas-quick-controls" role="group" aria-label={quickControls.title}>
-              <div className="canvas-quick-controls-copy">
-                <strong>{quickControls.title}</strong>
-                {quickControls.subtitle ? <span>{quickControls.subtitle}</span> : null}
-              </div>
-              <div className="canvas-quick-controls-row">
-                {quickControls.actions.map((action) => (
-                  <button
-                    key={action.id}
-                    type="button"
-                    className={`canvas-quick-control-button${action.active ? ' is-active' : ''}`}
-                    onClick={action.onPress}
-                  >
-                    {action.label}
-                  </button>
-                ))}
-              </div>
+              <span className="canvas-quick-controls-title">{quickControls.title}</span>
+              {quickControls.actions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  className={`canvas-quick-control-button${action.active ? ' is-active' : ''}`}
+                  onClick={action.onPress}
+                >
+                  {action.label}
+                </button>
+              ))}
             </div>
           ) : null}
         </div>
