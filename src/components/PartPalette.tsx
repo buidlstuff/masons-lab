@@ -23,6 +23,13 @@ const HIDDEN_PUBLIC_PART_KINDS = new Set<PrimitiveKind>([
   'station-zone',
 ]);
 
+interface PartControlAction {
+  id: string;
+  label: string;
+  active?: boolean;
+  onPress: () => void;
+}
+
 interface PartPaletteProps {
   manifest: ExperimentManifest;
   selectedPrimitive?: PrimitiveInstance;
@@ -31,6 +38,7 @@ interface PartPaletteProps {
   allowedKinds?: PrimitiveKind[];
   projectTitle?: string;
   projectStepTitle?: string;
+  partControls?: { title: string; subtitle?: string; actions: PartControlAction[] } | null;
   onSelectKind: (kind: PrimitiveKind | null) => void;
 }
 
@@ -47,6 +55,7 @@ export function PartPalette({
   allowedKinds,
   projectTitle,
   projectStepTitle,
+  partControls,
   onSelectKind,
 }: PartPaletteProps) {
   const counts = useMemo(() => countKinds(manifest), [manifest]);
@@ -148,6 +157,27 @@ export function PartPalette({
           </button>
         ) : null}
       </div>
+
+      {partControls && partControls.actions.length > 0 ? (
+        <div className="palette-part-controls">
+          <div className="palette-part-controls-header">
+            <strong>{partControls.title}</strong>
+            {partControls.subtitle ? <span className="muted">{partControls.subtitle}</span> : null}
+          </div>
+          <div className="palette-part-controls-row">
+            {partControls.actions.map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                className={`palette-control-btn${action.active ? ' is-active' : ''}`}
+                onClick={action.onPress}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {showSelectionStrip ? (
         <div className="palette-selection-strip">

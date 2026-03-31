@@ -2363,6 +2363,61 @@ button:disabled {
   line-height: 1.35;
 }
 
+/* ── Sidebar part controls ─────────────────────────────────────────── */
+.palette-part-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid rgba(61, 120, 132, 0.12);
+  background: rgba(230, 245, 240, 0.45);
+}
+
+.palette-part-controls-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.palette-part-controls-header strong {
+  font-size: 0.92rem;
+}
+
+.palette-part-controls-header .muted {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.palette-part-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.palette-control-btn {
+  min-height: 2.2rem;
+  padding: 0 0.75rem;
+  border: 1px solid rgba(61, 120, 132, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 252, 245, 0.96);
+  color: #2a4a4e;
+  font-size: 0.84rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.palette-control-btn:hover {
+  background: rgba(240, 250, 246, 0.98);
+  border-color: rgba(61, 120, 132, 0.3);
+}
+
+.palette-control-btn.is-active {
+  background: rgba(255, 248, 214, 0.98);
+  border-color: rgba(216, 151, 28, 0.28);
+  color: #8a5a0a;
+}
+
 .palette-panel-body {
   display: flex;
   flex-direction: column;
@@ -2803,6 +2858,76 @@ button:disabled {
   color: #8a5a0a;
 }
 
+/* ── Drive Mode HUD ─────────────────────────────────────────────────── */
+.drive-hud {
+  position: absolute;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(20, 30, 25, 0.82);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.drive-hud-arrow {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 1.4rem;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: none;
+  transition: background 0.1s;
+}
+
+.drive-hud-arrow:active,
+.drive-hud-arrow:hover {
+  background: rgba(130, 220, 180, 0.35);
+}
+
+.drive-hud-speed {
+  min-width: 5.5rem;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.9);
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.drive-hud-exit {
+  margin-left: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.drive-hud-exit:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
 .assistant-skeleton {
   display: flex;
   flex-direction: column;
@@ -2984,6 +3109,30 @@ button:disabled {
 
 .builder-stage-actions button {
   padding: 0.62rem 0.92rem;
+}
+
+/* ── Toolbar icon buttons ─────────────────────────────────────────── */
+.toolbar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 0.38rem 0.58rem 0.28rem !important;
+  min-width: 3rem;
+}
+
+.toolbar-icon {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+}
+
+.toolbar-label {
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  opacity: 0.8;
 }
 
 .builder-tablet-parts-button {

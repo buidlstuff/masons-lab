@@ -268,9 +268,19 @@ export function BuildPage() {
     [sourceBlueprintId],
   );
 
+  // Desktop detection for adaptive part controls
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 901px)').matches);
+  useEffect(() => {
+    const mql = window.matchMedia('(min-width: 901px)');
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
   const [manifest, setManifest] = useState<ExperimentManifest | null>(null);
   const [playState, setPlayState] = useState<DraftPlayState | null>(null);
   const [selectedPrimitiveId, setSelectedPrimitiveId] = useState<string>();
+  const [isDriveMode, setIsDriveMode] = useState(false);
   const [placingKind, setPlacingKind] = useState<PrimitiveKind | null>(null);
   const [controlValues, setControlValues] = useState<Record<string, string | number | boolean>>({});
   const [telemetry, setTelemetry] = useState<BuildTelemetry>({});
@@ -979,6 +989,36 @@ export function BuildPage() {
     return actions.length > 0 ? { title, subtitle, actions } : null;
   }, [controlValues, mergedControls, runtimeSnapshot.trainTrackId, selectedPrimitive, manifest, setBoundControlValue]);
 
+  // ── Driveable vehicle detection ─────────────────────────────────────────────
+  // Returns the motor primitive when the selected part belongs to a complete
+  // vehicle (chassis + wheels + motor). Used for drive mode and keyboard driving.
+  const driveableVehicle = useMemo(() => {
+    if (!manifest || !selectedPrimitiveId) return null;
+    const sel = manifest.primitives.find((p) => p.id === selectedPrimitiveId);
+    if (!sel) return null;
+    let chassisId: string | undefined;
+    if (sel.kind === 'chassis') chassisId = sel.id;
+    else if (sel.kind === 'wheel' || sel.kind === 'motor')
+      chassisId = (sel.config as { attachedToId?: string }).attachedToId;
+    if (!chassisId) return null;
+    const chassis = manifest.primitives.find((p) => p.id === chassisId && p.kind === 'chassis');
+    if (!chassis) return null;
+    const hasWheels = manifest.primitives.some(
+      (p) => p.kind === 'wheel' && (p.config as { attachedToId?: string }).attachedToId === chassisId,
+    );
+    if (!hasWheels) return null;
+    const motor = manifest.primitives.find(
+      (p) => p.kind === 'motor' && (p.config as { attachedToId?: string }).attachedToId === chassisId,
+    ) ?? null;
+    if (!motor) return null;
+    return { chassisId, motorId: motor.id, motor };
+  }, [manifest, selectedPrimitiveId]);
+
+  // Auto-enter/exit drive mode when a driveable vehicle is selected
+  useEffect(() => {
+    setIsDriveMode(Boolean(driveableVehicle));
+  }, [driveableVehicle]);
+
   const projectState = useMemo(
     () => (job && manifest ? evaluateProject(job, manifest, runtimeSnapshot, playState) : null),
     [job, manifest, playState, runtimeSnapshot],
@@ -1291,6 +1331,7 @@ export function BuildPage() {
   const handleSelectPrimitive = useCallback(
     (primitiveId?: string) => {
       setSelectedPrimitiveId(primitiveId);
+      if (!primitiveId) setIsDriveMode(false);
     },
     [],
   );
@@ -1526,61 +1567,35 @@ export function BuildPage() {
   }, [cancelConnectionMode, connectionKind, manifest, persistDraft, placingKind, selectedPrimitiveId, showStatus]);
 
   // ── Keyboard vehicle driving ────────────────────────────────────────────
-  // Arrow keys drive a vehicle when a chassis (or its motor/wheel) is selected.
-  // Left/Right = drive, release = stop.
+  // Arrow keys drive when drive mode is active. Escape exits drive mode.
   useEffect(() => {
-    if (!manifest) return;
+    if (!isDriveMode || !driveableVehicle) return;
+    if (connectionKind) return; // suppress during connection mode
 
-    // Find the chassis associated with the current selection
-    function findVehicleMotor(): PrimitiveInstance | null {
-      if (!manifest || !selectedPrimitiveId) return null;
-      const sel = manifest.primitives.find((p) => p.id === selectedPrimitiveId);
-      if (!sel) return null;
-
-      let chassisId: string | undefined;
-      if (sel.kind === 'chassis') {
-        chassisId = sel.id;
-      } else if (sel.kind === 'wheel' || sel.kind === 'motor') {
-        chassisId = (sel.config as { attachedToId?: string }).attachedToId;
-      }
-      if (!chassisId) return null;
-
-      // Verify it's actually a chassis with wheels (a vehicle)
-      const chassis = manifest.primitives.find((p) => p.id === chassisId && p.kind === 'chassis');
-      if (!chassis) return null;
-      const hasWheels = manifest.primitives.some(
-        (p) => p.kind === 'wheel' && (p.config as { attachedToId?: string }).attachedToId === chassisId,
-      );
-      if (!hasWheels) return null;
-
-      return manifest.primitives.find(
-        (p) => p.kind === 'motor' && (p.config as { attachedToId?: string }).attachedToId === chassisId,
-      ) ?? null;
-    }
+    const vehicle = driveableVehicle; // capture for closures
 
     function handleDriveKeyDown(event: KeyboardEvent) {
       const tag = (event.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
 
-      const motor = findVehicleMotor();
-      if (!motor) return;
+      if (event.key === 'Escape') {
+        setIsDriveMode(false);
+        setSelectedPrimitiveId(undefined);
+        return;
+      }
+
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       event.preventDefault();
 
-      const baseRpm = Math.abs(Number((motor.config as { rpm?: number }).rpm ?? 60));
+      const baseRpm = Math.abs(Number((vehicle.motor.config as { rpm?: number }).rpm ?? 60));
       const rpm = event.key === 'ArrowLeft' ? -baseRpm : baseRpm;
-
-      setBoundControlValue(motor.id, 'rpm', rpm, baseRpm);
-      setBoundControlValue(motor.id, 'powerState', true, false);
+      setBoundControlValue(vehicle.motorId, 'rpm', rpm, baseRpm);
+      setBoundControlValue(vehicle.motorId, 'powerState', true, false);
     }
 
     function handleDriveKeyUp(event: KeyboardEvent) {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-
-      const motor = findVehicleMotor();
-      if (!motor) return;
-
-      setBoundControlValue(motor.id, 'powerState', false, true);
+      setBoundControlValue(vehicle.motorId, 'powerState', false, true);
     }
 
     window.addEventListener('keydown', handleDriveKeyDown);
@@ -1589,7 +1604,7 @@ export function BuildPage() {
       window.removeEventListener('keydown', handleDriveKeyDown);
       window.removeEventListener('keyup', handleDriveKeyUp);
     };
-  }, [manifest, selectedPrimitiveId, setBoundControlValue]);
+  }, [isDriveMode, driveableVehicle, connectionKind, setBoundControlValue]);
 
   useEffect(() => {
     function handleAdultToolsToggle() {
@@ -1795,8 +1810,9 @@ export function BuildPage() {
           <div className="builder-stage-actions">
             <button
               type="button"
-              className={`builder-connect-cta${connectMenuOpen || connectionKind ? ' is-active' : ''}`}
+              className={`toolbar-btn builder-connect-cta${connectMenuOpen || connectionKind ? ' is-active' : ''}`}
               aria-pressed={connectMenuOpen || Boolean(connectionKind)}
+              title="Connect Parts"
               onClick={() => {
                 if (connectionKind) {
                   cancelConnectionMode('Connect cancelled. You are back in select mode.');
@@ -1805,20 +1821,25 @@ export function BuildPage() {
                 toggleConnectChooser();
               }}
             >
-              Connect Parts
+              <svg className="toolbar-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M7 13l6-6"/><circle cx="5.5" cy="14.5" r="2.5"/><circle cx="14.5" cy="5.5" r="2.5"/></svg>
+              <span className="toolbar-label">Connect</span>
             </button>
             <button
               type="button"
-              className={`builder-tablet-parts-button${tabletPartsOpen ? ' is-active' : ''}`}
+              className={`toolbar-btn builder-tablet-parts-button${tabletPartsOpen ? ' is-active' : ''}`}
               aria-expanded={tabletPartsOpen}
               aria-controls="builder-mobile-parts"
+              title="Parts"
               onClick={toggleTabletParts}
             >
-              Parts
+              <svg className="toolbar-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="3" y="3" width="5.5" height="5.5" rx="1"/><rect x="11.5" y="3" width="5.5" height="5.5" rx="1"/><rect x="3" y="11.5" width="5.5" height="5.5" rx="1"/><rect x="11.5" y="11.5" width="5.5" height="5.5" rx="1"/></svg>
+              <span className="toolbar-label">Parts</span>
             </button>
             <button
               type="button"
+              className="toolbar-btn"
               aria-pressed={handbookOpen}
+              title="Workbook"
               onClick={() => {
                 if (connectionKind) {
                   setConnectionKind(null);
@@ -1831,31 +1852,41 @@ export function BuildPage() {
                 setHandbookOpen((current) => !current);
               }}
             >
-              Workbook
+              <svg className="toolbar-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5A1.5 1.5 0 014.5 3h11A1.5 1.5 0 0117 4.5v11a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 15.5z"/><path d="M7 3v14"/><path d="M10 7h4M10 10h4"/></svg>
+              <span className="toolbar-label">Book</span>
             </button>
             <button
               type="button"
+              className="toolbar-btn"
               aria-pressed={openUtilityPanel === 'inspector'}
+              title="Inspector"
               onClick={() => toggleUtilityPanel('inspector')}
             >
-              Inspector
+              <svg className="toolbar-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="8.5" cy="8.5" r="5"/><path d="M12 12l4.5 4.5"/></svg>
+              <span className="toolbar-label">Inspect</span>
             </button>
             <button
               type="button"
+              className="toolbar-btn"
               aria-pressed={openUtilityPanel === 'controls'}
               disabled={mergedControls.length === 0}
+              title="Controls"
               onClick={() => toggleUtilityPanel('controls')}
             >
-              Controls
+              <svg className="toolbar-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 5h12M4 10h12M4 15h12"/><circle cx="7" cy="5" r="1.5" fill="currentColor"/><circle cx="13" cy="10" r="1.5" fill="currentColor"/><circle cx="9" cy="15" r="1.5" fill="currentColor"/></svg>
+              <span className="toolbar-label">Controls</span>
             </button>
-            <button type="button" onClick={handleClearBuild}>
-              Clear Build
+            <button type="button" className="toolbar-btn" title="Clear Build" onClick={handleClearBuild}>
+              <svg className="toolbar-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 7h10M8 7V5.5a1 1 0 011-1h2a1 1 0 011 1V7"/><path d="M6 7l.7 8.4a1.5 1.5 0 001.5 1.35h3.6a1.5 1.5 0 001.5-1.35L14 7"/></svg>
+              <span className="toolbar-label">Clear</span>
             </button>
-            <button type="button" onClick={handleUndo}>
-              Undo
+            <button type="button" className="toolbar-btn" title="Undo" onClick={handleUndo}>
+              <svg className="toolbar-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8l4-4M4 8l4 4"/><path d="M4 8h9a4 4 0 010 8H10"/></svg>
+              <span className="toolbar-label">Undo</span>
             </button>
-            <button type="button" onClick={handleSaveMachine}>
-              Save
+            <button type="button" className="toolbar-btn" title="Save" onClick={handleSaveMachine}>
+              <svg className="toolbar-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h8l4 4v8a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"/><path d="M7 3v4h6V3"/><path d="M7 13h6"/></svg>
+              <span className="toolbar-label">Save</span>
             </button>
           </div>
         </div>
@@ -2007,7 +2038,27 @@ export function BuildPage() {
               connectionMode={connectionKind ? { kind: connectionKind, sourceId: connectionSourceId } : null}
               activeJobHint={activeJobHint}
               projectGuide={projectGuide}
-              quickControls={selectedQuickControls}
+              quickControls={isDriveMode ? null : isDesktop ? null : selectedQuickControls}
+              driveMode={isDriveMode && driveableVehicle ? {
+                speed: Math.abs(Number(readControlValue(
+                  mergedControls, controlValues,
+                  driveableVehicle.motorId, 'rpm',
+                  Number((driveableVehicle.motor.config as { rpm?: number }).rpm ?? 60),
+                ))),
+                onSteerStart: (direction) => {
+                  const baseRpm = Math.abs(Number((driveableVehicle.motor.config as { rpm?: number }).rpm ?? 60));
+                  const rpm = direction === 'left' ? -baseRpm : baseRpm;
+                  setBoundControlValue(driveableVehicle.motorId, 'rpm', rpm, baseRpm);
+                  setBoundControlValue(driveableVehicle.motorId, 'powerState', true, false);
+                },
+                onSteerEnd: () => {
+                  setBoundControlValue(driveableVehicle.motorId, 'powerState', false, true);
+                },
+                onExit: () => {
+                  setIsDriveMode(false);
+                  setSelectedPrimitiveId(undefined);
+                },
+              } : null}
               onPlacePrimitive={handlePlacePrimitive}
               onSelectPrimitive={handleSelectPrimitive}
               onConnectPick={handleConnectPick}
@@ -2049,6 +2100,7 @@ export function BuildPage() {
               allowedKinds={paletteAllowedKinds}
               projectTitle={job?.title}
               projectStepTitle={activeProjectStep?.title}
+              partControls={isDesktop && !isDriveMode ? selectedQuickControls : null}
               onSelectKind={handleSelectKind}
             />
           </aside>

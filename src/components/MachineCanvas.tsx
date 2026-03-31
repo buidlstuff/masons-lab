@@ -125,6 +125,12 @@ interface MachineCanvasProps {
   onConnectionFlash?: (ids: string[]) => void;
   onTogglePower?: (primitiveId: string) => void;
   quickControls?: MachineCanvasQuickControls | null;
+  driveMode?: {
+    speed: number;
+    onSteerStart: (direction: 'left' | 'right') => void;
+    onSteerEnd: () => void;
+    onExit: () => void;
+  } | null;
   onCanvasReady?: () => void;
 }
 
@@ -145,6 +151,7 @@ export function MachineCanvas({
   onConnectionFlash,
   onTogglePower,
   quickControls,
+  driveMode,
   onCanvasReady,
 }: MachineCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -486,7 +493,34 @@ export function MachineCanvas({
               </div>
             </div>
           ) : null}
-          {quickControls && quickControls.actions.length > 0 ? (
+          {driveMode ? (
+            <div className="drive-hud" role="group" aria-label="Drive controls">
+              <button
+                type="button"
+                className="drive-hud-arrow"
+                aria-label="Drive left"
+                onPointerDown={() => driveMode.onSteerStart('left')}
+                onPointerUp={() => driveMode.onSteerEnd()}
+                onPointerLeave={() => driveMode.onSteerEnd()}
+              >
+                ◀
+              </button>
+              <span className="drive-hud-speed">{Math.round(driveMode.speed)} rpm</span>
+              <button
+                type="button"
+                className="drive-hud-arrow"
+                aria-label="Drive right"
+                onPointerDown={() => driveMode.onSteerStart('right')}
+                onPointerUp={() => driveMode.onSteerEnd()}
+                onPointerLeave={() => driveMode.onSteerEnd()}
+              >
+                ▶
+              </button>
+              <button type="button" className="drive-hud-exit" onClick={driveMode.onExit}>
+                Exit Drive
+              </button>
+            </div>
+          ) : quickControls && quickControls.actions.length > 0 ? (
             <div className="canvas-quick-controls" role="group" aria-label={quickControls.title}>
               <div className="canvas-quick-controls-copy">
                 <strong>{quickControls.title}</strong>
