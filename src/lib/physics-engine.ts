@@ -893,7 +893,13 @@ export function buildMatterWorld(
         attachOffsetY?: number;
       };
       const armBody = bodyMap.get(prim.id);
-      if (armBody) {
+      // Skip if a hinge-link already connects to this arm — the hinge provides
+      // the pivot constraint and adding a second one pins the assembly to world space.
+      const hasHinge = manifest.primitives.some(
+        (p) => (p.kind === 'hinge-link' || p.kind === 'powered-hinge-link')
+          && (p.config as { toId?: string }).toId === prim.id,
+      );
+      if (armBody && !hasHinge) {
         const length = cfg.length ?? 120;
         const parentBody = cfg.attachedToId ? bodyMap.get(cfg.attachedToId) : null;
         Matter.World.add(
