@@ -234,6 +234,7 @@ function createInitialRuntimeSnapshot(): RuntimeSnapshot {
     sandParticlePositions: [],
     bodyPositions: {},
     switchStates: {},
+    hookGrabs: {},
   };
 }
 

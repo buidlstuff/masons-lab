@@ -18,6 +18,28 @@ describe('editor connector flows', () => {
     expect((rope?.config as { toId: string }).toId).toBe('bucket-1');
   });
 
+  it('creates ropes to ball and rock endpoints', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      { id: 'winch-1', kind: 'winch', label: 'Winch', config: { x: 180, y: 120, speed: 30, ropeLength: 180 } },
+      { id: 'ball-1', kind: 'ball', label: 'Ball', config: { x: 180, y: 280, radius: 16 } },
+      { id: 'rock-1', kind: 'rock', label: 'Rock', config: { x: 300, y: 280 } },
+    ];
+
+    const withBallRope = connectPrimitives(manifest, 'winch-1', 'ball-1', { forceKind: 'rope' });
+    const ballRope = withBallRope.primitives.find((p) => p.kind === 'rope');
+    expect(ballRope).toBeTruthy();
+    expect((ballRope?.config as { toId: string }).toId).toBe('ball-1');
+
+    // Add a second winch for the rock rope
+    withBallRope.primitives.push(
+      { id: 'winch-2', kind: 'winch', label: 'Winch 2', config: { x: 300, y: 120, speed: 30, ropeLength: 180 } },
+    );
+    const withRockRope = connectPrimitives(withBallRope, 'winch-2', 'rock-1', { forceKind: 'rope' });
+    const rockRope = withRockRope.primitives.find((p) => p.kind === 'rope' && (p.config as { toId: string }).toId === 'rock-1');
+    expect(rockRope).toBeTruthy();
+  });
+
   it('moves bolted islands together', () => {
     const manifest = createEmptyManifest();
     manifest.primitives = [

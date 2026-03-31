@@ -842,3 +842,60 @@ describe('physics engine conveyor flow', () => {
     rightWorld.cleanup();
   });
 });
+
+describe('dynamic hook grab', () => {
+  it('grabs a ball that falls onto the hook', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      { id: 'hook-1', kind: 'hook', label: 'Hook', config: { x: 300, y: 300 } },
+      { id: 'ball-1', kind: 'ball', label: 'Ball', config: { x: 300, y: 260, radius: 14 } },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 60);
+    expect(frame.hookGrabs['hook-1']).toBe('ball-1');
+    world.cleanup();
+  });
+
+  it('does not double-grab when hook has static attachedToId cargo', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      { id: 'hook-1', kind: 'hook', label: 'Hook', config: { x: 300, y: 300 } },
+      { id: 'cargo-1', kind: 'cargo-block', label: 'Cargo', config: { x: 300, y: 320, weight: 1, attachedToId: 'hook-1' } },
+      { id: 'ball-1', kind: 'ball', label: 'Ball', config: { x: 300, y: 260, radius: 14 } },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const frame = stepWorld(world, 60);
+    // Hook already has cargo attached, should not grab ball
+    expect(frame.hookGrabs['hook-1']).toBe('cargo-1');
+    world.cleanup();
+  });
+
+  it('patchPositions updates body position without rebuild', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      { id: 'ball-1', kind: 'ball', label: 'Ball', config: { x: 200, y: 200, radius: 14 } },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const success = world.patchPositions({ 'ball-1': { x: 400, y: 200 } });
+    expect(success).toBe(true);
+
+    const body = Matter.Composite.allBodies(world.engine.world).find((b) => b.label === 'ball-1');
+    expect(body?.position.x).toBeCloseTo(400);
+    world.cleanup();
+  });
+
+  it('patchPositions returns false for unknown primitive', () => {
+    const manifest = createEmptyManifest();
+    manifest.primitives = [
+      { id: 'ball-1', kind: 'ball', label: 'Ball', config: { x: 200, y: 200, radius: 14 } },
+    ];
+
+    const world = buildMatterWorld(manifest);
+    const success = world.patchPositions({ 'nonexistent': { x: 400, y: 200 } });
+    expect(success).toBe(false);
+    world.cleanup();
+  });
+});

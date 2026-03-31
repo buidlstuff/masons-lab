@@ -92,6 +92,7 @@ export interface PhysicsFrame {
   bucketStates: Record<string, 'collecting' | 'dumping'>;
   springCompressions: Record<string, number>;
   sandParticlePositions: Array<{ x: number; y: number }>;
+  hookGrabs: Record<string, string>;
 }
 
 export interface MatterWorldOptions {
@@ -108,6 +109,7 @@ export interface PhysicsWorld {
     prevTrainProgress: number,
   ) => PhysicsFrame;
   applyControls: (controlValues: Record<string, string | number | boolean>) => void;
+  patchPositions: (moves: Record<string, { x: number; y: number }>) => boolean;
   cleanup: () => void;
 }
 
@@ -160,6 +162,11 @@ export function buildMatterWorld(
   const wagonCargoCooldowns = new Map<string, number>();
   const wagonUnloadTimers = new Map<string, number>();
   const trampolineCooldowns = new Map<string, number>();
+  const hookGrabs = new Map<string, { constraint: Matter.Constraint; grabbedId: string }>();
+  const pinConstraints = new Map<string, Matter.Constraint>();
+  const hookPrimitiveIds = new Set(
+    manifest.primitives.filter((p) => p.kind === 'hook').map((p) => p.id),
+  );
   const railVehicleProgressState = new Map<string, number>();
   const wagonFollowOffsetState = new Map<string, number>();
   let lostCargoCount = 0;
@@ -528,6 +535,47 @@ export function buildMatterWorld(
     }
   }
 
+  // ── Dynamic hook grab on collision ─────────────────────────────────────────
+  if (hookPrimitiveIds.size > 0) {
+    Matter.Events.on(engine, 'collisionStart', (event: Matter.IEventCollision<Matter.Engine>) => {
+      for (const pair of event.pairs) {
+        const aLabel = pair.bodyA.label;
+        const bLabel = pair.bodyB.label;
+
+        let hookId: string | undefined;
+        let hookBody: Matter.Body | undefined;
+        let otherBody: Matter.Body | undefined;
+        let otherId: string | undefined;
+
+        if (hookPrimitiveIds.has(aLabel) && !hookGrabs.has(aLabel)) {
+          hookId = aLabel; hookBody = pair.bodyA; otherBody = pair.bodyB; otherId = bLabel;
+        } else if (hookPrimitiveIds.has(bLabel) && !hookGrabs.has(bLabel)) {
+          hookId = bLabel; hookBody = pair.bodyB; otherBody = pair.bodyA; otherId = aLabel;
+        }
+
+        if (!hookId || !hookBody || !otherBody || !otherId) continue;
+        if (otherBody.isStatic) continue;
+        // Don't grab bodies in same bolted island
+        const hookGroup = hookBody.collisionFilter?.group ?? 0;
+        const otherGroup = otherBody.collisionFilter?.group ?? 0;
+        if (hookGroup < 0 && hookGroup === otherGroup) continue;
+        // Only grab bodies that correspond to a known primitive
+        if (!bodyMap.has(otherId)) continue;
+
+        const constraint = Matter.Constraint.create({
+          bodyA: hookBody,
+          bodyB: otherBody,
+          length: 14,
+          stiffness: 0.9,
+          damping: 0.1,
+          label: `hook-grab-${hookId}`,
+        });
+        Matter.World.add(engine.world, constraint);
+        hookGrabs.set(hookId, { constraint, grabbedId: otherId });
+      }
+    });
+  }
+
   // ── Conveyor support bodies ───────────────────────────────────────────────
   for (const prim of manifest.primitives) {
     if (prim.kind !== 'conveyor') continue;
@@ -809,17 +857,19 @@ export function buildMatterWorld(
         const hookBody = bodyMap.get(cfg.attachedToId);
         const cargoBody = bodyMap.get(prim.id);
         if (hookBody && cargoBody) {
-          Matter.World.add(
-            engine.world,
-            Matter.Constraint.create({
-              bodyA: hookBody,
-              bodyB: cargoBody,
-              length: 20,
-              stiffness: 0.9,
-              damping: 0.1,
-              label: `attach-${prim.id}`,
-            }),
-          );
+          const attachConstraint = Matter.Constraint.create({
+            bodyA: hookBody,
+            bodyB: cargoBody,
+            length: 20,
+            stiffness: 0.9,
+            damping: 0.1,
+            label: `attach-${prim.id}`,
+          });
+          Matter.World.add(engine.world, attachConstraint);
+          // Pre-register so dynamic grab doesn't double-attach
+          if (hookPrimitiveIds.has(cfg.attachedToId)) {
+            hookGrabs.set(cfg.attachedToId, { constraint: attachConstraint, grabbedId: prim.id });
+          }
         }
       }
     }
@@ -936,18 +986,17 @@ export function buildMatterWorld(
     if (cfg.attachedToId) continue;
     const body = bodyMap.get(prim.id);
     if (!body) continue;
-    Matter.World.add(
-      engine.world,
-      Matter.Constraint.create({
-        pointA: { x: body.position.x, y: body.position.y },
-        bodyB: body,
-        pointB: { x: 0, y: 0 },
-        length: 0,
-        stiffness: 1,
-        damping: 0,
-        label: `pin-${prim.id}`,
-      }),
-    );
+    const pinConstraint = Matter.Constraint.create({
+      pointA: { x: body.position.x, y: body.position.y },
+      bodyB: body,
+      pointB: { x: 0, y: 0 },
+      length: 0,
+      stiffness: 1,
+      damping: 0,
+      label: `pin-${prim.id}`,
+    });
+    Matter.World.add(engine.world, pinConstraint);
+    pinConstraints.set(prim.id, pinConstraint);
   }
 
   // ── Motor → gear proximity map ────────────────────────────────────────────
@@ -2363,16 +2412,35 @@ export function buildMatterWorld(
       bucketStates: { ...bucketStateMap },
       springCompressions: { ...springCompressionsState },
       sandParticlePositions: sandParticleBodies.map((body) => ({ x: body.position.x, y: body.position.y })),
+      hookGrabs: Object.fromEntries(
+        [...hookGrabs.entries()].map(([hId, { grabbedId }]) => [hId, grabbedId]),
+      ),
     };
   }
 
   // ── cleanup ───────────────────────────────────────────────────────────────
+  function patchPositions(moves: Record<string, { x: number; y: number }>): boolean {
+    for (const [primitiveId, pos] of Object.entries(moves)) {
+      const body = bodyMap.get(primitiveId);
+      if (!body) return false;
+      Matter.Body.setPosition(body, pos);
+      Matter.Body.setVelocity(body, { x: 0, y: 0 });
+      Matter.Body.setAngularVelocity(body, 0);
+      // Update pin constraints (gears/pulleys pinned to world space)
+      const pin = pinConstraints.get(primitiveId);
+      if (pin) {
+        (pin as { pointA: { x: number; y: number } }).pointA = { x: pos.x, y: pos.y };
+      }
+    }
+    return true;
+  }
+
   function cleanup() {
     Matter.World.clear(engine.world, false);
     Matter.Engine.clear(engine);
   }
 
-  return { engine, tick, applyControls, cleanup };
+  return { engine, tick, applyControls, patchPositions, cleanup };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

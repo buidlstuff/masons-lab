@@ -34,6 +34,45 @@ export interface RuntimeSnapshot {
   springCompressions: Record<string, number>;
   sandParticlePositions: Array<{ x: number; y: number }>;
   switchStates?: Record<string, 'left' | 'right'>;
+  hookGrabs?: Record<string, string>;
+}
+
+// ─── Position-only diff detection ─────────────────────────────────────────────
+
+function detectPositionOnlyDiff(
+  prev: ExperimentManifest,
+  next: ExperimentManifest,
+): Record<string, { x: number; y: number }> | null {
+  if (prev.primitives.length !== next.primitives.length) return null;
+  if (prev.controls.length !== next.controls.length) return null;
+
+  const moves: Record<string, { x: number; y: number }> = {};
+  for (let i = 0; i < next.primitives.length; i++) {
+    const prevP = prev.primitives[i];
+    const nextP = next.primitives[i];
+    if (prevP.id !== nextP.id || prevP.kind !== nextP.kind) return null;
+
+    const prevCfg = prevP.config as unknown as Record<string, unknown>;
+    const nextCfg = nextP.config as unknown as Record<string, unknown>;
+    const allKeys = new Set([...Object.keys(prevCfg), ...Object.keys(nextCfg)]);
+    let posChanged = false;
+
+    for (const key of allKeys) {
+      if (key === 'x' || key === 'y' || key === 'pivotX' || key === 'pivotY') {
+        if (prevCfg[key] !== nextCfg[key]) posChanged = true;
+        continue;
+      }
+      // These offset keys change during island moves but don't affect topology
+      if (key === 'attachOffsetX' || key === 'attachOffsetY') continue;
+      if (prevCfg[key] !== nextCfg[key]) return null;
+    }
+
+    if (posChanged && 'x' in nextCfg && 'y' in nextCfg) {
+      moves[nextP.id] = { x: Number(nextCfg.x), y: Number(nextCfg.y) };
+    }
+  }
+
+  return Object.keys(moves).length > 0 ? moves : null;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -59,6 +98,7 @@ export function useMachineSimulation(
   const hasLoadedWorldRef = useRef(false);
   const loadSequenceRef = useRef(0);
   const manifestRef = useRef(manifest);
+  const prevManifestRef = useRef<ExperimentManifest | null>(null);
 
   useEffect(() => {
     controlsRef.current = controlValues;
@@ -104,6 +144,19 @@ export function useMachineSimulation(
       return;
     }
 
+    // Fast path: position-only change can patch existing world in place
+    const prev = prevManifestRef.current;
+    if (prev && physicsRef.current && hasLoadedWorldRef.current) {
+      const moves = detectPositionOnlyDiff(prev, manifest);
+      if (moves) {
+        const patched = physicsRef.current.patchPositions(moves);
+        if (patched) {
+          prevManifestRef.current = manifest;
+          return;
+        }
+      }
+    }
+
     const shouldPrimeInitialSnapshot = !hasLoadedWorldRef.current || !physicsRef.current || !matterRef.current;
     if (shouldPrimeInitialSnapshot) {
       const initial = createInitialSnapshot(manifest);
@@ -128,6 +181,7 @@ export function useMachineSimulation(
         physicsRef.current = nextWorld;
         matterRef.current = (matterModule.default ?? matterModule) as MatterRuntime;
         hasLoadedWorldRef.current = true;
+        prevManifestRef.current = manifestRef.current;
         setStatus('ready');
 
         if (previousWorld && previousWorld !== nextWorld) {
@@ -210,6 +264,7 @@ export function useMachineSimulation(
           springCompressions: frame.springCompressions,
           sandParticlePositions: frame.sandParticlePositions,
           switchStates: frame.switchStates,
+          hookGrabs: frame.hookGrabs,
           telemetry: {
             ...prev.telemetry,
             hookHeight: frame.hookY !== null ? Math.round(frame.hookY) : prev.telemetry.hookHeight,
@@ -298,6 +353,7 @@ function createInitialSnapshot(manifest: ExperimentManifest | null): RuntimeSnap
     springCompressions: {},
     sandParticlePositions: [],
     switchStates,
+    hookGrabs: {},
     telemetry: {},
   };
 }

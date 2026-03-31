@@ -1,5 +1,5 @@
 # Mason's Lab — Current State
-*Last updated: March 30, 2026. This file is the handoff doc for future Codex sessions.*
+*Last updated: March 31, 2026. This file is the handoff doc for future Codex sessions.*
 
 ---
 
@@ -288,7 +288,7 @@ Main builder page: [src/pages/BuildPage.tsx](/Users/kyledavis/Documents/Claude/P
 Key pieces:
 
 - `MachineCanvas`
-- `PartPalette`
+- `ToolbarPartStrip` (horizontal scrollable parts bar merged into toolbar)
 - `InspectorPanel`
 - `ControlPanel`
 - `HudOverlay`
@@ -305,17 +305,19 @@ Important current UX facts:
   - Silly Scenes
   - Free Build
 - the launcher now has a playful workshop-sign / blueprint aesthetic and a visible Winky mascot
-- the build screen now reads as one attached workbench shell:
-  - top HUD with icon-based toolbar buttons (Connect, Book, Inspect, Controls, Clear, Undo, Save)
-  - large central canvas (with drive HUD overlay when driving a vehicle)
-  - persistent right-side parts shelf (with inline part controls on desktop)
-- the parts shelf is always expanded and meant to be the main browsing surface
-- `Inspector` and `Machine Controls` are now optional dropdown utilities, not permanent rail cards
-- guided build still constrains useful parts by step, but the full shelf remains visible
-- silly scenes and challenge browsing live on the launcher/home surface, not in the builder rail
+- the build screen is now a **single-column layout** with one unified toolbar:
+  - top bar: scrollable part tiles (quick parts + "More" catalog dropdown) + action buttons (Connect, Book, Inspect, Controls, Clear, Undo, Save)
+  - large central canvas
+  - no sidebar — parts are all in the top bar
+- there is no separate parts shelf/sidebar anymore — `PartPalette` component still exists in code but is only used by tests
+- `Inspector` and `Machine Controls` are optional dropdown utilities
+- guided build constrains visible parts in the strip by step
+- silly scenes and challenge browsing live on the launcher/home surface, not in the builder
 - clicking a vehicle enters gamepad drive mode with a bottom HUD strip (arrow buttons + speed + exit)
-- part controls are adaptive: sidebar on desktop (≥901px), canvas overlay on mobile/iPad
+- clicking a controllable part (motor, winch, locomotive, etc.) shows a **compact dark pill** at the bottom of the canvas with inline action buttons — not a blocking popup card
 - drive mode suppresses part controls — only the drive HUD shows
+- part icons use unicode symbols (◎ ⚙ ▬ etc.), not letters — avoids confusion with keyboard shortcuts
+- at ≤1200px, toolbar labels hide and parts become icon-only with title tooltips
 
 ---
 
@@ -350,6 +352,9 @@ These are still important and should be treated as hard guardrails:
 
 9. **Do not create duplicate constraints on crane-arms.**
    If a hinge-link or powered-hinge-link already connects to a crane-arm (as `toId`), the arm-pivot world-point constraint must be skipped. Having both pins the assembly to world space, making vehicles float.
+
+10. **Cargo should only respawn when truly off-screen.**
+    Do not auto-respawn cargo that is merely idle on the ground. The old 1.25s idle-timer respawn was removed because it caused annoying repeated teleporting during challenges. Only respawn when `body.position` is outside the canvas bounds (y > CANVAS_H + 90, x < -80, x > CANVAS_W + 80).
 
 ---
 
@@ -510,6 +515,35 @@ When in drive mode, the quick controls are suppressed by the drive HUD. This mea
 
 ---
 
+## March 31 Session — Unified Toolbar, UX Polish, Cargo Respawn Fix
+
+### Unified toolbar — parts merged into top bar (BuildPage.tsx, ToolbarPartStrip.tsx, index.css)
+
+Removed the right-side parts sidebar entirely. Parts are now a horizontal scrollable strip of tiles in the top toolbar alongside the action buttons (Connect, Book, etc.). Key changes:
+- New `ToolbarPartStrip` component: scrollable quick-part tiles + "More" button that opens a full catalog dropdown organized by category
+- `PartPalette` sidebar removed from BuildPage (component still exists for tests)
+- Single-column layout: `grid-template-columns: 1fr` (no sidebar)
+- Touch-friendly: `-webkit-overflow-scrolling: touch`, hidden scrollbar, fade mask on edges
+- At ≤1200px: labels hide, icon-only mode with title tooltips
+
+### Part icons replaced (PartPalette.tsx)
+
+Placeholder single-letter icons (`M`, `B`, `U`, etc.) replaced with unicode symbols (`⚙`, `⊔`, `▬`, `◎`, etc.) so they aren't confused for keyboard shortcuts.
+
+### Canvas hint folded into mode pill (MachineCanvas.tsx)
+
+The separate "Esc to cancel" hint element was removed. Escape instructions are now inline in the mode pill (e.g. "Place Motor · Esc cancel"). This prevents overlap with the parts strip.
+
+### Quick controls restyled as compact pill (MachineCanvas.tsx, index.css)
+
+Motor/winch/locomotive controls restyled from a large blocking popup card to a small dark translucent pill centered at the bottom of the canvas. Shows part name + action buttons in one horizontal row. Matches the drive HUD aesthetic.
+
+### Cargo idle-respawn removed (physics-engine.ts)
+
+Removed the `irrecoverable` idle-timer logic that respawned cargo after 1.25s of sitting still on the ground. Cargo now only respawns when it falls completely off-screen. Eliminated `cargoIdleTimers`, `nearConveyor`, `nearHopper`, `nearStation` proximity checks that only served the idle respawn.
+
+---
+
 ## Short Summary Of Where We Are
 
 Mason's Lab is now a fairly broad sandbox with:
@@ -523,10 +557,11 @@ Mason's Lab is now a fairly broad sandbox with:
 - scenes
 - challenges
 - a game-style launcher that separates mode selection from the builder
-- a builder UI centered on `connect + canvas + parts`
+- a **single unified toolbar** with scrollable parts strip + action buttons (no sidebar)
 - **gamepad-style drive mode** for vehicles with touch/keyboard steering
-- **icon-based toolbar** replacing text-heavy buttons
-- **adaptive part controls** (sidebar on desktop, popup on mobile)
+- **compact inline part controls** (dark pill at canvas bottom, not a blocking popup)
+- **icon-based toolbar** with unicode symbol part icons
+- cargo only respawns when off-screen (no more annoying idle-respawn loop)
 
 The next work should be **tightening clarity, polish, and reliability**, not exploding the part count much further.
 

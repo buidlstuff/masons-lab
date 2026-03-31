@@ -10,7 +10,13 @@ export const TRANSMISSION_CONNECTOR_KINDS = ['belt-link', 'chain-link'] as const
 export const MECHANICAL_CONNECTOR_KINDS = ['bolt-link', 'hinge-link', 'powered-hinge-link'] as const;
 export const CONNECTOR_KINDS = ['rope', ...TRANSMISSION_CONNECTOR_KINDS, ...MECHANICAL_CONNECTOR_KINDS] as const;
 export const ROTARY_LINK_ENDPOINT_KINDS = ['wheel', 'pulley', 'chain-sprocket', 'flywheel'] as const;
-export const ROPE_ENDPOINT_KINDS = ['hook', 'bucket', 'crane-arm', 'cargo-block'] as const;
+export const ROPE_ENDPOINT_KINDS = [
+  'hook', 'bucket', 'crane-arm', 'cargo-block',
+  'ball', 'rock', 'counterweight', 'piston', 'rack', 'spring-linear',
+  'wheel', 'motor', 'gear', 'pulley', 'chain-sprocket', 'flywheel', 'gearbox', 'winch',
+  'ramp', 'platform', 'wall', 'chassis', 'locomotive', 'wagon',
+  'chute', 'silo-bin', 'tunnel', 'trampoline',
+] as const;
 export const STRUCTURAL_BASE_KINDS = ['chassis', 'locomotive', 'wagon', 'platform', 'wall', 'ramp', 'gearbox', 'chute', 'silo-bin', 'tunnel', 'trampoline'] as const;
 export const BODY_BACKED_CONNECTOR_ENDPOINT_KINDS = [
   'wheel',
