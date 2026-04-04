@@ -273,7 +273,7 @@ export function buildMatterWorld(
     constraint: Matter.Constraint;
   }) {
     const prefix = ropePrefixLength(entry.fromId, entry.viaIds);
-    entry.constraint.length = Math.max(24, entry.totalLength - prefix);
+    entry.constraint.length = Math.max(12, entry.totalLength - prefix);
   }
 
   function normalizeAngle(angle: number) {
@@ -565,9 +565,9 @@ export function buildMatterWorld(
         const constraint = Matter.Constraint.create({
           bodyA: hookBody,
           bodyB: otherBody,
-          length: 14,
-          stiffness: 0.9,
-          damping: 0.1,
+          length: 6,
+          stiffness: 0.95,
+          damping: 0.25,
           label: `hook-grab-${hookId}`,
         });
         Matter.World.add(engine.world, constraint);
@@ -749,8 +749,8 @@ export function buildMatterWorld(
           bodyB: endpointBody,
           pointB: localAnchorForPrimitive(endpointPrim, 'rope'),
           length: Math.max(24, cfg.length - ropePrefixLength(cfg.fromId, viaIds)),
-          stiffness: 0.05,
-          damping: 0.2,
+          stiffness: 0.18,
+          damping: 0.35,
           label: `rope-${prim.id}`,
         });
         ropeConstraints.push({
@@ -860,9 +860,9 @@ export function buildMatterWorld(
           const attachConstraint = Matter.Constraint.create({
             bodyA: hookBody,
             bodyB: cargoBody,
-            length: 20,
-            stiffness: 0.9,
-            damping: 0.1,
+            length: 8,
+            stiffness: 0.95,
+            damping: 0.25,
             label: `attach-${prim.id}`,
           });
           Matter.World.add(engine.world, attachConstraint);
@@ -974,6 +974,7 @@ export function buildMatterWorld(
       if (armBody && !hasHinge) {
         const length = cfg.length ?? 120;
         const parentBody = cfg.attachedToId ? bodyMap.get(cfg.attachedToId) : null;
+        // Primary pivot at the arm's left end
         Matter.World.add(
           engine.world,
           Matter.Constraint.create({
@@ -991,9 +992,35 @@ export function buildMatterWorld(
             bodyB: armBody,
             pointB: { x: -length / 2, y: 0 },
             length: 0,
-            stiffness: 0.9,
+            stiffness: 1.0,
             damping: 0.5,
             label: `arm-pivot-${prim.id}`,
+          }),
+        );
+        // Anti-sag: second constraint ~1/3 along the arm, offset upward,
+        // that resists gravity pulling the arm tip down. This acts like
+        // a rigid truss keeping the arm horizontal.
+        const antiSagOffset = length * 0.35;
+        Matter.World.add(
+          engine.world,
+          Matter.Constraint.create({
+            ...(parentBody
+              ? {
+                  bodyA: parentBody,
+                  pointA: {
+                    x: (cfg.attachOffsetX ?? 0) + antiSagOffset,
+                    y: (cfg.attachOffsetY ?? 0) - 16,
+                  },
+                }
+              : {
+                  pointA: { x: cfg.x + antiSagOffset, y: cfg.y - 16 },
+                }),
+            bodyB: armBody,
+            pointB: { x: -length / 2 + antiSagOffset, y: -8 },
+            length: 8,
+            stiffness: 0.8,
+            damping: 0.4,
+            label: `arm-antisag-${prim.id}`,
           }),
         );
       }
@@ -1899,7 +1926,9 @@ export function buildMatterWorld(
       const currentRelativeAngle = normalizeAngle(toBody.angle - fromBody.angle);
       const currentRelativeVelocity = toBody.angularVelocity - fromBody.angularVelocity;
       let nextRelativeAngle = currentRelativeAngle;
-      let commandedRelativeVelocity = currentRelativeVelocity * 0.82;
+      // When no motor is driving the hinge, act as a holding brake —
+      // strongly damp angular velocity so the arm doesn't sag under gravity.
+      let commandedRelativeVelocity = currentRelativeVelocity * 0.4;
       let maxRelativeVelocity = 1.4;
 
       if (link.motorId) {
@@ -2291,6 +2320,34 @@ export function buildMatterWorld(
       syncRopeConstraint(rope);
     }
 
+    // Active rope tension: if a rope endpoint has stretched beyond its
+    // constraint length, apply a corrective velocity to pull it back.
+    // This prevents the "rubber band" feel where ropes stretch under load.
+    for (const rope of ropeConstraints) {
+      const c = rope.constraint;
+      if (!c.bodyB) continue;
+      const anchorPos = c.bodyA
+        ? worldPointFromBody(c.bodyA, c.pointA)
+        : c.pointA;
+      const endLocal = c.pointB ?? { x: 0, y: 0 };
+      const endPos = worldPointFromBody(c.bodyB, endLocal);
+      const dx = endPos.x - anchorPos.x;
+      const dy = endPos.y - anchorPos.y;
+      const actualLen = Math.hypot(dx, dy);
+      const targetLen = c.length;
+      const overstretch = actualLen - targetLen;
+      if (overstretch > 2) {
+        // Pull endpoint toward anchor proportional to overstretch
+        const correction = Math.min(overstretch * 0.12, 3.0);
+        const nx = dx / Math.max(actualLen, 1);
+        const ny = dy / Math.max(actualLen, 1);
+        Matter.Body.setVelocity(c.bodyB, {
+          x: c.bodyB.velocity.x - nx * correction,
+          y: c.bodyB.velocity.y - ny * correction,
+        });
+      }
+    }
+
     const drivenVels = driveMotors();
     const switchStates = Object.fromEntries(
       manifest.primitives
@@ -2353,6 +2410,43 @@ export function buildMatterWorld(
     const wagonFrame = tickWagons(_dt, railFrame.routeCache);
     const collectedThisTick = tickHopper();
     tickBuckets();
+
+    // Proximity-based hook grab: if a hook doesn't have a grab yet,
+    // check if any grabbable body is within reach. This catches cases
+    // where the collision event was too brief to register.
+    for (const hookId of hookPrimitiveIds) {
+      if (hookGrabs.has(hookId)) continue;
+      const hookBody = bodyMap.get(hookId);
+      if (!hookBody) continue;
+      const hookGroup = hookBody.collisionFilter?.group ?? 0;
+      for (const matPrim of manifest.primitives) {
+        if (!MATERIAL_KINDS.includes(matPrim.kind)) continue;
+        if (collectedCargoIds.has(matPrim.id) || wagonCargoAssignments.has(matPrim.id)) continue;
+        if ((matPrim.config as { attachedToId?: string }).attachedToId) continue;
+        const matBody = bodyMap.get(matPrim.id);
+        if (!matBody || matBody.isStatic) continue;
+        const matGroup = matBody.collisionFilter?.group ?? 0;
+        if (hookGroup < 0 && hookGroup === matGroup) continue;
+        const dist = Math.hypot(
+          hookBody.position.x - matBody.position.x,
+          hookBody.position.y - matBody.position.y,
+        );
+        if (dist < 22) {
+          const constraint = Matter.Constraint.create({
+            bodyA: hookBody,
+            bodyB: matBody,
+            length: 6,
+            stiffness: 0.95,
+            damping: 0.25,
+            label: `hook-grab-${hookId}`,
+          });
+          Matter.World.add(engine.world, constraint);
+          hookGrabs.set(hookId, { constraint, grabbedId: matPrim.id });
+          break;
+        }
+      }
+    }
+
     recoverLostCargo(_dt, conveyorFrame.supportedCargoIds);
     for (const particle of sandParticleBodies) {
       if (
@@ -2722,8 +2816,8 @@ function createBodyForPrimitive(
       const length = cfg.length ?? 120;
       return Matter.Bodies.rectangle(cfg.x + length / 2, cfg.y, length, 10, {
         label: prim.id,
-        density: 0.001,
-        frictionAir: 0.1,
+        density: 0.0006,
+        frictionAir: 0.15,
       });
     }
 
@@ -2801,8 +2895,9 @@ function createBodyForPrimitive(
       return Matter.Bodies.circle(cfg.x, cfg.y, 10, {
         label: prim.id,
         restitution: 0.04,
-        friction: 0.6,
-        density: 0.004,
+        friction: 0.8,
+        density: 0.006,
+        frictionAir: 0.03,
       });
     }
 
