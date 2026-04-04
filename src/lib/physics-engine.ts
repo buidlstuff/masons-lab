@@ -420,7 +420,7 @@ export function buildMatterWorld(
       isStatic: true,
       label: '__ground__',
       friction: 0.85,
-      restitution: 0.2,
+      restitution: 0.05,
     }),
     Matter.Bodies.rectangle(-25, CANVAS_H / 2, 50, CANVAS_H * 2, {
       isStatic: true,
@@ -894,6 +894,8 @@ export function buildMatterWorld(
         const parentBody = bodyMap.get(cfg.attachedToId);
         const childBody = bodyMap.get(prim.id);
         if (parentBody && childBody) {
+          const isWheel = prim.kind === 'wheel';
+          // Primary positional constraint
           Matter.World.add(
             engine.world,
             Matter.Constraint.create({
@@ -905,11 +907,31 @@ export function buildMatterWorld(
               bodyB: childBody,
               pointB: { x: 0, y: 0 },
               length: 0,
-              stiffness: prim.kind === 'wheel' ? 0.95 : 0.9,
-              damping: 0.1,
+              stiffness: isWheel ? 1.0 : 0.92,
+              damping: isWheel ? 0.35 : 0.2,
               label: `attach-${prim.id}`,
             }),
           );
+          // Wheels get a second constraint offset laterally to prevent wobble,
+          // similar to how bolt-links use two-point locking for rigidity.
+          if (isWheel) {
+            Matter.World.add(
+              engine.world,
+              Matter.Constraint.create({
+                bodyA: parentBody,
+                pointA: {
+                  x: (cfg.attachOffsetX ?? 0),
+                  y: (cfg.attachOffsetY ?? 0) - 12,
+                },
+                bodyB: childBody,
+                pointB: { x: 0, y: -12 },
+                length: 0,
+                stiffness: 0.85,
+                damping: 0.3,
+                label: `attach-lat-${prim.id}`,
+              }),
+            );
+          }
         }
       }
     }
@@ -1409,9 +1431,9 @@ export function buildMatterWorld(
   // Returns the driven map so tick() can compute gear telemetry.
 
   /** How quickly driven parts reach target velocity (0 = frozen, 1 = instant). */
-  const MOTOR_BLEND = 0.12;
+  const MOTOR_BLEND = 0.09;
   /** Max angular acceleration per tick (rad/s²-ish) — prevents sudden jumps. */
-  const MAX_ANGULAR_ACCEL = 0.35;
+  const MAX_ANGULAR_ACCEL = 0.22;
 
   function driveMotors(): Map<string, number> {
     const driven = new Map<string, number>(); // id → target angularVelocity
@@ -1458,7 +1480,7 @@ export function buildMatterWorld(
     // Wheels: spin with angular velocity blend AND push their parent chassis
     // directly so the vehicle actually moves.  Relying on friction-to-constraint
     // force chains in Matter.js is too fragile for a kids' sandbox.
-    const CHASSIS_DRIVE_FORCE = 0.0008;
+    const CHASSIS_DRIVE_FORCE = 0.0006;
     const chassisPushed = new Set<string>(); // avoid double-pushing
     for (const [id, targetAngVel] of driven) {
       const body = bodyMap.get(id);
@@ -1674,17 +1696,42 @@ export function buildMatterWorld(
       if (prim.kind !== 'chassis') continue;
       const body = bodyMap.get(prim.id);
       if (!body || body.isStatic) continue;
-      const hasWheels = manifest.primitives.some(
+      const wheelPrims = manifest.primitives.filter(
         (p) => p.kind === 'wheel'
           && (p.config as { attachedToId?: string }).attachedToId === prim.id,
       );
-      if (!hasWheels) continue;
-      // Gentle tilt correction + angular damping
-      const tiltCorrection = -body.angle * 0.025;
+      if (wheelPrims.length === 0) continue;
+
+      // Stronger tilt correction + angular damping to prevent flipping
+      const tiltCorrection = -body.angle * 0.06;
       Matter.Body.setAngularVelocity(
         body,
-        body.angularVelocity * 0.92 + tiltCorrection,
+        body.angularVelocity * 0.88 + tiltCorrection,
       );
+
+      // Vertical bounce damping: if chassis is bouncing up/down, damp it
+      if (Math.abs(body.velocity.y) > 1.5) {
+        Matter.Body.setVelocity(body, {
+          x: body.velocity.x,
+          y: body.velocity.y * 0.85,
+        });
+      }
+
+      // Keep wheels from drifting away vertically — gently pull them
+      // toward their expected offset position relative to chassis
+      for (const wp of wheelPrims) {
+        const wheelBody = bodyMap.get(wp.id);
+        if (!wheelBody) continue;
+        const cfg = wp.config as { attachOffsetX?: number; attachOffsetY?: number };
+        const expectedY = body.position.y + (cfg.attachOffsetY ?? 0);
+        const yDrift = wheelBody.position.y - expectedY;
+        if (Math.abs(yDrift) > 4) {
+          Matter.Body.setVelocity(wheelBody, {
+            x: wheelBody.velocity.x,
+            y: wheelBody.velocity.y - yDrift * 0.08,
+          });
+        }
+      }
     }
   }
 
@@ -1813,8 +1860,8 @@ export function buildMatterWorld(
     // using forces instead of teleporting.  The two-point constraints handle
     // most of the rigidity; this cleanup pass prevents drift without killing
     // external forces (wheel traction, collisions, gravity).
-    const BOLT_POS_STIFFNESS = 0.35;
-    const BOLT_ANGLE_STIFFNESS = 0.25;
+    const BOLT_POS_STIFFNESS = 0.45;
+    const BOLT_ANGLE_STIFFNESS = 0.35;
     for (const link of boltLinks) {
       const fromBody = bodyMap.get(link.fromId);
       const toBody = bodyMap.get(link.toId);
@@ -2567,7 +2614,7 @@ function createBodyForPrimitive(
       const cfg = prim.config as { x: number; y: number };
       return Matter.Bodies.circle(cfg.x, cfg.y, 8, {
         label: prim.id,
-        restitution: 0.3,
+        restitution: 0.1,
         friction: 0.8,
         density: 0.003,
       });
@@ -2578,8 +2625,8 @@ function createBodyForPrimitive(
       return Matter.Bodies.circle(cfg.x, cfg.y, cfg.radius, {
         label: prim.id,
         friction: cfg.traction,
-        frictionAir: 0.01,
-        restitution: 0.15,
+        frictionAir: 0.015,
+        restitution: 0.02,
         density: 0.003,
       });
     }
@@ -2753,8 +2800,8 @@ function createBodyForPrimitive(
       const cfg = prim.config as { x: number; y: number };
       return Matter.Bodies.circle(cfg.x, cfg.y, 10, {
         label: prim.id,
-        restitution: 0.15,
-        friction: 0.4,
+        restitution: 0.04,
+        friction: 0.6,
         density: 0.004,
       });
     }
@@ -2765,7 +2812,7 @@ function createBodyForPrimitive(
         label: prim.id,
         density: Math.max(0.001, (cfg.weight ?? 1) * 0.002),
         friction: 0.5,
-        restitution: 0.25,
+        restitution: 0.08,
       });
     }
 

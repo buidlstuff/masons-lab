@@ -28,6 +28,7 @@ function createBlueprintRecord(blueprint: MachineBlueprint): SavedBlueprintRecor
 function createRecipes(): EngineeringRecipe[] {
   const poweredHingeControls = getPoweredHingeControls('powered-arm-hinge', 'Powered Hinge');
   const excavatorHingeControls = getPoweredHingeControls('excavator-hinge', 'Boom');
+  const dumpHingeControls = getPoweredHingeControls('dump-hinge', 'Bed');
 
   return [
     // ── Vehicle recipes ──────────────────────────────────────────────────────
@@ -459,6 +460,247 @@ function createRecipes(): EngineeringRecipe[] {
             { id: 'spring-launcher-spring', kind: 'spring-linear', label: 'Spring', config: { x: 150, y: 280, orientation: 'vertical', restLength: 60, stiffness: 0.08 } },
             { id: 'spring-launcher-ball', kind: 'ball', label: 'Ball', config: { x: 150, y: 180, radius: 14 } },
             { id: 'spring-launcher-bucket', kind: 'bucket', label: 'Target Bucket', config: { x: 320, y: 250, width: 42, depth: 28 } },
+          ],
+          behaviors: [],
+          controls: [],
+          hud: [],
+        },
+      }),
+    },
+
+    // ── More complex composite recipes ──────────────────────────────────────
+    {
+      id: 'dump-truck',
+      title: 'Dump Truck',
+      summary: 'A wheeled truck with a tiltable bed that dumps its cargo when raised.',
+      partList: ['Chassis', 'Wheel x2', 'Motor', 'Powered Hinge', 'Crane Arm (Bed)', 'Bucket', 'Counterweight'],
+      steps: [
+        'The chassis rides on two wheels with a motor for driving.',
+        'A short crane arm acts as the dump bed, pivoting from the rear of the chassis.',
+        'A bucket on the bed end catches cargo for hauling.',
+        'Use the bed angle slider to tilt the bed up and dump the load, then flatten it to reload.',
+      ],
+      whyItWorks: 'The powered hinge tilts the bed arm, and gravity slides the cargo off when the angle is steep enough.',
+      variation: 'Load cargo from a hopper or conveyor, then drive to a dump site.',
+      assistantPrompt: 'Explain how the hinge angle controls dumping and why the counterweight keeps the truck from tipping backward.',
+      blueprintRecord: createBlueprintRecord({
+        blueprintId: 'starter-dump-truck',
+        category: 'chassis',
+        title: 'Dump Truck',
+        summary: 'A wheeled truck with a tiltable dump bed.',
+        tags: ['starter', 'recipe', 'vehicle', 'construction', 'dump'],
+        ports: [
+          { portId: 'mount-top', kind: 'mount', label: 'Top Mount', compatibleWith: ['mount'] },
+        ],
+        fragment: {
+          primitives: [
+            { id: 'dump-chassis', kind: 'chassis', label: 'Chassis', config: { x: 300, y: 506, width: 200, height: 22 } },
+            { id: 'dump-whl-front', kind: 'wheel', label: 'Front Wheel', config: { x: 215, y: 530, radius: 26, traction: 0.95, attachedToId: 'dump-chassis', attachOffsetX: -85, attachOffsetY: 20 } },
+            { id: 'dump-whl-rear', kind: 'wheel', label: 'Rear Wheel', config: { x: 385, y: 530, radius: 26, traction: 0.95, attachedToId: 'dump-chassis', attachOffsetX: 85, attachOffsetY: 20 } },
+            { id: 'dump-motor', kind: 'motor', label: 'Motor', config: { x: 340, y: 486, rpm: 45, torque: 1.5, powerState: false, attachedToId: 'dump-chassis', attachOffsetX: 40, attachOffsetY: -15 } },
+            { id: 'dump-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 210, y: 490, mass: 5, attachedToId: 'dump-chassis', attachOffsetX: -80, attachOffsetY: -12 } },
+            // Bed arm: pivot at rear of chassis (x=380), arm extends forward over the chassis
+            // Pivot world X = chassis.x + 80 = 380. Arm left end at pivot: cfg.x + length/2 - 50 = 380 → cfg.x = 380 - 50 = 330. Body center = 330 + 50 = 380. Actually let's place pivot at back.
+            { id: 'dump-bed', kind: 'crane-arm', label: 'Dump Bed', config: { x: 280, y: 494, length: 120 } },
+            { id: 'dump-bucket', kind: 'bucket', label: 'Bed Scoop', config: { x: 340, y: 480, width: 50, depth: 24, attachedToId: 'dump-bed', attachOffsetX: 40, attachOffsetY: 0 } },
+            {
+              id: 'dump-hinge',
+              kind: 'powered-hinge-link',
+              label: 'Bed Hinge',
+              config: {
+                fromId: 'dump-chassis',
+                toId: 'dump-bed',
+                pivotX: 380,
+                pivotY: 494,
+                fromLocalX: 80,
+                fromLocalY: -12,
+                toLocalX: 60,
+                toLocalY: 0,
+                minAngle: -5,
+                maxAngle: 65,
+                motorId: 'dump-motor',
+                targetAngle: 0,
+                enabled: false,
+              },
+            },
+          ],
+          behaviors: [],
+          controls: [
+            { id: 'dump-power', kind: 'toggle', label: 'Motor Power', bind: { targetId: 'dump-motor', path: 'powerState' }, defaultValue: false },
+            { id: 'dump-speed', kind: 'slider', label: 'Drive Speed', bind: { targetId: 'dump-motor', path: 'rpm' }, defaultValue: 45, min: 10, max: 100, step: 5 },
+            ...dumpHingeControls,
+          ],
+          hud: [],
+        },
+      }),
+    },
+    {
+      id: 'crane-cab',
+      title: 'Crane Cab',
+      summary: 'A stationary crane tower with a winch, rope, and hook for lifting cargo from a fixed base.',
+      partList: ['Chassis (Base)', 'Crane Arm', 'Winch', 'Rope', 'Hook', 'Counterweight', 'Cargo Block'],
+      steps: [
+        'The heavy chassis sits on the ground as a stable base — no wheels needed.',
+        'A long crane arm extends out from the base with a counterweight behind the pivot.',
+        'The winch sits on top of the base and the rope hangs down to the hook.',
+        'Lower the hook onto cargo, let it grab, then reel it up.',
+      ],
+      whyItWorks: 'The heavy base and counterweight keep the crane from tipping. The arm provides horizontal reach while the winch controls vertical lift.',
+      variation: 'Add wheels and a motor to make it mobile, or swap the hook for a bucket.',
+      assistantPrompt: 'Explain how the counterweight balances the load on the arm and what happens if the cargo is too heavy.',
+      blueprintRecord: createBlueprintRecord({
+        blueprintId: 'starter-crane-cab',
+        category: 'structure',
+        title: 'Crane Cab',
+        summary: 'A stationary crane with arm, winch, rope, and hook.',
+        tags: ['starter', 'recipe', 'crane', 'lifting', 'stationary'],
+        ports: [
+          { portId: 'mount-top', kind: 'mount', label: 'Top Mount', compatibleWith: ['mount'] },
+        ],
+        fragment: {
+          primitives: [
+            { id: 'cab-base', kind: 'chassis', label: 'Crane Base', config: { x: 200, y: 520, width: 140, height: 28 } },
+            { id: 'cab-arm', kind: 'crane-arm', label: 'Boom', config: { x: 180, y: 460, length: 180, attachedToId: 'cab-base', attachOffsetX: -20, attachOffsetY: -30 } },
+            { id: 'cab-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 140, y: 460, mass: 10, attachedToId: 'cab-base', attachOffsetX: -60, attachOffsetY: -30 } },
+            { id: 'cab-winch', kind: 'winch', label: 'Winch', config: { x: 300, y: 430, speed: 30, ropeLength: 160 } },
+            { id: 'cab-hook', kind: 'hook', label: 'Hook', config: { x: 340, y: 420 } },
+            { id: 'cab-rope', kind: 'rope', label: 'Crane Rope', config: { fromId: 'cab-winch', toId: 'cab-hook', length: 160 } },
+            { id: 'cab-cargo', kind: 'cargo-block', label: 'Cargo', config: { x: 400, y: 530, weight: 1 } },
+          ],
+          behaviors: [],
+          controls: [
+            {
+              id: 'cab-rope-length',
+              kind: 'slider',
+              label: 'Rope Length',
+              description: 'Raise or lower the hook.',
+              bind: { targetId: 'cab-winch', path: 'ropeLength' },
+              defaultValue: 160,
+              min: 50,
+              max: 220,
+              step: 5,
+            },
+          ],
+          hud: [],
+        },
+      }),
+    },
+    {
+      id: 'flatbed-truck',
+      title: 'Flatbed Truck',
+      summary: 'A long-bed truck with a flat platform for hauling cargo across the lab.',
+      partList: ['Chassis', 'Wheel x2', 'Motor', 'Platform (Bed)', 'Cargo Block x2'],
+      steps: [
+        'A wide chassis provides a stable rolling base.',
+        'Two wheels underneath are driven by a motor.',
+        'Cargo blocks sit on the flat bed and ride along as the truck drives.',
+        'Drive to a drop-off point and push the cargo off with a wall or piston.',
+      ],
+      whyItWorks: 'The wide chassis and low center of gravity keep the cargo stable. Friction between the cargo and chassis keeps blocks from sliding off.',
+      variation: 'Add walls on the sides to make a walled truck bed, or add a winch to load heavy cargo.',
+      assistantPrompt: 'Explain why the cargo stays on the truck and what would make it slide off.',
+      blueprintRecord: createBlueprintRecord({
+        blueprintId: 'starter-flatbed-truck',
+        category: 'chassis',
+        title: 'Flatbed Truck',
+        summary: 'A wide truck for hauling loose cargo.',
+        tags: ['starter', 'recipe', 'vehicle', 'transport', 'hauling'],
+        ports: [
+          { portId: 'mount-top', kind: 'mount', label: 'Top Mount', compatibleWith: ['mount'] },
+        ],
+        fragment: {
+          primitives: [
+            { id: 'flat-chassis', kind: 'chassis', label: 'Chassis', config: { x: 500, y: 506, width: 220, height: 22 } },
+            { id: 'flat-whl-l', kind: 'wheel', label: 'Left Wheel', config: { x: 405, y: 530, radius: 26, traction: 0.95, attachedToId: 'flat-chassis', attachOffsetX: -95, attachOffsetY: 20 } },
+            { id: 'flat-whl-r', kind: 'wheel', label: 'Right Wheel', config: { x: 595, y: 530, radius: 26, traction: 0.95, attachedToId: 'flat-chassis', attachOffsetX: 95, attachOffsetY: 20 } },
+            { id: 'flat-motor', kind: 'motor', label: 'Motor', config: { x: 540, y: 486, rpm: 40, torque: 1.5, powerState: false, attachedToId: 'flat-chassis', attachOffsetX: 40, attachOffsetY: -15 } },
+            { id: 'flat-cargo-1', kind: 'cargo-block', label: 'Cargo A', config: { x: 470, y: 480, weight: 1 } },
+            { id: 'flat-cargo-2', kind: 'cargo-block', label: 'Cargo B', config: { x: 500, y: 480, weight: 1 } },
+          ],
+          behaviors: [],
+          controls: [
+            { id: 'flat-power', kind: 'toggle', label: 'Motor Power', bind: { targetId: 'flat-motor', path: 'powerState' }, defaultValue: false },
+            { id: 'flat-speed', kind: 'slider', label: 'Drive Speed', bind: { targetId: 'flat-motor', path: 'rpm' }, defaultValue: 40, min: 10, max: 100, step: 5 },
+          ],
+          hud: [],
+        },
+      }),
+    },
+    {
+      id: 'bulldozer',
+      title: 'Bulldozer',
+      summary: 'A heavy machine with a front blade that pushes cargo and debris along the ground.',
+      partList: ['Chassis', 'Wheel x2', 'Motor', 'Counterweight', 'Wall (Blade)', 'Cargo Block x2'],
+      steps: [
+        'The chassis is heavier than a car thanks to the counterweight on the back.',
+        'Two high-traction wheels give the bulldozer plenty of grip.',
+        'A wall mounted at the front acts as a blade that pushes anything in its path.',
+        'Drive forward and watch the blade shove the cargo blocks across the lab floor.',
+      ],
+      whyItWorks: 'The counterweight adds mass so the wheels have more traction. The blade is rigid and wide enough to push multiple blocks at once.',
+      variation: 'Replace the blade with a bucket on a hinge to make it scoop instead of push.',
+      assistantPrompt: 'Explain why more weight helps the wheels grip and how the blade transfers the pushing force.',
+      blueprintRecord: createBlueprintRecord({
+        blueprintId: 'starter-bulldozer',
+        category: 'chassis',
+        title: 'Bulldozer',
+        summary: 'A heavy pusher with a front blade.',
+        tags: ['starter', 'recipe', 'vehicle', 'construction', 'push'],
+        ports: [
+          { portId: 'mount-top', kind: 'mount', label: 'Top Mount', compatibleWith: ['mount'] },
+        ],
+        fragment: {
+          primitives: [
+            { id: 'dozer-chassis', kind: 'chassis', label: 'Chassis', config: { x: 700, y: 506, width: 160, height: 24 } },
+            { id: 'dozer-whl-front', kind: 'wheel', label: 'Front Wheel', config: { x: 635, y: 530, radius: 28, traction: 0.98, attachedToId: 'dozer-chassis', attachOffsetX: -65, attachOffsetY: 20 } },
+            { id: 'dozer-whl-rear', kind: 'wheel', label: 'Rear Wheel', config: { x: 765, y: 530, radius: 28, traction: 0.98, attachedToId: 'dozer-chassis', attachOffsetX: 65, attachOffsetY: 20 } },
+            { id: 'dozer-motor', kind: 'motor', label: 'Motor', config: { x: 730, y: 484, rpm: 55, torque: 2.0, powerState: false, attachedToId: 'dozer-chassis', attachOffsetX: 30, attachOffsetY: -18 } },
+            { id: 'dozer-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 760, y: 488, mass: 8, attachedToId: 'dozer-chassis', attachOffsetX: 60, attachOffsetY: -14 } },
+            // Blade: a wide bucket bolted to the front of the chassis acts as a pusher
+            { id: 'dozer-blade', kind: 'bucket', label: 'Blade', config: { x: 620, y: 516, width: 56, depth: 32, attachedToId: 'dozer-chassis', attachOffsetX: -80, attachOffsetY: 10 } },
+            { id: 'dozer-cargo-1', kind: 'cargo-block', label: 'Debris A', config: { x: 560, y: 530, weight: 1 } },
+            { id: 'dozer-cargo-2', kind: 'cargo-block', label: 'Debris B', config: { x: 530, y: 530, weight: 1 } },
+          ],
+          behaviors: [],
+          controls: [
+            { id: 'dozer-power', kind: 'toggle', label: 'Motor Power', bind: { targetId: 'dozer-motor', path: 'powerState' }, defaultValue: false },
+            { id: 'dozer-speed', kind: 'slider', label: 'Drive Speed', bind: { targetId: 'dozer-motor', path: 'rpm' }, defaultValue: 55, min: 10, max: 120, step: 5 },
+          ],
+          hud: [],
+        },
+      }),
+    },
+    {
+      id: 'wrecking-ball',
+      title: 'Wrecking Ball',
+      summary: 'A crane arm with a heavy ball dangling from a rope — swing it to smash things.',
+      partList: ['Chassis (Base)', 'Crane Arm', 'Rope', 'Rock (Ball)', 'Counterweight', 'Wall (Target)'],
+      steps: [
+        'A heavy base keeps the crane from tipping when the ball swings.',
+        'The crane arm sticks out horizontally from the base.',
+        'A rope hangs from the arm tip with a heavy rock acting as the wrecking ball.',
+        'Drag the ball to one side and let go — watch it demolish the target wall!',
+      ],
+      whyItWorks: 'The ball stores energy as it swings upward and releases it on impact. A heavier ball hits harder.',
+      variation: 'Add a winch to control the rope length, or mount the whole thing on wheels for a mobile wrecker.',
+      assistantPrompt: 'Explain how pendulum energy works and why the ball swings back after hitting the wall.',
+      blueprintRecord: createBlueprintRecord({
+        blueprintId: 'starter-wrecking-ball',
+        category: 'tool-head',
+        title: 'Wrecking Ball',
+        summary: 'A crane arm with a pendulum demolition ball.',
+        tags: ['starter', 'recipe', 'crane', 'demolition', 'pendulum'],
+        ports: [
+          { portId: 'mount-main', kind: 'mount', label: 'Main Mount', compatibleWith: ['mount'] },
+        ],
+        fragment: {
+          primitives: [
+            { id: 'wreck-base', kind: 'chassis', label: 'Base', config: { x: 200, y: 524, width: 120, height: 28 } },
+            { id: 'wreck-arm', kind: 'crane-arm', label: 'Boom', config: { x: 200, y: 470, length: 160, attachedToId: 'wreck-base', attachOffsetX: 0, attachOffsetY: -28 } },
+            { id: 'wreck-counter', kind: 'counterweight', label: 'Counterweight', config: { x: 150, y: 470, mass: 10, attachedToId: 'wreck-base', attachOffsetX: -50, attachOffsetY: -28 } },
+            { id: 'wreck-ball', kind: 'rock', label: 'Wrecking Ball', config: { x: 360, y: 400 } },
+            { id: 'wreck-rope', kind: 'rope', label: 'Ball Rope', config: { fromId: 'wreck-arm', toId: 'wreck-ball', length: 110 } },
+            { id: 'wreck-target', kind: 'cargo-block', label: 'Target', config: { x: 500, y: 530, weight: 1 } },
           ],
           behaviors: [],
           controls: [],
